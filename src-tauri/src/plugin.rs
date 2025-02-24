@@ -110,11 +110,6 @@ impl ZelanState {
 use serde_json;
 use tauri::State;
 
-#[tauri::command]
-pub fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 /// Get current status of the event bus
 #[tauri::command]
 pub async fn get_event_bus_status(
