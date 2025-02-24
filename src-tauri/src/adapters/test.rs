@@ -1,12 +1,12 @@
 // src/adapters/test.rs
-use crate::{ServiceAdapter, EventBus, StreamEvent};
+use crate::{EventBus, ServiceAdapter, StreamEvent};
+use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::json;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use anyhow::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A simple test adapter that generates events at regular intervals
 /// Useful for testing the event bus and WebSocket server without external services
@@ -26,11 +26,11 @@ impl TestAdapter {
             task_handle: tokio::sync::Mutex::new(None),
         }
     }
-    
+
     /// Generate test events at a regular interval
     async fn generate_events(&self) -> Result<()> {
         let mut counter = 0;
-        
+
         while self.connected.load(Ordering::SeqCst) {
             // Generate a test event
             let event = StreamEvent::new(
@@ -40,14 +40,14 @@ impl TestAdapter {
                     "counter": counter,
                     "message": format!("Test event #{}", counter),
                     "timestamp": chrono::Utc::now().to_rfc3339(),
-                })
+                }),
             );
-            
+
             // Publish the event
             if let Err(e) = self.event_bus.publish(event).await {
                 eprintln!("Failed to publish test event: {}", e);
             }
-            
+
             // Generate a different event every 5 counts
             if counter % 5 == 0 {
                 let event = StreamEvent::new(
@@ -57,18 +57,18 @@ impl TestAdapter {
                         "counter": counter,
                         "special": true,
                         "message": "This is a special test event",
-                    })
+                    }),
                 );
-                
+
                 if let Err(e) = self.event_bus.publish(event).await {
                     eprintln!("Failed to publish special test event: {}", e);
                 }
             }
-            
+
             counter += 1;
             sleep(Duration::from_secs(1)).await;
         }
-        
+
         Ok(())
     }
 }
@@ -80,10 +80,10 @@ impl ServiceAdapter for TestAdapter {
         if self.connected.load(Ordering::SeqCst) {
             return Ok(());
         }
-        
+
         // Set connected state
         self.connected.store(true, Ordering::SeqCst);
-        
+
         // Start generating events in a background task
         let self_clone = self.clone();
         let handle = tokio::spawn(async move {
@@ -91,37 +91,37 @@ impl ServiceAdapter for TestAdapter {
                 eprintln!("Error in test event generator: {}", e);
             }
         });
-        
+
         // Store the task handle
         *self.task_handle.lock().await = Some(handle);
-        
+
         println!("Test adapter connected and generating events");
         Ok(())
     }
-    
+
     async fn disconnect(&self) -> Result<()> {
         // Set disconnected state to stop event generation
         self.connected.store(false, Ordering::SeqCst);
-        
+
         // Wait for the task to complete
         if let Some(handle) = self.task_handle.lock().await.take() {
             // We don't want to await the handle here as it might be waiting
             // for the connected flag to change, which we just did above
             handle.abort();
         }
-        
+
         println!("Test adapter disconnected");
         Ok(())
     }
-    
+
     fn is_connected(&self) -> bool {
         self.connected.load(Ordering::SeqCst)
     }
-    
+
     fn get_name(&self) -> &str {
         &self.name
     }
-    
+
     async fn configure(&self, config: serde_json::Value) -> Result<()> {
         println!("Test adapter configured with: {}", config);
         Ok(())

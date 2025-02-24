@@ -8,8 +8,8 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Json},
-    Router,
     routing::{get, post},
+    Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -103,9 +103,12 @@ impl EventBus {
         {
             let mut stats = self.stats.write().await;
             stats.events_published += 1;
-            
+
             *stats.source_counts.entry(event.source.clone()).or_insert(0) += 1;
-            *stats.type_counts.entry(event.event_type.clone()).or_insert(0) += 1;
+            *stats
+                .type_counts
+                .entry(event.event_type.clone())
+                .or_insert(0) += 1;
         }
 
         // Send the event
@@ -113,10 +116,16 @@ impl EventBus {
             Ok(receivers) => Ok(receivers),
             Err(err) => {
                 // If error indicates no subscribers, just record the statistic but don't treat as error
-                if err.to_string().contains("channel closed") || err.to_string().contains("no receivers") {
+                if err.to_string().contains("channel closed")
+                    || err.to_string().contains("no receivers")
+                {
                     let mut stats = self.stats.write().await;
                     stats.events_dropped += 1;
-                    println!("No receivers for event {}.{}, event dropped", event.source(), event.event_type());
+                    println!(
+                        "No receivers for event {}.{}, event dropped",
+                        event.source(),
+                        event.event_type()
+                    );
                     Ok(0) // Return 0 receivers instead of an error
                 } else {
                     let mut stats = self.stats.write().await;
@@ -158,16 +167,16 @@ impl Clone for EventBus {
 pub trait ServiceAdapter: Send + Sync {
     /// Connect to the service
     async fn connect(&self) -> Result<()>;
-    
+
     /// Disconnect from the service
     async fn disconnect(&self) -> Result<()>;
-    
+
     /// Check if the adapter is currently connected
     fn is_connected(&self) -> bool;
-    
+
     /// Get the adapter's name
     fn get_name(&self) -> &str;
-    
+
     /// Set configuration for the adapter (optional)
     async fn configure(&self, _config: serde_json::Value) -> Result<()> {
         Ok(()) // Default implementation does nothing
@@ -218,19 +227,26 @@ impl StreamService {
     }
 
     /// Register a new adapter with the service
-    pub async fn register_adapter<A>(&self, adapter: A) where A: ServiceAdapter + 'static {
+    pub async fn register_adapter<A>(&self, adapter: A)
+    where
+        A: ServiceAdapter + 'static,
+    {
         let name = adapter.get_name().to_string();
         let adapter_box = Arc::new(Box::new(adapter) as Box<dyn ServiceAdapter>);
-        
-        self.adapters.write().await.insert(name.clone(), adapter_box);
-        self.status.write().await.insert(name, ServiceStatus::Disconnected);
+
+        self.adapters
+            .write()
+            .await
+            .insert(name.clone(), adapter_box);
+        self.status
+            .write()
+            .await
+            .insert(name, ServiceStatus::Disconnected);
     }
 
     /// Connect all registered adapters
     pub async fn connect_all_adapters(&self) -> Result<()> {
-        let adapter_names: Vec<String> = {
-            self.adapters.read().await.keys().cloned().collect()
-        };
+        let adapter_names: Vec<String> = { self.adapters.read().await.keys().cloned().collect() };
 
         for name in adapter_names {
             self.connect_adapter(&name).await?;
@@ -262,14 +278,22 @@ impl StreamService {
             loop {
                 match adapter_clone.connect().await {
                     Ok(()) => {
-                        status_clone.write().await.insert(name_clone.clone(), ServiceStatus::Connected);
+                        status_clone
+                            .write()
+                            .await
+                            .insert(name_clone.clone(), ServiceStatus::Connected);
                         break;
                     }
                     Err(e) => {
-                        eprintln!("Failed to connect adapter '{}': {}. Retrying in {}ms...", 
-                            name_clone, e, RECONNECT_DELAY_MS);
-                        
-                        status_clone.write().await.insert(name_clone.clone(), ServiceStatus::Error);
+                        eprintln!(
+                            "Failed to connect adapter '{}': {}. Retrying in {}ms...",
+                            name_clone, e, RECONNECT_DELAY_MS
+                        );
+
+                        status_clone
+                            .write()
+                            .await
+                            .insert(name_clone.clone(), ServiceStatus::Error);
                         sleep(Duration::from_millis(RECONNECT_DELAY_MS)).await;
                     }
                 }
@@ -289,7 +313,10 @@ impl StreamService {
         };
 
         adapter.disconnect().await?;
-        self.status.write().await.insert(name.to_string(), ServiceStatus::Disconnected);
+        self.status
+            .write()
+            .await
+            .insert(name.to_string(), ServiceStatus::Disconnected);
         Ok(())
     }
 
@@ -320,13 +347,15 @@ impl StreamService {
         println!("Starting WebSocket server...");
         let event_bus = self.event_bus.clone();
         let (shutdown_sender, mut shutdown_receiver) = mpsc::channel::<()>(1);
-        
+
         // Store sender for later shutdown
         self.shutdown_sender = Some(shutdown_sender);
 
         // Start WebSocket server in a separate task
         let handle = tokio::spawn(async move {
-            let socket_addr = format!("127.0.0.1:{}", WS_PORT).parse::<std::net::SocketAddr>().unwrap();
+            let socket_addr = format!("127.0.0.1:{}", WS_PORT)
+                .parse::<std::net::SocketAddr>()
+                .unwrap();
             let listener = match TcpListener::bind(socket_addr).await {
                 Ok(listener) => listener,
                 Err(e) => {
@@ -345,13 +374,13 @@ impl StreamService {
                         println!("WebSocket server shutting down");
                         break;
                     }
-                    
+
                     // Accept new connections
                     accept_result = listener.accept() => {
                         match accept_result {
                             Ok((stream, addr)) => {
                                 println!("New WebSocket connection from: {}", addr);
-                                
+
                                 // Handle each connection in a separate task
                                 let event_bus_clone = event_bus.clone();
                                 tokio::spawn(async move {
@@ -377,11 +406,11 @@ impl StreamService {
     pub async fn stop_websocket_server(&mut self) -> Result<()> {
         if let Some(sender) = self.shutdown_sender.take() {
             let _ = sender.send(()).await;
-            
+
             if let Some(handle) = self.ws_server_handle.take() {
                 handle.await?;
             }
-            
+
             Ok(())
         } else {
             Err(anyhow!("WebSocket server not running"))
@@ -403,7 +432,10 @@ impl StreamService {
             .route("/events", get(stream_events_handler))
             .route("/status", get(get_status_handler))
             .route("/adapters/:name/connect", post(connect_adapter_handler))
-            .route("/adapters/:name/disconnect", post(disconnect_adapter_handler))
+            .route(
+                "/adapters/:name/disconnect",
+                post(disconnect_adapter_handler),
+            )
             .with_state(state);
 
         // Start the server in a background task
@@ -442,30 +474,25 @@ impl IntoResponse for AppError {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Something went wrong: {}", self.0),
-        ).into_response()
+        )
+            .into_response()
     }
 }
 
 // Handler functions for Axum
-async fn get_stats_handler(
-    State(state): State<ApiState>,
-) -> Json<EventBusStats> {
+async fn get_stats_handler(State(state): State<ApiState>) -> Json<EventBusStats> {
     let stats = state.event_bus.get_stats().await;
     Json(stats)
 }
 
-async fn stream_events_handler(
-    State(state): State<ApiState>,
-) -> impl IntoResponse {
+async fn stream_events_handler(State(state): State<ApiState>) -> impl IntoResponse {
     // This would be a streaming response with Server-Sent Events
     // For simplicity, we'll just return the current stats as JSON
     let stats = state.event_bus.get_stats().await;
     Json(stats)
 }
 
-async fn get_status_handler(
-    State(state): State<ApiState>,
-) -> Json<HashMap<String, ServiceStatus>> {
+async fn get_status_handler(State(state): State<ApiState>) -> Json<HashMap<String, ServiceStatus>> {
     let status_map = state.status.read().await.clone();
     Json(status_map)
 }
@@ -475,8 +502,12 @@ async fn connect_adapter_handler(
     State(state): State<ApiState>,
 ) -> Result<Json<String>, StatusCode> {
     // Update the status to connecting
-    state.status.write().await.insert(name.clone(), ServiceStatus::Connecting);
-    
+    state
+        .status
+        .write()
+        .await
+        .insert(name.clone(), ServiceStatus::Connecting);
+
     match state.adapters.read().await.get(&name) {
         Some(adapter) => {
             let adapter_clone = adapter.clone();
@@ -488,9 +519,7 @@ async fn connect_adapter_handler(
             });
             Ok(Json("Connection initiated".to_string()))
         }
-        None => {
-            Err(StatusCode::NOT_FOUND)
-        }
+        None => Err(StatusCode::NOT_FOUND),
     }
 }
 
@@ -507,29 +536,28 @@ async fn disconnect_adapter_handler(
                     eprintln!("Failed to disconnect adapter '{}': {}", name_clone, e);
                 }
             });
-            state.status.write().await.insert(name, ServiceStatus::Disconnected);
+            state
+                .status
+                .write()
+                .await
+                .insert(name, ServiceStatus::Disconnected);
             Ok(Json("Disconnection initiated".to_string()))
         }
-        None => {
-            Err(StatusCode::NOT_FOUND)
-        }
+        None => Err(StatusCode::NOT_FOUND),
     }
 }
 
 /// Handler for WebSocket client connections
-async fn handle_websocket_client(
-    stream: TcpStream,
-    event_bus: Arc<EventBus>,
-) -> Result<()> {
+async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) -> Result<()> {
     // Upgrade TCP connection to WebSocket
     let ws_stream = accept_async(stream).await?;
-    
+
     // Create a receiver from the event bus
     let mut receiver = event_bus.subscribe();
-    
+
     // Split the WebSocket into sender and receiver
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-    
+
     // Handle incoming WebSocket messages
     loop {
         tokio::select! {
@@ -556,7 +584,7 @@ async fn handle_websocket_client(
                     }
                 }
             }
-            
+
             // Handle incoming WebSocket messages
             result = ws_receiver.next() => {
                 match result {

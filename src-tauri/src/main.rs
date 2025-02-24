@@ -13,8 +13,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            plugin::greet, 
-            plugin::get_event_bus_status, 
+            plugin::greet,
+            plugin::get_event_bus_status,
             plugin::get_adapter_statuses,
             plugin::send_test_event
         ])

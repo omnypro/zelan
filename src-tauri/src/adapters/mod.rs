@@ -1,3 +1,3 @@
 pub mod test;
 
-pub use test::TestAdapter; 
+pub use test::TestAdapter;
