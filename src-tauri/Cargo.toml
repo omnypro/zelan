@@ -51,3 +51,6 @@ twitch_oauth2 = "0.15.1"
 twitch_api2 = "0.6.1"
 
 dotenvy = "*"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
