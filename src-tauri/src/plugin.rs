@@ -12,6 +12,16 @@ pub struct ZelanState {
     _runtime: Arc<TokioRuntime>,
 }
 
+// Implement Clone for ZelanState to allow cloning the service in command handlers
+impl Clone for ZelanState {
+    fn clone(&self) -> Self {
+        Self {
+            service: self.service.clone(),
+            _runtime: self._runtime.clone(),
+        }
+    }
+}
+
 impl ZelanState {
     pub fn new() -> Result<Self> {
         // Create tokio runtime
@@ -89,17 +99,81 @@ impl ZelanState {
     }
 }
 
-// Re-export the greet command for use in the plugin
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use tauri::State;
+use serde_json;
+
 #[tauri::command]
-fn greet(name: &str) -> String {
+pub fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// Get current status of the event bus
+#[tauri::command]
+pub async fn get_event_bus_status(state: State<'_, ZelanState>) -> Result<serde_json::Value, String> {
+    // Use a scope to ensure the lock is released before .await
+    let event_bus = {
+        let service = state.service.lock().unwrap();
+        service.event_bus().clone()
+    };
+    
+    // Now we can await outside the lock scope
+    let stats = event_bus.get_stats().await;
+    
+    // Convert to JSON value
+    serde_json::to_value(stats).map_err(|e| e.to_string())
+}
+
+/// Get all adapter statuses
+#[tauri::command]
+pub async fn get_adapter_statuses(state: State<'_, ZelanState>) -> Result<serde_json::Value, String> {
+    // Clone the service outside the .await
+    let service_clone = {
+        let service_guard = state.service.lock().unwrap();
+        service_guard.clone()
+    };
+    
+    // Now we can safely await without holding the lock
+    let statuses = service_clone.get_all_statuses().await;
+    
+    // Convert to JSON value
+    serde_json::to_value(statuses).map_err(|e| e.to_string())
+}
+
+/// Send a test event through the system
+#[tauri::command]
+pub async fn send_test_event(state: State<'_, ZelanState>) -> Result<String, String> {
+    use crate::StreamEvent;
+    use serde_json::json;
+    
+    // Simplified version to debug command invocation issues
+    let event_bus = {
+        let service = state.service.lock().unwrap();
+        service.event_bus().clone()
+    };
+    
+    // Create a manual test event
+    let event = StreamEvent::new(
+        "manual",
+        "test.manual",
+        json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "message": "Manual test event from frontend"
+        })
+    );
+    
+    // Attempt to publish the event
+    if let Err(e) = event_bus.publish(event).await {
+        return Err(format!("Failed to send test event: {}", e));
+    }
+    
+    // Return success even if there were no receivers
+    Ok("Test event sent successfully".to_string())
 }
 
 /// Initialize the Zelan plugin
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("zelan")
-        .invoke_handler(tauri::generate_handler![greet])
         .setup(|app, _api| {
             // Create and initialize the zelan state
             let zelan_state = ZelanState::new()?;

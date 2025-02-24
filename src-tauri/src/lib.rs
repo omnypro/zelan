@@ -192,6 +192,19 @@ pub struct StreamService {
     shutdown_sender: Option<mpsc::Sender<()>>,
 }
 
+// Implement Clone for StreamService so it can be used in async contexts
+impl Clone for StreamService {
+    fn clone(&self) -> Self {
+        Self {
+            event_bus: self.event_bus.clone(),
+            adapters: self.adapters.clone(),
+            status: self.status.clone(),
+            ws_server_handle: None, // We don't clone the server handle
+            shutdown_sender: None,  // We don't clone the shutdown sender
+        }
+    }
+}
+
 impl StreamService {
     pub fn new() -> Self {
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));

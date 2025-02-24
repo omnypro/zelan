@@ -1,49 +1,139 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import './App.css';
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [eventBusStats, setEventBusStats] = useState<any>(null);
+  const [adapterStatuses, setAdapterStatuses] = useState<any>(null);
+  const [testEventResult, setTestEventResult] = useState<string>('');
+  const [refreshKey, setRefreshKey] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  // Fetch stats and statuses on mount and when refreshKey changes
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+
+        // Get event bus stats
+        const stats = await invoke('get_event_bus_status');
+        setEventBusStats(stats);
+
+        // Get adapter statuses
+        const statuses = await invoke('get_adapter_statuses');
+        setAdapterStatuses(statuses);
+
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [refreshKey]);
+
+  // Send a test event
+  const sendTestEvent = async () => {
+    try {
+      setLoading(true);
+      const result = await invoke<string>('send_test_event');
+      setTestEventResult(result);
+      // Refresh stats after sending an event
+      setRefreshKey((prev) => prev + 1);
+    } catch (error) {
+      console.error('Error sending test event:', error);
+      setTestEventResult(`Error: ${error}`);
+      setLoading(false);
+    }
+  };
+
+  // Manual refresh
+  const refreshData = () => {
+    setRefreshKey((prev) => prev + 1);
+  };
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+      <h1>Zelan - Streaming Data Hub</h1>
 
       <div className="row">
-        <a href="https://vitejs.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
         <a href="https://tauri.app" target="_blank">
           <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
         </a>
-        <a href="https://reactjs.org" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <div className="actions">
+        <button onClick={sendTestEvent} disabled={loading}>
+          {loading ? 'Processing...' : 'Send Test Event'}
+        </button>
+        <button onClick={refreshData} disabled={loading}>
+          {loading ? 'Loading...' : 'Refresh Data'}
+        </button>
+      </div>
+
+      {testEventResult && (
+        <div className="result-panel">
+          <h3>Test Event Result</h3>
+          <p>{testEventResult}</p>
+        </div>
+      )}
+
+      <div className="stats-container">
+        <div className="stats-panel">
+          <h3>Event Bus Statistics</h3>
+          {eventBusStats ? (
+            <div>
+              <p>
+                <strong>Events Published:</strong>{' '}
+                {eventBusStats.events_published}
+              </p>
+              <p>
+                <strong>Events Dropped:</strong> {eventBusStats.events_dropped}
+              </p>
+
+              <h4>Source Counts</h4>
+              <ul>
+                {Object.entries(eventBusStats.source_counts || {}).map(
+                  ([source, count]) => (
+                    <li key={source}>
+                      {source}: {count as number}
+                    </li>
+                  )
+                )}
+              </ul>
+
+              <h4>Event Types</h4>
+              <ul>
+                {Object.entries(eventBusStats.type_counts || {}).map(
+                  ([type, count]) => (
+                    <li key={type}>
+                      {type}: {count as number}
+                    </li>
+                  )
+                )}
+              </ul>
+            </div>
+          ) : (
+            <p>Loading event bus statistics...</p>
+          )}
+        </div>
+
+        <div className="stats-panel">
+          <h3>Adapter Status</h3>
+          {adapterStatuses ? (
+            <ul>
+              {Object.entries(adapterStatuses).map(([adapter, status]) => (
+                <li key={adapter}>
+                  <strong>{adapter}:</strong> {status as string}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>Loading adapter statuses...</p>
+          )}
+        </div>
+      </div>
     </main>
   );
 }
