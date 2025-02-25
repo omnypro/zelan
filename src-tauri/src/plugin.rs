@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{ObsAdapter, TestAdapter},
+    adapters::{ObsAdapter, TestAdapter, TwitchAdapter},
     AdapterSettings, ErrorCode, ErrorSeverity, StreamService, ZelanError,
 };
 use anyhow::{anyhow, Result};
@@ -248,6 +248,86 @@ impl ZelanState {
                     .register_adapter(obs_adapter, Some(obs_settings))
                     .await;
                 debug!("Registered OBS adapter with default settings");
+            }
+            
+            // Register the Twitch adapter with settings
+            if let Some(saved_twitch_settings) = adapter_settings.get("twitch") {
+                info!(
+                    enabled = saved_twitch_settings.enabled,
+                    "Found saved Twitch adapter settings"
+                );
+                
+                // Extract the saved Twitch configuration from the settings
+                let config = if let Some(config_value) = saved_twitch_settings.config.as_object() {
+                    // Import the Twitch adapter config from the adapters module
+                    use crate::adapters::twitch::TwitchConfig;
+                    
+                    // Create a Twitch config from the saved settings
+                    let mut twitch_config = TwitchConfig::default();
+                    
+                    // Extract the channel_id (use default if not present)
+                    if let Some(channel_id) = config_value.get("channel_id").and_then(|v| v.as_str()) {
+                        twitch_config.channel_id = Some(channel_id.to_string());
+                    }
+                    
+                    // Extract the channel_login (use default if not present)
+                    if let Some(channel_login) = config_value.get("channel_login").and_then(|v| v.as_str()) {
+                        twitch_config.channel_login = Some(channel_login.to_string());
+                    }
+                    
+                    // Extract the access_token (if present)
+                    if let Some(access_token) = config_value.get("access_token").and_then(|v| v.as_str()) {
+                        twitch_config.access_token = Some(access_token.to_string());
+                    }
+                    
+                    // Extract the refresh_token (if present)
+                    if let Some(refresh_token) = config_value.get("refresh_token").and_then(|v| v.as_str()) {
+                        twitch_config.refresh_token = Some(refresh_token.to_string());
+                    }
+                    
+                    // Extract poll_interval_ms (use default if not present)
+                    if let Some(poll_interval) = config_value.get("poll_interval_ms").and_then(|v| v.as_u64()) {
+                        twitch_config.poll_interval_ms = poll_interval;
+                    }
+                    
+                    // Extract monitor_channel_info (use default if not present)
+                    if let Some(monitor_channel) = config_value.get("monitor_channel_info").and_then(|v| v.as_bool()) {
+                        twitch_config.monitor_channel_info = monitor_channel;
+                    }
+                    
+                    twitch_config
+                } else {
+                    // Import the Twitch adapter config from the adapters module
+                    use crate::adapters::twitch::TwitchConfig;
+                    warn!("No valid Twitch configuration found, using defaults");
+                    TwitchConfig::default()
+                };
+                
+                // Create the adapter with the loaded configuration
+                info!("Initializing Twitch adapter");
+                let twitch_adapter = TwitchAdapter::with_config(service_guard.event_bus(), config);
+                
+                // Register the adapter with its settings
+                service_guard.register_adapter(twitch_adapter, Some(saved_twitch_settings.clone())).await;
+                info!("Registered Twitch adapter with saved settings");
+            } else {
+                info!("No saved Twitch settings found, using defaults");
+                let twitch_adapter = TwitchAdapter::new(service_guard.event_bus());
+                let twitch_settings = AdapterSettings {
+                    enabled: true,
+                    config: serde_json::json!({
+                        "channel_id": null,
+                        "channel_login": null,
+                        "poll_interval_ms": 30000, 
+                        "monitor_channel_info": true
+                    }),
+                    display_name: "Twitch".to_string(),
+                    description: "Connects to Twitch to receive stream information and events".to_string(),
+                };
+                service_guard
+                    .register_adapter(twitch_adapter, Some(twitch_settings))
+                    .await;
+                debug!("Registered Twitch adapter with default settings");
             }
             
             // Connect all adapters

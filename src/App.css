@@ -806,3 +806,142 @@ li {
     color: #aaa;
   }
 }
+
+/* Twitch Authentication Styles */
+.twitch-auth-container {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.auth-pending {
+  margin: 15px 0;
+}
+
+.verification-details {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 15px 0;
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.verification-url {
+  margin-bottom: 15px;
+  color: #6441a5;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.verification-url:hover {
+  text-decoration: underline;
+}
+
+.device-code {
+  font-size: 24px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: #333;
+  padding: 10px 15px;
+  background-color: #f0f0f0;
+  border-radius: 4px;
+}
+
+.expires-text {
+  color: #666;
+  font-size: 0.9em;
+  margin-top: 10px;
+}
+
+.waiting-text {
+  margin-top: 15px;
+  font-style: italic;
+  color: #666;
+}
+
+.auth-success {
+  color: #28a745;
+  font-weight: bold;
+  margin: 15px 0;
+}
+
+.auth-instructions {
+  margin: 15px 0;
+}
+
+.auth-instructions ol {
+  text-align: left;
+  margin-left: 1rem;
+  padding-left: 1rem;
+}
+
+.auth-instructions li {
+  margin-bottom: 0.5rem;
+}
+
+.auth-requirements {
+  margin: 10px 0 15px;
+}
+
+.note {
+  background-color: #fff8e6;
+  border-left: 4px solid #ffcc5c;
+  padding: 10px 15px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  margin: 0;
+}
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.authenticated p {
+  color: #28a745;
+  font-weight: bold;
+}
+
+.section-divider {
+  margin: 20px 0;
+  border: 0;
+  border-top: 1px solid #eee;
+}
+
+@media (prefers-color-scheme: dark) {
+  .twitch-auth-container {
+    background-color: #333;
+  }
+  
+  .verification-details {
+    background-color: #222;
+  }
+  
+  .verification-url {
+    color: #9147ff;
+  }
+  
+  .device-code {
+    background-color: #444;
+    color: #eee;
+  }
+  
+  .expires-text, .waiting-text {
+    color: #aaa;
+  }
+  
+  .section-divider {
+    border-top-color: #444;
+  }
+  
+  .note {
+    background-color: #3a3a25;
+    border-left-color: #ffcc5c;
+    color: #eee;
+  }
+}
