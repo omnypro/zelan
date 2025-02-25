@@ -1,5 +1,5 @@
 use crate::{
-    adapters::TestAdapter, AdapterSettings, ErrorCode, ErrorSeverity, StreamService, ZelanError,
+    adapters::{ObsAdapter, TestAdapter}, AdapterSettings, ErrorCode, ErrorSeverity, StreamService, ZelanError,
 };
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
@@ -80,6 +80,22 @@ impl ZelanState {
                     description: "A test adapter that generates sample events at regular intervals for development and debugging".to_string(),
                 };
                 service_guard.register_adapter(test_adapter, Some(test_settings)).await;
+                
+                // Register the OBS adapter with settings
+                let obs_adapter = ObsAdapter::new(service_guard.event_bus());
+                let obs_settings = AdapterSettings {
+                    enabled: true,
+                    config: serde_json::json!({
+                        "host": "localhost",
+                        "port": 4455,
+                        "password": "",
+                        "auto_connect": true,
+                        "include_scene_details": true
+                    }),
+                    display_name: "OBS Studio".to_string(),
+                    description: "Connects to OBS Studio via WebSocket to receive scene changes, streaming status, and other events".to_string(),
+                };
+                service_guard.register_adapter(obs_adapter, Some(obs_settings)).await;
 
                 // Connect all adapters
                 if let Err(e) = service_guard.connect_all_adapters().await {
