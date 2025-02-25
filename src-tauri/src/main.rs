@@ -14,7 +14,7 @@ fn main() {
         Ok(path) => Some(path),
         Err(_) => None,
     };
-    
+
     // Initialize the tracing subscriber for structured logging
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -31,13 +31,13 @@ fn main() {
         .init();
 
     info!("Zelan application starting");
-    
+
     // Log environment loading after logger is initialized
     match env_file_path {
         Some(path) => info!("Loaded environment variables from {}", path.display()),
         None => debug!("No .env file found. Using existing environment variables."),
     };
-    
+
     // Print log level configuration hint for developers
     debug!("Logging initialized. Set RUST_LOG environment variable to control log levels");
     debug!("Example: RUST_LOG=zelan_lib=trace,zelan_lib::adapters::obs=debug");

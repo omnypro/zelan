@@ -13,13 +13,17 @@ pub const SHUTDOWN_CHANNEL_SIZE: usize = 1;
 pub trait AdapterConfig: Clone + Send + Sync + std::fmt::Debug {
     /// Convert the configuration to a JSON value for storage
     fn to_json(&self) -> serde_json::Value;
-    
+
     /// Create a configuration from a JSON value
-    fn from_json(json: &serde_json::Value) -> Result<Self> where Self: Sized;
-    
+    fn from_json(json: &serde_json::Value) -> Result<Self>
+    where
+        Self: Sized;
+
     /// Get a string identifying the adapter type
-    fn adapter_type() -> &'static str where Self: Sized;
-    
+    fn adapter_type() -> &'static str
+    where
+        Self: Sized;
+
     /// Validate the configuration
     fn validate(&self) -> Result<()>;
 }
@@ -45,8 +49,8 @@ impl Clone for BaseAdapter {
             name: self.name.clone(),
             event_bus: Arc::clone(&self.event_bus),
             connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
-            shutdown_signal: Mutex::new(None),  // Don't clone the shutdown channel
-            event_handler: Mutex::new(None),    // Don't clone the task handle
+            shutdown_signal: Mutex::new(None), // Don't clone the shutdown channel
+            event_handler: Mutex::new(None),   // Don't clone the task handle
         }
     }
 }
@@ -84,21 +88,21 @@ impl BaseAdapter {
     pub fn set_connected(&self, connected: bool) {
         self.connected.store(connected, Ordering::SeqCst);
     }
-    
+
     /// Store the event handler task
     #[instrument(skip(self, handle), level = "debug")]
     pub async fn set_event_handler(&self, handle: tokio::task::JoinHandle<()>) {
         debug!(adapter = %self.name, "Storing event handler task");
         *self.event_handler.lock().await = Some(handle);
     }
-    
+
     /// Store the shutdown signal sender
     #[instrument(skip(self, sender), level = "debug")]
     pub async fn set_shutdown_signal(&self, sender: mpsc::Sender<()>) {
         debug!(adapter = %self.name, "Storing shutdown signal sender");
         *self.shutdown_signal.lock().await = Some(sender);
     }
-    
+
     /// Create a shutdown channel
     #[instrument(skip(self), level = "debug")]
     pub async fn create_shutdown_channel(&self) -> (mpsc::Sender<()>, mpsc::Receiver<()>) {
@@ -107,7 +111,7 @@ impl BaseAdapter {
         self.set_shutdown_signal(shutdown_tx.clone()).await;
         (shutdown_tx, shutdown_rx)
     }
-    
+
     /// Send shutdown signal and stop event handler
     #[instrument(skip(self), level = "debug")]
     pub async fn stop_event_handler(&self) -> Result<()> {
@@ -127,19 +131,23 @@ impl BaseAdapter {
         } else {
             debug!(adapter = %self.name, "No event handler task to abort");
         }
-        
+
         Ok(())
     }
-    
+
     /// Publish an event to the event bus
     #[instrument(skip(self, payload), level = "debug")]
-    pub async fn publish_event(&self, event_type: &str, payload: serde_json::Value) -> Result<usize> {
+    pub async fn publish_event(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<usize> {
         debug!(
             adapter = %self.name,
             event_type = %event_type,
             "Publishing event"
         );
-        
+
         let stream_event = StreamEvent::new(&self.name, event_type, payload);
         match self.event_bus.publish(stream_event).await {
             Ok(receivers) => {

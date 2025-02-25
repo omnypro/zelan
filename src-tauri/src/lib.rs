@@ -138,7 +138,7 @@ impl EventBus {
         // Cache event details before acquiring lock
         let source = event.source.clone();
         let event_type = event.event_type.clone();
-        
+
         debug!("Publishing event to bus");
 
         // Attempt to send the event first (most common operation)
@@ -152,7 +152,7 @@ impl EventBus {
                     *stats_guard.source_counts.entry(source).or_insert(0) += 1;
                     *stats_guard.type_counts.entry(event_type).or_insert(0) += 1;
                 });
-                
+
                 debug!(receivers, "Event published successfully");
                 Ok(receivers)
             }
@@ -340,7 +340,7 @@ impl StreamService {
             ws_port = config.websocket.port,
             "Creating StreamService from stored configuration"
         );
-        
+
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         let adapter_settings = Arc::new(RwLock::new(config.adapters));
 
@@ -364,20 +364,23 @@ impl StreamService {
             websocket: self.ws_config.clone(),
             adapters: adapter_settings,
         };
-        
+
         debug!(
             ws_port = config.websocket.port,
             adapter_count = config.adapters.len(),
             "Configuration exported"
         );
-        
+
         config
     }
 
     /// Get the current WebSocket configuration
     #[instrument(skip(self), level = "debug")]
     pub fn ws_config(&self) -> &WebSocketConfig {
-        debug!(port = self.ws_config.port, "Retrieved WebSocket configuration");
+        debug!(
+            port = self.ws_config.port,
+            "Retrieved WebSocket configuration"
+        );
         &self.ws_config
     }
 
