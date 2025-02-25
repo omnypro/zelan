@@ -21,19 +21,12 @@ fn get_client_id() -> Result<ClientId> {
 
 /// Get all available Twitch scopes
 /// These will be pared down later when we know exactly which ones we need
-fn get_all_scopes() -> Vec<Scope> {
+fn get_scopes() -> Vec<Scope> {
     vec![
         Scope::AnalyticsReadExtensions,
         Scope::AnalyticsReadGames,
         Scope::BitsRead,
         Scope::ChannelEditCommercial,
-        Scope::ChannelManageBroadcast,
-        Scope::ChannelManageExtensions,
-        Scope::ChannelManagePolls,
-        Scope::ChannelManagePredictions,
-        Scope::ChannelManageRedemptions,
-        Scope::ChannelManageSchedule,
-        Scope::ChannelManageVideos,
         Scope::ChannelReadEditors,
         Scope::ChannelReadGoals,
         Scope::ChannelReadHypeTrain,
@@ -43,7 +36,6 @@ fn get_all_scopes() -> Vec<Scope> {
         Scope::ChannelReadStreamKey,
         Scope::ChannelReadSubscriptions,
         Scope::ChannelReadVips,
-        Scope::ClipsEdit,
         Scope::ModerationRead,
         Scope::ModeratorReadBlockedTerms,
         Scope::ModeratorReadAutomodSettings,
@@ -52,17 +44,14 @@ fn get_all_scopes() -> Vec<Scope> {
         Scope::ModeratorReadFollowers,
         Scope::ModeratorReadGuestStar,
         Scope::ModeratorReadShieldMode,
-        Scope::UserEdit,
         Scope::UserReadBlockedUsers,
         Scope::UserReadBroadcast,
         Scope::UserReadEmail,
         Scope::UserReadFollows,
         Scope::UserReadSubscriptions,
         Scope::ChannelModerate,
-        Scope::ChatEdit,
         Scope::ChatRead,
         Scope::WhispersRead,
-        Scope::WhispersEdit,
     ]
 }
 
@@ -163,7 +152,7 @@ impl TwitchAuthManager {
 
     /// Get the scopes for Twitch authentication
     pub fn get_scopes(&self) -> Result<Vec<Scope>> {
-        Ok(get_all_scopes())
+        Ok(get_scopes())
     }
 
     /// Set the device code in the auth state
@@ -197,7 +186,7 @@ impl TwitchAuthManager {
             .build()?;
 
         // Get all scopes
-        let all_scopes = get_all_scopes();
+        let all_scopes = get_scopes();
 
         // Create the builder with all scopes
         let mut builder = DeviceUserTokenBuilder::new(client_id, all_scopes);
@@ -246,7 +235,7 @@ impl TwitchAuthManager {
                 let client_id = get_client_id()?;
 
                 // Get all scopes
-                let all_scopes = get_all_scopes();
+                let all_scopes = get_scopes();
 
                 // Create a builder with the same scopes
                 let mut builder = DeviceUserTokenBuilder::new(client_id, all_scopes);
