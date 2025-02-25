@@ -424,3 +424,87 @@ li {
   color: #9e9e9e;
   font-style: italic;
 }
+
+/* WebSocket Config Styles */
+.websocket-info {
+  text-align: left;
+}
+
+.websocket-connection {
+  margin-bottom: 1.5rem;
+}
+
+.uri-display {
+  background-color: #f5f5f5;
+  padding: 10px;
+  border-radius: 6px;
+  margin: 10px 0;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.port-configuration {
+  margin: 15px 0;
+}
+
+.input-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.input-group label {
+  font-weight: 500;
+  min-width: 40px;
+}
+
+.input-group input {
+  flex: 0 0 100px;
+  padding: 8px 12px;
+}
+
+.action-button.small {
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
+.help-text {
+  margin: 5px 0 0 0;
+  font-size: 0.8rem;
+  color: #666;
+  font-style: italic;
+}
+
+.connection-help {
+  margin-top: 1.5rem;
+}
+
+.terminal-command {
+  background-color: #212121;
+  color: #f5f5f5;
+  padding: 10px;
+  border-radius: 6px;
+  margin: 10px 0;
+  font-family: monospace;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* Dark mode overrides for WebSocket UI */
+@media (prefers-color-scheme: dark) {
+  .uri-display {
+    background-color: #333;
+    color: #f5f5f5;
+  }
+  
+  .terminal-command {
+    background-color: #111;
+    color: #1de9b6;
+    border: 1px solid #333;
+  }
+  
+  .help-text {
+    color: #aaa;
+  }
+}

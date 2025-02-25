@@ -1,4 +1,4 @@
-import { useState, useEffect, ReactNode } from 'react';
+import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import './App.css';
 
@@ -11,35 +11,54 @@ interface ZelanError {
 }
 
 // Custom error component to display errors to the user
-const ErrorNotification = ({ error, onDismiss }: { error: ZelanError | string, onDismiss: () => void }) => {
+const ErrorNotification = ({
+  error,
+  onDismiss,
+}: {
+  error: ZelanError | string;
+  onDismiss: () => void;
+}) => {
   // Handle both string errors and ZelanError objects
-  const errorObj = typeof error === 'string' 
-    ? { 
-        code: 'UNKNOWN', 
-        message: error,
-        severity: 'error' as const
-      } 
-    : error;
-    
+  const errorObj =
+    typeof error === 'string'
+      ? {
+          code: 'UNKNOWN',
+          message: error,
+          severity: 'error' as const,
+        }
+      : error;
+
   // Map severity to CSS class
-  const severityClass = {
-    'info': 'info',
-    'warning': 'warning',
-    'error': 'error',
-    'critical': 'critical'
-  }[errorObj.severity] || 'error';
-  
+  const severityClass =
+    {
+      info: 'info',
+      warning: 'warning',
+      error: 'error',
+      critical: 'critical',
+    }[errorObj.severity] || 'error';
+
   return (
     <div className={`error-notification ${severityClass}`}>
       <div className="error-header">
         <span className="error-code">{errorObj.code}</span>
-        <button className="dismiss-button" onClick={onDismiss}>×</button>
+        <button className="dismiss-button" onClick={onDismiss}>
+          ×
+        </button>
       </div>
       <p className="error-message">{errorObj.message}</p>
       {errorObj.context && <p className="error-context">{errorObj.context}</p>}
     </div>
   );
 };
+
+// Define WebSocketInfo interface to match backend response
+interface WebSocketInfo {
+  port: number;
+  uri: string;
+  httpUri: string;
+  wscat: string;
+  websocat: string;
+}
 
 function App() {
   const [eventBusStats, setEventBusStats] = useState<any>(null);
@@ -49,19 +68,24 @@ function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [errors, setErrors] = useState<(ZelanError | string)[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [wsInfo, setWsInfo] = useState<WebSocketInfo | null>(null);
+  const [newPort, setNewPort] = useState<string>('');
 
   // Helper function to add errors
   const addError = (error: ZelanError | string) => {
-    setErrors(prev => [error, ...prev].slice(0, 5)); // Keep only the 5 most recent errors
+    setErrors((prev) => [error, ...prev].slice(0, 5)); // Keep only the 5 most recent errors
   };
 
   // Helper function to dismiss errors
   const dismissError = (index: number) => {
-    setErrors(prev => prev.filter((_, i) => i !== index));
+    setErrors((prev) => prev.filter((_, i) => i !== index));
   };
 
   // Helper function to handle invoke errors
-  const safeInvoke = async <T,>(command: string, ...args: any[]): Promise<T> => {
+  const safeInvoke = async <T,>(
+    command: string,
+    ...args: any[]
+  ): Promise<T> => {
     try {
       return await invoke<T>(command, ...args);
     } catch (error) {
@@ -88,10 +112,19 @@ function App() {
         // Get adapter statuses
         const statuses = await safeInvoke('get_adapter_statuses');
         setAdapterStatuses(statuses);
-        
+
+        // Get WebSocket info
+        const info = await safeInvoke<WebSocketInfo>('get_websocket_info');
+        setWsInfo(info);
+
+        // Initialize new port state if empty
+        if (newPort === '' && info?.port) {
+          setNewPort(info.port.toString());
+        }
+
         // Update last refreshed timestamp
         setLastUpdated(new Date());
-        
+
         setLoading(false);
       } catch (error) {
         // Error already handled by safeInvoke
@@ -100,25 +133,54 @@ function App() {
     };
 
     fetchData();
-    
+
     // Set up auto-refresh interval (every 5 seconds)
     const intervalId = setInterval(() => {
       fetchData();
     }, 5000);
-    
+
     // Clean up interval on unmount
     return () => clearInterval(intervalId);
   }, [refreshKey]);
+
+  // Update WebSocket port
+  const updatePort = async () => {
+    try {
+      setLoading(true);
+      const port = parseInt(newPort, 10);
+
+      if (isNaN(port) || port < 1024 || port > 65535) {
+        addError('Port must be a number between 1024 and 65535');
+        setLoading(false);
+        return;
+      }
+
+      const result = await safeInvoke<string>('set_websocket_port', { port });
+
+      // Show the result as a notification
+      addError({
+        code: 'INFO',
+        message: result,
+        severity: 'info',
+      });
+
+      // Refresh data to update the displayed port
+      refreshData();
+    } catch (error) {
+      // Error already handled by safeInvoke
+      setLoading(false);
+    }
+  };
 
   // Send a test event
   const sendTestEvent = async () => {
     try {
       setLoading(true);
       setTestEventResult('');
-      
+
       const result = await safeInvoke<string>('send_test_event');
       setTestEventResult(result);
-      
+
       // Refresh stats after sending an event
       setRefreshKey((prev) => prev + 1);
     } catch (error) {
@@ -142,23 +204,31 @@ function App() {
           <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
         </a>
       </div>
-      
+
       {/* Error notifications */}
       <div className="error-container">
         {errors.map((error, index) => (
-          <ErrorNotification 
-            key={index} 
-            error={error} 
-            onDismiss={() => dismissError(index)} 
+          <ErrorNotification
+            key={index}
+            error={error}
+            onDismiss={() => dismissError(index)}
           />
         ))}
       </div>
 
       <div className="actions">
-        <button onClick={sendTestEvent} disabled={loading} className="action-button">
+        <button
+          onClick={sendTestEvent}
+          disabled={loading}
+          className="action-button"
+        >
           {loading ? 'Processing...' : 'Send Test Event'}
         </button>
-        <button onClick={refreshData} disabled={loading} className="action-button">
+        <button
+          onClick={refreshData}
+          disabled={loading}
+          className="action-button"
+        >
           {loading ? 'Loading...' : 'Refresh Data'}
         </button>
       </div>
@@ -173,6 +243,59 @@ function App() {
       <div className="stats-container">
         <div className="stats-panel">
           <div className="panel-header">
+            <h3>WebSocket Configuration</h3>
+          </div>
+
+          {wsInfo ? (
+            <div className="websocket-info">
+              <div className="websocket-connection">
+                <h4>Event Stream Connection</h4>
+                <p className="uri-display">
+                  <code>{wsInfo.uri}</code>
+                </p>
+                <div className="port-configuration">
+                  <div className="input-group">
+                    <label htmlFor="ws-port">Port:</label>
+                    <input
+                      id="ws-port"
+                      type="number"
+                      value={newPort}
+                      onChange={(e) => setNewPort(e.target.value)}
+                      min="1024"
+                      max="65535"
+                    />
+                    <button
+                      onClick={updatePort}
+                      disabled={loading || newPort === wsInfo.port.toString()}
+                      className="action-button small"
+                    >
+                      Update
+                    </button>
+                  </div>
+                  <p className="help-text">
+                    Change requires app restart to take effect
+                  </p>
+                </div>
+              </div>
+
+              <div className="connection-help">
+                <h4>Terminal Connection</h4>
+                <p>Connect to the event stream using:</p>
+                <pre className="terminal-command">{wsInfo.wscat}</pre>
+                <p>Or with websocat:</p>
+                <pre className="terminal-command">{wsInfo.websocat}</pre>
+                <h4>HTTP API</h4>
+                <p>REST API available at:</p>
+                <pre className="terminal-command">{wsInfo.httpUri}</pre>
+              </div>
+            </div>
+          ) : (
+            <p className="loading">Loading WebSocket configuration...</p>
+          )}
+        </div>
+
+        <div className="stats-panel">
+          <div className="panel-header">
             <h3>Event Bus Statistics</h3>
             {lastUpdated && (
               <span className="last-updated">
@@ -180,16 +303,20 @@ function App() {
               </span>
             )}
           </div>
-          
+
           {eventBusStats ? (
             <div>
               <div className="stat-summary">
                 <div className="stat-box">
-                  <span className="stat-value">{eventBusStats.events_published}</span>
+                  <span className="stat-value">
+                    {eventBusStats.events_published}
+                  </span>
                   <span className="stat-label">Events Published</span>
                 </div>
                 <div className="stat-box">
-                  <span className="stat-value">{eventBusStats.events_dropped}</span>
+                  <span className="stat-value">
+                    {eventBusStats.events_dropped}
+                  </span>
                   <span className="stat-label">Events Dropped</span>
                 </div>
               </div>
@@ -204,9 +331,8 @@ function App() {
                     </li>
                   )
                 )}
-                {Object.keys(eventBusStats.source_counts || {}).length === 0 && (
-                  <li className="empty-list">No events recorded yet</li>
-                )}
+                {Object.keys(eventBusStats.source_counts || {}).length ===
+                  0 && <li className="empty-list">No events recorded yet</li>}
               </ul>
 
               <h4>Event Types</h4>
@@ -233,17 +359,18 @@ function App() {
           <div className="panel-header">
             <h3>Adapter Status</h3>
           </div>
-          
+
           {adapterStatuses ? (
             <ul className="adapter-list">
               {Object.entries(adapterStatuses).map(([adapter, status]) => {
-                const statusClass = {
-                  "Connected": "status-connected",
-                  "Connecting": "status-connecting",
-                  "Disconnected": "status-disconnected",
-                  "Error": "status-error"
-                }[status as string] || "";
-                
+                const statusClass =
+                  {
+                    Connected: 'status-connected',
+                    Connecting: 'status-connecting',
+                    Disconnected: 'status-disconnected',
+                    Error: 'status-error',
+                  }[status as string] || '';
+
                 return (
                   <li key={adapter} className={`adapter-item ${statusClass}`}>
                     <span className="adapter-name">{adapter}</span>

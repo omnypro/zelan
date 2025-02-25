@@ -212,6 +212,71 @@ pub async fn send_test_event(state: State<'_, ZelanState>) -> Result<String, Zel
     }
 }
 
+/// Get current WebSocket connection info
+#[tauri::command]
+pub fn get_websocket_info(state: State<'_, ZelanState>) -> Result<serde_json::Value, ZelanError> {
+    // Get the WebSocket configuration
+    let config = match state.service.lock() {
+        Ok(service) => service.ws_config().clone(),
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::Internal,
+                message: "Failed to acquire service lock".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+            });
+        }
+    };
+    
+    // Build info object with the WebSocket URI and helpful tips
+    let info = serde_json::json!({
+        "port": config.port,
+        "uri": format!("ws://127.0.0.1:{}", config.port),
+        "httpUri": format!("http://127.0.0.1:{}", config.port + 1),
+        "wscat": format!("wscat -c ws://127.0.0.1:{}", config.port),
+        "websocat": format!("websocat ws://127.0.0.1:{}", config.port),
+    });
+
+    Ok(info)
+}
+
+/// Update WebSocket port configuration
+#[tauri::command]
+pub fn set_websocket_port(port: u16, state: State<'_, ZelanState>) -> Result<String, ZelanError> {
+    // Validate port number
+    if port < 1024 || port > 65535 {
+        return Err(ZelanError {
+            code: ErrorCode::ConfigInvalid,
+            message: "Invalid port number".to_string(),
+            context: Some(format!("Port must be between 1024 and 65535, got {}", port)),
+            severity: ErrorSeverity::Error,
+        });
+    }
+    
+    // Get exclusive access to the service
+    let mut service_guard = match state.service.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::Internal,
+                message: "Failed to acquire service lock".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+            });
+        }
+    };
+    
+    // Update WebSocket configuration
+    let mut config = service_guard.ws_config().clone();
+    config.port = port;
+    service_guard.set_ws_config(config);
+    
+    // Note: This doesn't restart the server, you'll need to restart the app
+    // for the port change to take effect
+    
+    Ok(format!("WebSocket port updated to {}. Restart the application for changes to take effect.", port))
+}
+
 /// Initialize the Zelan plugin
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("zelan")

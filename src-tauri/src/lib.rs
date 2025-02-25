@@ -28,7 +28,14 @@ pub use error::{ErrorCode, ErrorSeverity, ZelanError, ZelanResult};
 // Constants for event bus configuration
 const EVENT_BUS_CAPACITY: usize = 1000;
 const RECONNECT_DELAY_MS: u64 = 5000;
-const WS_PORT: u16 = 9000;
+const DEFAULT_WS_PORT: u16 = 9000;
+
+/// Configuration for the WebSocket server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSocketConfig {
+    /// Port to bind the WebSocket server to
+    pub port: u16,
+}
 
 /// Standardized event structure for all events flowing through the system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,6 +229,7 @@ pub struct StreamService {
     status: Arc<RwLock<HashMap<String, ServiceStatus>>>,
     ws_server_handle: Option<tokio::task::JoinHandle<()>>,
     shutdown_sender: Option<mpsc::Sender<()>>,
+    ws_config: WebSocketConfig,
 }
 
 // Implement Clone for StreamService so it can be used in async contexts
@@ -233,6 +241,7 @@ impl Clone for StreamService {
             status: self.status.clone(),
             ws_server_handle: None, // We don't clone the server handle
             shutdown_sender: None,  // We don't clone the shutdown sender
+            ws_config: self.ws_config.clone(),
         }
     }
 }
@@ -246,7 +255,33 @@ impl StreamService {
             status: Arc::new(RwLock::new(HashMap::new())),
             ws_server_handle: None,
             shutdown_sender: None,
+            ws_config: WebSocketConfig {
+                port: DEFAULT_WS_PORT,
+            },
         }
+    }
+    
+    /// Create a new StreamService with custom WebSocket configuration
+    pub fn with_config(ws_config: WebSocketConfig) -> Self {
+        let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
+        Self {
+            event_bus,
+            adapters: Arc::new(RwLock::new(HashMap::new())),
+            status: Arc::new(RwLock::new(HashMap::new())),
+            ws_server_handle: None,
+            shutdown_sender: None,
+            ws_config,
+        }
+    }
+    
+    /// Get the current WebSocket configuration
+    pub fn ws_config(&self) -> &WebSocketConfig {
+        &self.ws_config
+    }
+    
+    /// Update the WebSocket configuration
+    pub fn set_ws_config(&mut self, config: WebSocketConfig) {
+        self.ws_config = config;
     }
 
     /// Register a new adapter with the service
@@ -409,9 +444,12 @@ impl StreamService {
         // Store sender for later shutdown
         self.shutdown_sender = Some(shutdown_sender);
 
+        // Pass the WebSocket config
+        let ws_port = self.ws_config.port;
+        
         // Start WebSocket server in a separate task
         let handle = tokio::spawn(async move {
-            let socket_addr = format!("127.0.0.1:{}", WS_PORT)
+            let socket_addr = format!("127.0.0.1:{}", ws_port)
                 .parse::<std::net::SocketAddr>()
                 .unwrap();
             let listener = match TcpListener::bind(socket_addr).await {
@@ -422,7 +460,12 @@ impl StreamService {
                 }
             };
 
+            // Print a helpful message for connecting to the WebSocket server
             println!("WebSocket server listening on: {}", socket_addr);
+            println!("💡 Debugging tip: Connect to the event stream using a WebSocket client:");
+            println!("   - URI: ws://127.0.0.1:{}", ws_port);
+            println!("   - With wscat: wscat -c ws://127.0.0.1:{}", ws_port);
+            println!("   - With websocat: websocat ws://127.0.0.1:{}", ws_port);
 
             // Handle incoming connections
             loop {
@@ -497,9 +540,10 @@ impl StreamService {
             .with_state(state);
 
         // Start the server in a background task
-        let http_port = WS_PORT + 1; // Use next port for HTTP
+        let http_port = self.ws_config.port + 1; // Use next port for HTTP
         tokio::spawn(async move {
             println!("Starting HTTP API server on port {}", http_port);
+            println!("💡 API endpoints available at http://127.0.0.1:{}", http_port);
             let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", http_port))
                 .await
                 .unwrap();

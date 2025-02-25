@@ -21,7 +21,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             plugin::get_event_bus_status,
             plugin::get_adapter_statuses,
-            plugin::send_test_event
+            plugin::send_test_event,
+            plugin::get_websocket_info,
+            plugin::set_websocket_port
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
