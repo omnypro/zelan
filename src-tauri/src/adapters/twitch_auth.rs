@@ -26,14 +26,11 @@ fn get_scopes() -> Vec<Scope> {
         Scope::AnalyticsReadExtensions,
         Scope::AnalyticsReadGames,
         Scope::BitsRead,
-        Scope::ChannelEditCommercial,
-        Scope::ChannelReadEditors,
         Scope::ChannelReadGoals,
         Scope::ChannelReadHypeTrain,
         Scope::ChannelReadPolls,
         Scope::ChannelReadPredictions,
         Scope::ChannelReadRedemptions,
-        Scope::ChannelReadStreamKey,
         Scope::ChannelReadSubscriptions,
         Scope::ChannelReadVips,
         Scope::ModerationRead,
@@ -51,7 +48,6 @@ fn get_scopes() -> Vec<Scope> {
         Scope::UserReadSubscriptions,
         Scope::ChannelModerate,
         Scope::ChatRead,
-        Scope::WhispersRead,
     ]
 }
 
