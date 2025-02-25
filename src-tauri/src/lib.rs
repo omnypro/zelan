@@ -123,7 +123,7 @@ impl EventBus {
         // Cache event details before acquiring lock
         let source = event.source.clone();
         let event_type = event.event_type.clone();
-        
+
         // Attempt to send the event first (most common operation)
         match self.sender.send(event) {
             Ok(receivers) => {
@@ -136,17 +136,19 @@ impl EventBus {
                     *stats_guard.type_counts.entry(event_type).or_insert(0) += 1;
                 });
                 Ok(receivers)
-            },
+            }
             Err(err) => {
                 // If error indicates no subscribers, just record the statistic but don't treat as error
-                if err.to_string().contains("channel closed") || err.to_string().contains("no receivers") {
+                if err.to_string().contains("channel closed")
+                    || err.to_string().contains("no receivers")
+                {
                     // Update dropped count in a separate task
                     let stats = Arc::clone(&self.stats);
                     tokio::task::spawn(async move {
                         let mut stats_guard = stats.write().await;
                         stats_guard.events_dropped += 1;
                     });
-                    
+
                     println!(
                         "No receivers for event {}.{}, event dropped",
                         source, event_type
@@ -159,7 +161,7 @@ impl EventBus {
                         let mut stats_guard = stats.write().await;
                         stats_guard.events_dropped += 1;
                     });
-                    
+
                     Err(error::event_bus_publish_failed(err))
                 }
             }
@@ -220,6 +222,21 @@ pub enum ServiceStatus {
     Connecting,
     Connected,
     Error,
+    Disabled,
+}
+
+/// Settings for a service adapter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdapterSettings {
+    /// Whether the adapter is enabled
+    pub enabled: bool,
+    /// Adapter-specific configuration
+    #[serde(default)]
+    pub config: serde_json::Value,
+    /// Display name for the adapter
+    pub display_name: String,
+    /// Description of the adapter's functionality
+    pub description: String,
 }
 
 /// Main service that manages adapters and the event bus
@@ -227,6 +244,7 @@ pub struct StreamService {
     event_bus: Arc<EventBus>,
     adapters: Arc<RwLock<HashMap<String, Arc<Box<dyn ServiceAdapter>>>>>,
     status: Arc<RwLock<HashMap<String, ServiceStatus>>>,
+    adapter_settings: Arc<RwLock<HashMap<String, AdapterSettings>>>,
     ws_server_handle: Option<tokio::task::JoinHandle<()>>,
     shutdown_sender: Option<mpsc::Sender<()>>,
     ws_config: WebSocketConfig,
@@ -239,6 +257,7 @@ impl Clone for StreamService {
             event_bus: self.event_bus.clone(),
             adapters: self.adapters.clone(),
             status: self.status.clone(),
+            adapter_settings: self.adapter_settings.clone(),
             ws_server_handle: None, // We don't clone the server handle
             shutdown_sender: None,  // We don't clone the shutdown sender
             ws_config: self.ws_config.clone(),
@@ -253,6 +272,7 @@ impl StreamService {
             event_bus,
             adapters: Arc::new(RwLock::new(HashMap::new())),
             status: Arc::new(RwLock::new(HashMap::new())),
+            adapter_settings: Arc::new(RwLock::new(HashMap::new())),
             ws_server_handle: None,
             shutdown_sender: None,
             ws_config: WebSocketConfig {
@@ -260,7 +280,7 @@ impl StreamService {
             },
         }
     }
-    
+
     /// Create a new StreamService with custom WebSocket configuration
     pub fn with_config(ws_config: WebSocketConfig) -> Self {
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
@@ -268,46 +288,171 @@ impl StreamService {
             event_bus,
             adapters: Arc::new(RwLock::new(HashMap::new())),
             status: Arc::new(RwLock::new(HashMap::new())),
+            adapter_settings: Arc::new(RwLock::new(HashMap::new())),
             ws_server_handle: None,
             shutdown_sender: None,
             ws_config,
         }
     }
-    
+
     /// Get the current WebSocket configuration
     pub fn ws_config(&self) -> &WebSocketConfig {
         &self.ws_config
     }
-    
+
     /// Update the WebSocket configuration
     pub fn set_ws_config(&mut self, config: WebSocketConfig) {
         self.ws_config = config;
     }
 
     /// Register a new adapter with the service
-    pub async fn register_adapter<A>(&self, adapter: A)
+    pub async fn register_adapter<A>(&self, adapter: A, settings: Option<AdapterSettings>)
     where
         A: ServiceAdapter + 'static,
     {
         let name = adapter.get_name().to_string();
         let adapter_box = Arc::new(Box::new(adapter) as Box<dyn ServiceAdapter>);
 
+        // Store the adapter
         self.adapters
             .write()
             .await
             .insert(name.clone(), adapter_box);
-        self.status
+
+        // Create default settings if none provided
+        let adapter_settings = settings.unwrap_or_else(|| AdapterSettings {
+            enabled: true,
+            config: serde_json::Value::Null,
+            display_name: name.clone(),
+            description: format!("{} adapter", name),
+        });
+
+        // Store the settings
+        self.adapter_settings
             .write()
             .await
-            .insert(name, ServiceStatus::Disconnected);
+            .insert(name.clone(), adapter_settings);
+
+        // Set initial status based on enabled setting
+        let initial_status = if self
+            .adapter_settings
+            .read()
+            .await
+            .get(&name)
+            .unwrap()
+            .enabled
+        {
+            ServiceStatus::Disconnected
+        } else {
+            ServiceStatus::Disabled
+        };
+
+        self.status.write().await.insert(name, initial_status);
     }
 
-    /// Connect all registered adapters
+    /// Get adapter settings
+    pub async fn get_adapter_settings(&self, name: &str) -> Result<AdapterSettings> {
+        match self.adapter_settings.read().await.get(name) {
+            Some(settings) => Ok(settings.clone()),
+            None => Err(anyhow!("Adapter '{}' not found", name)),
+        }
+    }
+
+    /// Get all adapter settings
+    pub async fn get_all_adapter_settings(&self) -> HashMap<String, AdapterSettings> {
+        self.adapter_settings.read().await.clone()
+    }
+
+    /// Update adapter settings
+    pub async fn update_adapter_settings(
+        &self,
+        name: &str,
+        settings: AdapterSettings,
+    ) -> ZelanResult<()> {
+        // Check if adapter exists
+        if !self.adapters.read().await.contains_key(name) {
+            return Err(error::adapter_not_found(name));
+        }
+
+        // Get old settings to check if enabled status changed
+        let old_enabled = match self.adapter_settings.read().await.get(name) {
+            Some(old_settings) => old_settings.enabled,
+            None => true, // Default to enabled if no previous settings
+        };
+
+        // Update settings
+        self.adapter_settings
+            .write()
+            .await
+            .insert(name.to_string(), settings.clone());
+
+        // Handle enable/disable if the status changed
+        if old_enabled != settings.enabled {
+            if settings.enabled {
+                // Changed from disabled to enabled - set to disconnected
+                self.status
+                    .write()
+                    .await
+                    .insert(name.to_string(), ServiceStatus::Disconnected);
+            } else {
+                // Changed from enabled to disabled - disconnect if connected
+                let current_status = self.status.read().await.get(name).cloned();
+
+                if let Some(status) = current_status {
+                    if status == ServiceStatus::Connected || status == ServiceStatus::Connecting {
+                        match self.adapters.read().await.get(name) {
+                            Some(adapter) => {
+                                let _ = adapter.disconnect().await;
+                            }
+                            None => {}
+                        }
+                    }
+
+                    // Set status to disabled
+                    self.status
+                        .write()
+                        .await
+                        .insert(name.to_string(), ServiceStatus::Disabled);
+                }
+            }
+        }
+
+        // If settings contains configuration, apply it to the adapter
+        if !settings.config.is_null() {
+            if let Some(adapter) = self.adapters.read().await.get(name) {
+                if let Err(e) = adapter.configure(settings.config.clone()).await {
+                    return Err(ZelanError {
+                        code: ErrorCode::ConfigInvalid,
+                        message: format!("Failed to configure adapter '{}'", name),
+                        context: Some(e.to_string()),
+                        severity: ErrorSeverity::Warning,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Connect all registered adapters that are enabled
     pub async fn connect_all_adapters(&self) -> Result<()> {
         let adapter_names: Vec<String> = { self.adapters.read().await.keys().cloned().collect() };
 
         for name in adapter_names {
-            self.connect_adapter(&name).await?;
+            // Skip disabled adapters
+            let is_enabled = match self.adapter_settings.read().await.get(&name) {
+                Some(settings) => settings.enabled,
+                None => true, // Default to enabled if no settings
+            };
+
+            if is_enabled {
+                // Don't fail on individual adapter connection failures
+                if let Err(e) = self.connect_adapter(&name).await {
+                    eprintln!("Failed to connect adapter '{}': {}", name, e);
+                }
+            } else {
+                println!("Skipping disabled adapter: {}", name);
+            }
         }
 
         Ok(())
@@ -315,12 +460,28 @@ impl StreamService {
 
     /// Connect a specific adapter by name
     pub async fn connect_adapter(&self, name: &str) -> ZelanResult<()> {
+        // Check if adapter exists
         let adapter = {
             match self.adapters.read().await.get(name) {
                 Some(adapter) => adapter.clone(),
                 None => return Err(error::adapter_not_found(name)),
             }
         };
+
+        // Check if adapter is enabled
+        let is_enabled = match self.adapter_settings.read().await.get(name) {
+            Some(settings) => settings.enabled,
+            None => true, // Default to enabled if no settings
+        };
+
+        if !is_enabled {
+            return Err(ZelanError {
+                code: ErrorCode::AdapterDisabled,
+                message: format!("Adapter '{}' is disabled", name),
+                context: Some("Enable the adapter in settings before connecting".to_string()),
+                severity: ErrorSeverity::Warning,
+            });
+        }
 
         {
             let mut status = self.status.write().await;
@@ -350,14 +511,14 @@ impl StreamService {
                     Err(e) => {
                         retry_count += 1;
                         let err = error::adapter_connection_failed(&name_clone, &e);
-                        
+
                         // Calculate backoff time with exponential increase
                         let backoff_ms = if retry_count >= max_retries {
                             RECONNECT_DELAY_MS * 5 // Cap at 5x the base delay
                         } else {
                             RECONNECT_DELAY_MS * (1 << retry_count.min(6)) // Exponential backoff with a reasonable cap
                         };
-                        
+
                         eprintln!(
                             "{}. Retry {}/{} in {}ms...",
                             err, retry_count, max_retries, backoff_ms
@@ -367,10 +528,10 @@ impl StreamService {
                             .write()
                             .await
                             .insert(name_clone.clone(), ServiceStatus::Error);
-                            
+
                         // If we've reached max retries, wait longer between attempts
                         sleep(Duration::from_millis(backoff_ms)).await;
-                        
+
                         // Consider breaking if too many retries, but continue for now
                         if retry_count > 100 {
                             eprintln!("Too many retries for adapter '{}', giving up", name_clone);
@@ -398,18 +559,16 @@ impl StreamService {
             .write()
             .await
             .insert(name.to_string(), ServiceStatus::Disconnected);
-            
+
         // Then attempt the disconnect
         match adapter.disconnect().await {
             Ok(()) => Ok(()),
-            Err(e) => {
-                Err(ZelanError {
-                    code: ErrorCode::AdapterDisconnectFailed,
-                    message: format!("Failed to disconnect adapter '{}'", name),
-                    context: Some(e.to_string()),
-                    severity: ErrorSeverity::Warning,
-                })
-            }
+            Err(e) => Err(ZelanError {
+                code: ErrorCode::AdapterDisconnectFailed,
+                message: format!("Failed to disconnect adapter '{}'", name),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Warning,
+            }),
         }
     }
 
@@ -446,7 +605,7 @@ impl StreamService {
 
         // Pass the WebSocket config
         let ws_port = self.ws_config.port;
-        
+
         // Start WebSocket server in a separate task
         let handle = tokio::spawn(async move {
             let socket_addr = format!("127.0.0.1:{}", ws_port)
@@ -543,7 +702,10 @@ impl StreamService {
         let http_port = self.ws_config.port + 1; // Use next port for HTTP
         tokio::spawn(async move {
             println!("Starting HTTP API server on port {}", http_port);
-            println!("💡 API endpoints available at http://127.0.0.1:{}", http_port);
+            println!(
+                "💡 API endpoints available at http://127.0.0.1:{}",
+                http_port
+            );
             let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", http_port))
                 .await
                 .unwrap();
@@ -652,25 +814,27 @@ async fn disconnect_adapter_handler(
 /// Handler for WebSocket client connections
 async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) -> ZelanResult<()> {
     // Get client IP for logging
-    let peer_addr = stream.peer_addr().map_or("unknown".to_string(), |addr| addr.to_string());
-    
+    let peer_addr = stream
+        .peer_addr()
+        .map_or("unknown".to_string(), |addr| addr.to_string());
+
     // Upgrade TCP connection to WebSocket with timeout
-    let ws_stream = match tokio::time::timeout(
-        std::time::Duration::from_secs(5), 
-        accept_async(stream)
-    ).await {
-        Ok(result) => match result {
-            Ok(ws) => ws,
-            Err(e) => return Err(error::websocket_accept_failed(e)),
-        },
-        Err(_) => return Err(ZelanError {
-            code: ErrorCode::WebSocketAcceptFailed,
-            message: "WebSocket connection timed out during handshake".to_string(),
-            context: Some(format!("Client: {}", peer_addr)),
-            severity: ErrorSeverity::Warning,
-        }),
-    };
-    
+    let ws_stream =
+        match tokio::time::timeout(std::time::Duration::from_secs(5), accept_async(stream)).await {
+            Ok(result) => match result {
+                Ok(ws) => ws,
+                Err(e) => return Err(error::websocket_accept_failed(e)),
+            },
+            Err(_) => {
+                return Err(ZelanError {
+                    code: ErrorCode::WebSocketAcceptFailed,
+                    message: "WebSocket connection timed out during handshake".to_string(),
+                    context: Some(format!("Client: {}", peer_addr)),
+                    severity: ErrorSeverity::Warning,
+                })
+            }
+        };
+
     println!("WebSocket client connected: {}", peer_addr);
 
     // Create a receiver from the event bus
@@ -678,20 +842,23 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
 
     // Split the WebSocket into sender and receiver
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-    
+
     // Track connection stats
     let mut messages_sent = 0;
     let mut last_activity = std::time::Instant::now();
     let connection_start = std::time::Instant::now();
-    
+
     // Keep a cached version of the last serialized events to avoid redundant serialization
     let mut event_cache: Option<(String, String)> = None;
-    
+
     // Handle incoming WebSocket messages
     loop {
         // Check for client inactivity timeout (5 minutes)
         if last_activity.elapsed() > std::time::Duration::from_secs(300) {
-            println!("WebSocket client {} timed out (inactive for 5 minutes)", peer_addr);
+            println!(
+                "WebSocket client {} timed out (inactive for 5 minutes)",
+                peer_addr
+            );
             break;
         }
 
@@ -702,7 +869,7 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                     Ok(event) => {
                         // Create a key for the event type+source
                         let event_key = format!("{}.{}", event.source(), event.event_type());
-                        
+
                         // Check if we've already serialized this exact event type+source
                         let json = if let Some((cached_key, cached_json)) = &event_cache {
                             if *cached_key == event_key {
@@ -739,7 +906,7 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                             eprintln!("Error sending WebSocket message to {}: {}", peer_addr, e);
                             break;
                         }
-                        
+
                         // Update stats
                         messages_sent += 1;
                         last_activity = std::time::Instant::now();
@@ -764,7 +931,7 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                     Some(Ok(msg)) => {
                         // Update activity timestamp
                         last_activity = std::time::Instant::now();
-                        
+
                         // Handle client messages
                         match msg {
                             Message::Text(text) => {
@@ -796,11 +963,11 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                     }
                     None => {
                         println!("WebSocket client {} disconnected", peer_addr);
-                        break; 
+                        break;
                     }
                 }
             }
-            
+
             // Add a timeout to check client activity periodically
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {
                 // Send ping to check if client is still alive

@@ -15,6 +15,16 @@ pub struct TestAdapter {
     event_bus: Arc<EventBus>,
     connected: AtomicBool,
     task_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    config: tokio::sync::RwLock<TestAdapterConfig>,
+}
+
+/// Configuration for the test adapter
+#[derive(Debug, Clone)]
+struct TestAdapterConfig {
+    /// Interval between events in milliseconds
+    interval_ms: u64,
+    /// Whether to generate special events
+    generate_special_events: bool,
 }
 
 impl TestAdapter {
@@ -24,6 +34,10 @@ impl TestAdapter {
             event_bus,
             connected: AtomicBool::new(false),
             task_handle: tokio::sync::Mutex::new(None),
+            config: tokio::sync::RwLock::new(TestAdapterConfig {
+                interval_ms: 1000, // Default: 1 second
+                generate_special_events: true,
+            }),
         }
     }
 
@@ -32,6 +46,9 @@ impl TestAdapter {
         let mut counter = 0;
 
         while self.connected.load(Ordering::SeqCst) {
+            // Get current config (read lock)
+            let config = self.config.read().await.clone();
+
             // Generate a test event
             let event = StreamEvent::new(
                 "test",
@@ -48,8 +65,8 @@ impl TestAdapter {
                 eprintln!("Failed to publish test event: {}", e);
             }
 
-            // Generate a different event every 5 counts
-            if counter % 5 == 0 {
+            // Generate a different event every 5 counts if enabled
+            if config.generate_special_events && counter % 5 == 0 {
                 let event = StreamEvent::new(
                     "test",
                     "test.special",
@@ -66,7 +83,7 @@ impl TestAdapter {
             }
 
             counter += 1;
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_millis(config.interval_ms)).await;
         }
 
         Ok(())
@@ -123,6 +140,26 @@ impl ServiceAdapter for TestAdapter {
     }
 
     async fn configure(&self, config: serde_json::Value) -> Result<()> {
+        // Update our configuration based on the provided JSON
+        let mut current_config = self.config.write().await;
+
+        // Extract the interval if provided
+        if let Some(interval_ms) = config.get("interval_ms").and_then(|v| v.as_u64()) {
+            // Ensure interval is reasonable (minimum 100ms, maximum 60000ms)
+            let interval = interval_ms.clamp(100, 60000);
+            current_config.interval_ms = interval;
+            println!("Test adapter interval set to: {}ms", interval);
+        }
+
+        // Extract the generate_special_events flag if provided
+        if let Some(generate_special) = config
+            .get("generate_special_events")
+            .and_then(|v| v.as_bool())
+        {
+            current_config.generate_special_events = generate_special;
+            println!("Test adapter special events: {}", generate_special);
+        }
+
         println!("Test adapter configured with: {}", config);
         Ok(())
     }
@@ -130,11 +167,17 @@ impl ServiceAdapter for TestAdapter {
 
 impl Clone for TestAdapter {
     fn clone(&self) -> Self {
+        // Create a new instance with default config
+        // This avoids blocking in clone which is bad practice
         Self {
             name: self.name.clone(),
             event_bus: Arc::clone(&self.event_bus),
             connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
             task_handle: tokio::sync::Mutex::new(None),
+            config: tokio::sync::RwLock::new(TestAdapterConfig {
+                interval_ms: 1000,             // Default value
+                generate_special_events: true, // Default value
+            }),
         }
     }
 }

@@ -1,4 +1,6 @@
-use crate::{adapters::TestAdapter, StreamService, ZelanError, ErrorCode, ErrorSeverity};
+use crate::{
+    adapters::TestAdapter, AdapterSettings, ErrorCode, ErrorSeverity, StreamService, ZelanError,
+};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use tauri::{
@@ -66,9 +68,18 @@ impl ZelanState {
                     eprintln!("Failed to start HTTP API: {}", e);
                 }
 
-                // Register the test adapter
+                // Register the test adapter with settings
                 let test_adapter = TestAdapter::new(service_guard.event_bus());
-                service_guard.register_adapter(test_adapter).await;
+                let test_settings = AdapterSettings {
+                    enabled: true,
+                    config: serde_json::json!({
+                        "interval_ms": 1000, // Generate events every second
+                        "generate_special_events": true,
+                    }),
+                    display_name: "Test Adapter".to_string(),
+                    description: "A test adapter that generates sample events at regular intervals for development and debugging".to_string(),
+                };
+                service_guard.register_adapter(test_adapter, Some(test_settings)).await;
 
                 // Connect all adapters
                 if let Err(e) = service_guard.connect_all_adapters().await {
@@ -132,13 +143,11 @@ pub async fn get_event_bus_status(
     let stats = event_bus.get_stats().await;
 
     // Convert to JSON value
-    serde_json::to_value(stats).map_err(|e| {
-        ZelanError {
-            code: ErrorCode::Internal,
-            message: "Failed to serialize event bus stats".to_string(),
-            context: Some(e.to_string()),
-            severity: ErrorSeverity::Error,
-        }
+    serde_json::to_value(stats).map_err(|e| ZelanError {
+        code: ErrorCode::Internal,
+        message: "Failed to serialize event bus stats".to_string(),
+        context: Some(e.to_string()),
+        severity: ErrorSeverity::Error,
     })
 }
 
@@ -164,14 +173,86 @@ pub async fn get_adapter_statuses(
     let statuses = service_clone.get_all_statuses().await;
 
     // Convert to JSON value
-    serde_json::to_value(statuses).map_err(|e| {
-        ZelanError {
-            code: ErrorCode::Internal,
-            message: "Failed to serialize adapter statuses".to_string(),
-            context: Some(e.to_string()),
-            severity: ErrorSeverity::Error,
-        }
+    serde_json::to_value(statuses).map_err(|e| ZelanError {
+        code: ErrorCode::Internal,
+        message: "Failed to serialize adapter statuses".to_string(),
+        context: Some(e.to_string()),
+        severity: ErrorSeverity::Error,
     })
+}
+
+/// Get all adapter settings
+#[tauri::command]
+pub async fn get_adapter_settings(
+    state: State<'_, ZelanState>,
+) -> Result<serde_json::Value, ZelanError> {
+    // Clone the service outside the .await
+    let service_clone = match state.service.lock() {
+        Ok(service_guard) => service_guard.clone(),
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::Internal,
+                message: "Failed to acquire service lock".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+            });
+        }
+    };
+
+    // Now we can safely await without holding the lock
+    let settings = service_clone.get_all_adapter_settings().await;
+
+    // Convert to JSON value
+    serde_json::to_value(settings).map_err(|e| ZelanError {
+        code: ErrorCode::Internal,
+        message: "Failed to serialize adapter settings".to_string(),
+        context: Some(e.to_string()),
+        severity: ErrorSeverity::Error,
+    })
+}
+
+/// Update adapter settings
+#[tauri::command]
+pub async fn update_adapter_settings(
+    adapter_name: String,
+    settings: serde_json::Value,
+    state: State<'_, ZelanState>,
+) -> Result<String, ZelanError> {
+    // Deserialize the settings
+    let adapter_settings: AdapterSettings = match serde_json::from_value(settings) {
+        Ok(s) => s,
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::ConfigInvalid,
+                message: "Invalid adapter settings format".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+            });
+        }
+    };
+
+    // Clone the service outside the .await
+    let service_clone = match state.service.lock() {
+        Ok(service_guard) => service_guard.clone(),
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::Internal,
+                message: "Failed to acquire service lock".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+            });
+        }
+    };
+
+    // Update the settings
+    service_clone
+        .update_adapter_settings(&adapter_name, adapter_settings)
+        .await?;
+
+    Ok(format!(
+        "Successfully updated settings for adapter '{}'",
+        adapter_name
+    ))
 }
 
 /// Send a test event through the system
@@ -207,7 +288,10 @@ pub async fn send_test_event(state: State<'_, ZelanState>) -> Result<String, Zel
 
     // Attempt to publish the event
     match event_bus.publish(event).await {
-        Ok(receivers) => Ok(format!("Test event sent successfully to {} receivers", receivers)),
+        Ok(receivers) => Ok(format!(
+            "Test event sent successfully to {} receivers",
+            receivers
+        )),
         Err(e) => Err(e),
     }
 }
@@ -227,7 +311,7 @@ pub fn get_websocket_info(state: State<'_, ZelanState>) -> Result<serde_json::Va
             });
         }
     };
-    
+
     // Build info object with the WebSocket URI and helpful tips
     let info = serde_json::json!({
         "port": config.port,
@@ -244,7 +328,7 @@ pub fn get_websocket_info(state: State<'_, ZelanState>) -> Result<serde_json::Va
 #[tauri::command]
 pub fn set_websocket_port(port: u16, state: State<'_, ZelanState>) -> Result<String, ZelanError> {
     // Validate port number
-    if port < 1024 || port > 65535 {
+    if port < 1024 {
         return Err(ZelanError {
             code: ErrorCode::ConfigInvalid,
             message: "Invalid port number".to_string(),
@@ -252,7 +336,7 @@ pub fn set_websocket_port(port: u16, state: State<'_, ZelanState>) -> Result<Str
             severity: ErrorSeverity::Error,
         });
     }
-    
+
     // Get exclusive access to the service
     let mut service_guard = match state.service.lock() {
         Ok(guard) => guard,
@@ -265,16 +349,19 @@ pub fn set_websocket_port(port: u16, state: State<'_, ZelanState>) -> Result<Str
             });
         }
     };
-    
+
     // Update WebSocket configuration
     let mut config = service_guard.ws_config().clone();
     config.port = port;
     service_guard.set_ws_config(config);
-    
+
     // Note: This doesn't restart the server, you'll need to restart the app
     // for the port change to take effect
-    
-    Ok(format!("WebSocket port updated to {}. Restart the application for changes to take effect.", port))
+
+    Ok(format!(
+        "WebSocket port updated to {}. Restart the application for changes to take effect.",
+        port
+    ))
 }
 
 /// Initialize the Zelan plugin

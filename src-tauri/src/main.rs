@@ -8,9 +8,10 @@ fn main() {
     // Build and run the Tauri application with our plugin
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = app.get_webview_window("main")
-                       .expect("no main window")
-                       .set_focus();
+            let _ = app
+                .get_webview_window("main")
+                .expect("no main window")
+                .set_focus();
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(plugin::init())
@@ -21,6 +22,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             plugin::get_event_bus_status,
             plugin::get_adapter_statuses,
+            plugin::get_adapter_settings,
+            plugin::update_adapter_settings,
             plugin::send_test_event,
             plugin::get_websocket_info,
             plugin::set_websocket_port

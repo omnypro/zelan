@@ -22,24 +22,25 @@ pub enum ErrorCode {
     // General errors
     Unknown,
     Internal,
-    
+
     // Adapter related errors
     AdapterNotFound,
     AdapterConnectionFailed,
     AdapterDisconnectFailed,
-    
+    AdapterDisabled,
+
     // Event bus related errors
     EventBusPublishFailed,
     EventBusDropped,
-    
+
     // HTTP/WebSocket related errors
     WebSocketBindFailed,
     WebSocketAcceptFailed,
     WebSocketSendFailed,
-    
+
     // API related errors
     ApiRequestFailed,
-    
+
     // Configuration related errors
     ConfigInvalid,
 }
@@ -76,6 +77,7 @@ impl fmt::Display for ErrorCode {
             ErrorCode::AdapterNotFound => write!(f, "ADAPTER_NOT_FOUND"),
             ErrorCode::AdapterConnectionFailed => write!(f, "ADAPTER_CONNECTION_FAILED"),
             ErrorCode::AdapterDisconnectFailed => write!(f, "ADAPTER_DISCONNECT_FAILED"),
+            ErrorCode::AdapterDisabled => write!(f, "ADAPTER_DISABLED"),
             ErrorCode::EventBusPublishFailed => write!(f, "EVENT_BUS_PUBLISH_FAILED"),
             ErrorCode::EventBusDropped => write!(f, "EVENT_BUS_DROPPED"),
             ErrorCode::WebSocketBindFailed => write!(f, "WEBSOCKET_BIND_FAILED"),
