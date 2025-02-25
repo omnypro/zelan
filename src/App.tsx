@@ -177,7 +177,7 @@ function App() {
     fetchData();
 
     // Only set up auto-refresh for dashboard tab (to avoid interfering with settings editing)
-    let intervalId: NodeJS.Timeout | undefined;
+    let intervalId: ReturnType<typeof setTimeout> | undefined;
 
     if (activeTab === 'dashboard') {
       intervalId = setInterval(() => {
@@ -333,14 +333,6 @@ function App() {
 
   return (
     <main className="container">
-      <h1>Zelan - Streaming Data Hub</h1>
-
-      <div className="row">
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-      </div>
-
       {/* Navigation Tabs */}
       <div className="tabs">
         <button
