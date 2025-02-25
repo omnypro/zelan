@@ -9,6 +9,12 @@ use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::Subscrib
 use zelan_lib::{plugin, Config, StreamService};
 
 fn main() {
+    // Load environment variables from .env file if it exists
+    let env_file_path = match dotenvy::dotenv() {
+        Ok(path) => Some(path),
+        Err(_) => None,
+    };
+    
     // Initialize the tracing subscriber for structured logging
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -25,6 +31,12 @@ fn main() {
         .init();
 
     info!("Zelan application starting");
+    
+    // Log environment loading after logger is initialized
+    match env_file_path {
+        Some(path) => info!("Loaded environment variables from {}", path.display()),
+        None => debug!("No .env file found. Using existing environment variables."),
+    };
     
     // Print log level configuration hint for developers
     debug!("Logging initialized. Set RUST_LOG environment variable to control log levels");

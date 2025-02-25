@@ -38,6 +38,19 @@ pub struct BaseAdapter {
     event_handler: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
+impl Clone for BaseAdapter {
+    fn clone(&self) -> Self {
+        // Create a new instance with the same name and event bus
+        Self {
+            name: self.name.clone(),
+            event_bus: Arc::clone(&self.event_bus),
+            connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
+            shutdown_signal: Mutex::new(None),  // Don't clone the shutdown channel
+            event_handler: Mutex::new(None),    // Don't clone the task handle
+        }
+    }
+}
+
 impl BaseAdapter {
     /// Create a new base adapter
     #[instrument(skip(event_bus), level = "debug")]

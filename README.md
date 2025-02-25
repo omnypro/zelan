@@ -12,3 +12,30 @@ Zelan eliminates redundant integration work by providing a single access point f
 - Unified data model across multiple streaming platforms and services
 - Configurable interface for adding/managing data sources
 - Standardized API for stream overlays and tools to consume aggregated data
+
+## Setup & Configuration
+
+### Environment Variables
+
+Zelan requires environment variables for certain adapters to function properly. Copy the `.env.example` file to a new file named `.env` in the project root:
+
+```bash
+cp .env.example .env
+```
+
+Then edit the `.env` file to set the required values:
+
+#### Twitch Integration
+
+To use the Twitch adapter, you need to obtain a Client ID:
+
+1. Register a new application at the [Twitch Developer Console](https://dev.twitch.tv/console/apps)
+2. Set the OAuth Redirect URL to `http://localhost`
+3. Set your application's Category to "Other"
+4. After creating the application, copy the Client ID (not the Client Secret) to your `.env` file:
+
+```
+TWITCH_CLIENT_ID=your_client_id_here
+```
+
+Note: This project uses device code flow authentication, which is designed for desktop applications that cannot securely store client secrets.

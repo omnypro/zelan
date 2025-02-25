@@ -9,6 +9,13 @@
 - `cargo test [test_name]` - Run a specific Rust test
 - `cargo clippy` - Run Rust linter
 
+## Environment Setup
+This project requires environment variables for certain features to work properly.
+
+### Twitch Integration
+Requires the `TWITCH_CLIENT_ID` environment variable to be set in a `.env` file.
+See `.env.example` for reference and instructions to obtain a client ID.
+
 ## Code Style Guidelines
 
 ### TypeScript/React
