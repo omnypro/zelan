@@ -5692,6 +5692,7 @@ dependencies = [
  "tower-http",
  "twitch_api2",
  "twitch_oauth2",
+ "uuid",
 ]
 
 [[package]]

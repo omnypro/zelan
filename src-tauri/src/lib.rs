@@ -20,7 +20,10 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 // Re-export Adapters
 pub mod adapters;
+pub mod error;
 pub mod plugin;
+
+pub use error::{ErrorCode, ErrorSeverity, ZelanError, ZelanResult};
 
 // Constants for event bus configuration
 const EVENT_BUS_CAPACITY: usize = 1000;
@@ -74,12 +77,23 @@ pub struct EventBus {
 }
 
 /// Statistics about event bus activity
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventBusStats {
     events_published: u64,
     events_dropped: u64,
     source_counts: HashMap<String, u64>,
     type_counts: HashMap<String, u64>,
+}
+
+impl Default for EventBusStats {
+    fn default() -> Self {
+        Self {
+            events_published: 0,
+            events_dropped: 0,
+            source_counts: HashMap::new(),
+            type_counts: HashMap::new(),
+        }
+    }
 }
 
 impl EventBus {
@@ -97,40 +111,49 @@ impl EventBus {
         self.sender.subscribe()
     }
 
-    /// Publish an event to all subscribers
-    pub async fn publish(&self, event: StreamEvent) -> Result<usize> {
-        // Update statistics
-        {
-            let mut stats = self.stats.write().await;
-            stats.events_published += 1;
-
-            *stats.source_counts.entry(event.source.clone()).or_insert(0) += 1;
-            *stats
-                .type_counts
-                .entry(event.event_type.clone())
-                .or_insert(0) += 1;
-        }
-
-        // Send the event
-        match self.sender.send(event.clone()) {
-            Ok(receivers) => Ok(receivers),
+    /// Publish an event to all subscribers with optimized statistics handling
+    pub async fn publish(&self, event: StreamEvent) -> ZelanResult<usize> {
+        // Cache event details before acquiring lock
+        let source = event.source.clone();
+        let event_type = event.event_type.clone();
+        
+        // Attempt to send the event first (most common operation)
+        match self.sender.send(event) {
+            Ok(receivers) => {
+                // Only update stats after successful send, using a separate task
+                let stats = Arc::clone(&self.stats);
+                tokio::task::spawn(async move {
+                    let mut stats_guard = stats.write().await;
+                    stats_guard.events_published += 1;
+                    *stats_guard.source_counts.entry(source).or_insert(0) += 1;
+                    *stats_guard.type_counts.entry(event_type).or_insert(0) += 1;
+                });
+                Ok(receivers)
+            },
             Err(err) => {
                 // If error indicates no subscribers, just record the statistic but don't treat as error
-                if err.to_string().contains("channel closed")
-                    || err.to_string().contains("no receivers")
-                {
-                    let mut stats = self.stats.write().await;
-                    stats.events_dropped += 1;
+                if err.to_string().contains("channel closed") || err.to_string().contains("no receivers") {
+                    // Update dropped count in a separate task
+                    let stats = Arc::clone(&self.stats);
+                    tokio::task::spawn(async move {
+                        let mut stats_guard = stats.write().await;
+                        stats_guard.events_dropped += 1;
+                    });
+                    
                     println!(
                         "No receivers for event {}.{}, event dropped",
-                        event.source(),
-                        event.event_type()
+                        source, event_type
                     );
                     Ok(0) // Return 0 receivers instead of an error
                 } else {
-                    let mut stats = self.stats.write().await;
-                    stats.events_dropped += 1;
-                    Err(anyhow!("Failed to publish event: {}", err))
+                    // Update dropped count for other errors
+                    let stats = Arc::clone(&self.stats);
+                    tokio::task::spawn(async move {
+                        let mut stats_guard = stats.write().await;
+                        stats_guard.events_dropped += 1;
+                    });
+                    
+                    Err(error::event_bus_publish_failed(err))
                 }
             }
         }
@@ -256,11 +279,11 @@ impl StreamService {
     }
 
     /// Connect a specific adapter by name
-    pub async fn connect_adapter(&self, name: &str) -> Result<()> {
+    pub async fn connect_adapter(&self, name: &str) -> ZelanResult<()> {
         let adapter = {
             match self.adapters.read().await.get(name) {
                 Some(adapter) => adapter.clone(),
-                None => return Err(anyhow!("Adapter '{}' not found", name)),
+                None => return Err(error::adapter_not_found(name)),
             }
         };
 
@@ -274,6 +297,10 @@ impl StreamService {
         let name_clone = name.to_string();
         let status_clone = Arc::clone(&self.status);
 
+        // Track connection attempts for exponential backoff
+        let max_retries = 5; // Maximum number of retries
+        let mut retry_count = 0;
+
         tokio::spawn(async move {
             loop {
                 match adapter_clone.connect().await {
@@ -282,19 +309,38 @@ impl StreamService {
                             .write()
                             .await
                             .insert(name_clone.clone(), ServiceStatus::Connected);
+                        println!("Adapter '{}' connected successfully", name_clone);
                         break;
                     }
                     Err(e) => {
+                        retry_count += 1;
+                        let err = error::adapter_connection_failed(&name_clone, &e);
+                        
+                        // Calculate backoff time with exponential increase
+                        let backoff_ms = if retry_count >= max_retries {
+                            RECONNECT_DELAY_MS * 5 // Cap at 5x the base delay
+                        } else {
+                            RECONNECT_DELAY_MS * (1 << retry_count.min(6)) // Exponential backoff with a reasonable cap
+                        };
+                        
                         eprintln!(
-                            "Failed to connect adapter '{}': {}. Retrying in {}ms...",
-                            name_clone, e, RECONNECT_DELAY_MS
+                            "{}. Retry {}/{} in {}ms...",
+                            err, retry_count, max_retries, backoff_ms
                         );
 
                         status_clone
                             .write()
                             .await
                             .insert(name_clone.clone(), ServiceStatus::Error);
-                        sleep(Duration::from_millis(RECONNECT_DELAY_MS)).await;
+                            
+                        // If we've reached max retries, wait longer between attempts
+                        sleep(Duration::from_millis(backoff_ms)).await;
+                        
+                        // Consider breaking if too many retries, but continue for now
+                        if retry_count > 100 {
+                            eprintln!("Too many retries for adapter '{}', giving up", name_clone);
+                            break;
+                        }
                     }
                 }
             }
@@ -304,20 +350,32 @@ impl StreamService {
     }
 
     /// Disconnect a specific adapter by name
-    pub async fn disconnect_adapter(&self, name: &str) -> Result<()> {
+    pub async fn disconnect_adapter(&self, name: &str) -> ZelanResult<()> {
         let adapter = {
             match self.adapters.read().await.get(name) {
                 Some(adapter) => adapter.clone(),
-                None => return Err(anyhow!("Adapter '{}' not found", name)),
+                None => return Err(error::adapter_not_found(name)),
             }
         };
 
-        adapter.disconnect().await?;
+        // Set status to disconnecting first
         self.status
             .write()
             .await
             .insert(name.to_string(), ServiceStatus::Disconnected);
-        Ok(())
+            
+        // Then attempt the disconnect
+        match adapter.disconnect().await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                Err(ZelanError {
+                    code: ErrorCode::AdapterDisconnectFailed,
+                    message: format!("Failed to disconnect adapter '{}'", name),
+                    context: Some(e.to_string()),
+                    severity: ErrorSeverity::Warning,
+                })
+            }
+        }
     }
 
     /// Get the status of a specific adapter
@@ -548,39 +606,110 @@ async fn disconnect_adapter_handler(
 }
 
 /// Handler for WebSocket client connections
-async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) -> Result<()> {
-    // Upgrade TCP connection to WebSocket
-    let ws_stream = accept_async(stream).await?;
+async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) -> ZelanResult<()> {
+    // Get client IP for logging
+    let peer_addr = stream.peer_addr().map_or("unknown".to_string(), |addr| addr.to_string());
+    
+    // Upgrade TCP connection to WebSocket with timeout
+    let ws_stream = match tokio::time::timeout(
+        std::time::Duration::from_secs(5), 
+        accept_async(stream)
+    ).await {
+        Ok(result) => match result {
+            Ok(ws) => ws,
+            Err(e) => return Err(error::websocket_accept_failed(e)),
+        },
+        Err(_) => return Err(ZelanError {
+            code: ErrorCode::WebSocketAcceptFailed,
+            message: "WebSocket connection timed out during handshake".to_string(),
+            context: Some(format!("Client: {}", peer_addr)),
+            severity: ErrorSeverity::Warning,
+        }),
+    };
+    
+    println!("WebSocket client connected: {}", peer_addr);
 
     // Create a receiver from the event bus
     let mut receiver = event_bus.subscribe();
 
     // Split the WebSocket into sender and receiver
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-
+    
+    // Track connection stats
+    let mut messages_sent = 0;
+    let mut last_activity = std::time::Instant::now();
+    let connection_start = std::time::Instant::now();
+    
+    // Keep a cached version of the last serialized events to avoid redundant serialization
+    let mut event_cache: Option<(String, String)> = None;
+    
     // Handle incoming WebSocket messages
     loop {
+        // Check for client inactivity timeout (5 minutes)
+        if last_activity.elapsed() > std::time::Duration::from_secs(300) {
+            println!("WebSocket client {} timed out (inactive for 5 minutes)", peer_addr);
+            break;
+        }
+
         tokio::select! {
             // Handle events from the event bus
             result = receiver.recv() => {
                 match result {
                     Ok(event) => {
-                        // Serialize event to JSON and send to client
-                        match serde_json::to_string(&event) {
-                            Ok(json) => {
-                                if let Err(e) = ws_sender.send(Message::Text(json.into())).await {
-                                    eprintln!("Error sending WebSocket message: {}", e);
-                                    break;
+                        // Create a key for the event type+source
+                        let event_key = format!("{}.{}", event.source(), event.event_type());
+                        
+                        // Check if we've already serialized this exact event type+source
+                        let json = if let Some((cached_key, cached_json)) = &event_cache {
+                            if *cached_key == event_key {
+                                cached_json.clone()
+                            } else {
+                                // Event type changed, serialize new event
+                                match serde_json::to_string(&event) {
+                                    Ok(json) => {
+                                        event_cache = Some((event_key, json.clone()));
+                                        json
+                                    },
+                                    Err(e) => {
+                                        eprintln!("Error serializing event: {}", e);
+                                        continue;
+                                    }
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("Error serializing event: {}", e);
+                        } else {
+                            // No cached event, serialize new event
+                            match serde_json::to_string(&event) {
+                                Ok(json) => {
+                                    event_cache = Some((event_key, json.clone()));
+                                    json
+                                },
+                                Err(e) => {
+                                    eprintln!("Error serializing event: {}", e);
+                                    continue;
+                                }
                             }
+                        };
+
+                        // Send serialized event to client
+                        if let Err(e) = ws_sender.send(Message::Text(json.into())).await {
+                            eprintln!("Error sending WebSocket message to {}: {}", peer_addr, e);
+                            break;
                         }
+                        
+                        // Update stats
+                        messages_sent += 1;
+                        last_activity = std::time::Instant::now();
                     }
                     Err(e) => {
-                        eprintln!("Error receiving from event bus: {}", e);
-                        break;
+                        // Don't report lagged errors, just reconnect to the event bus
+                        if e.to_string().contains("lagged") {
+                            println!("WebSocket client {} lagged behind, reconnecting to event bus", peer_addr);
+                            receiver = event_bus.subscribe();
+                            continue;
+                        } else {
+                            eprintln!("Error receiving from event bus for client {}: {}", peer_addr, e);
+                            break;
+                        }
                     }
                 }
             }
@@ -589,20 +718,62 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
             result = ws_receiver.next() => {
                 match result {
                     Some(Ok(msg)) => {
-                        // Handle client messages - could implement filtering/commands here
-                        if msg.is_close() {
-                            break;
+                        // Update activity timestamp
+                        last_activity = std::time::Instant::now();
+                        
+                        // Handle client messages
+                        match msg {
+                            Message::Text(text) => {
+                                // Process client commands - could implement filtering/subscriptions here
+                                if text == "ping" {
+                                    if let Err(e) = ws_sender.send(Message::Text("pong".into())).await {
+                                        eprintln!("Error sending pong to {}: {}", peer_addr, e);
+                                        break;
+                                    }
+                                }
+                            },
+                            Message::Close(_) => {
+                                println!("WebSocket client {} requested close", peer_addr);
+                                break;
+                            },
+                            Message::Ping(data) => {
+                                // Automatically respond to pings
+                                if let Err(e) = ws_sender.send(Message::Pong(data)).await {
+                                    eprintln!("Error responding to ping from {}: {}", peer_addr, e);
+                                    break;
+                                }
+                            },
+                            _ => {} // Ignore other message types
                         }
                     }
                     Some(Err(e)) => {
-                        eprintln!("WebSocket error: {}", e);
+                        eprintln!("WebSocket error from client {}: {}", peer_addr, e);
                         break;
                     }
-                    None => break, // Client disconnected
+                    None => {
+                        println!("WebSocket client {} disconnected", peer_addr);
+                        break; 
+                    }
+                }
+            }
+            
+            // Add a timeout to check client activity periodically
+            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {
+                // Send ping to check if client is still alive
+                if let Err(e) = ws_sender.send(Message::Ping(vec![].into())).await {
+                    eprintln!("Error sending ping to {}: {}", peer_addr, e);
+                    break;
                 }
             }
         }
     }
+
+    // Log connection statistics
+    let duration = connection_start.elapsed();
+    println!(
+        "WebSocket client {} disconnected after {:?}, sent {} messages",
+        peer_addr, duration, messages_sent
+    );
 
     Ok(())
 }

@@ -1,4 +1,4 @@
-use crate::{adapters::TestAdapter, StreamService};
+use crate::{adapters::TestAdapter, StreamService, ZelanError, ErrorCode, ErrorSeverity};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use tauri::{
@@ -114,67 +114,102 @@ use tauri::State;
 #[tauri::command]
 pub async fn get_event_bus_status(
     state: State<'_, ZelanState>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, ZelanError> {
     // Use a scope to ensure the lock is released before .await
-    let event_bus = {
-        let service = state.service.lock().unwrap();
-        service.event_bus().clone()
+    let event_bus = match state.service.lock() {
+        Ok(service) => service.event_bus().clone(),
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::Internal,
+                message: "Failed to acquire service lock".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+            });
+        }
     };
 
     // Now we can await outside the lock scope
     let stats = event_bus.get_stats().await;
 
     // Convert to JSON value
-    serde_json::to_value(stats).map_err(|e| e.to_string())
+    serde_json::to_value(stats).map_err(|e| {
+        ZelanError {
+            code: ErrorCode::Internal,
+            message: "Failed to serialize event bus stats".to_string(),
+            context: Some(e.to_string()),
+            severity: ErrorSeverity::Error,
+        }
+    })
 }
 
 /// Get all adapter statuses
 #[tauri::command]
 pub async fn get_adapter_statuses(
     state: State<'_, ZelanState>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, ZelanError> {
     // Clone the service outside the .await
-    let service_clone = {
-        let service_guard = state.service.lock().unwrap();
-        service_guard.clone()
+    let service_clone = match state.service.lock() {
+        Ok(service_guard) => service_guard.clone(),
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::Internal,
+                message: "Failed to acquire service lock".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+            });
+        }
     };
 
     // Now we can safely await without holding the lock
     let statuses = service_clone.get_all_statuses().await;
 
     // Convert to JSON value
-    serde_json::to_value(statuses).map_err(|e| e.to_string())
+    serde_json::to_value(statuses).map_err(|e| {
+        ZelanError {
+            code: ErrorCode::Internal,
+            message: "Failed to serialize adapter statuses".to_string(),
+            context: Some(e.to_string()),
+            severity: ErrorSeverity::Error,
+        }
+    })
 }
 
 /// Send a test event through the system
 #[tauri::command]
-pub async fn send_test_event(state: State<'_, ZelanState>) -> Result<String, String> {
+pub async fn send_test_event(state: State<'_, ZelanState>) -> Result<String, ZelanError> {
     use crate::StreamEvent;
     use serde_json::json;
 
-    // Simplified version to debug command invocation issues
-    let event_bus = {
-        let service = state.service.lock().unwrap();
-        service.event_bus().clone()
+    // Get the event bus from the service
+    let event_bus = match state.service.lock() {
+        Ok(service) => service.event_bus().clone(),
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::Internal,
+                message: "Failed to acquire service lock".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+            });
+        }
     };
 
-    // Create a manual test event
+    // Create a manual test event with more details
     let event = StreamEvent::new(
         "manual",
         "test.manual",
         json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),
-            "message": "Manual test event from frontend"
+            "message": "Manual test event from frontend",
+            "source": "UI",
+            "id": uuid::Uuid::new_v4().to_string()
         }),
     );
 
     // Attempt to publish the event
-    if let Err(e) = event_bus.publish(event).await {
-        return Err(format!("Failed to send test event: {}", e));
+    match event_bus.publish(event).await {
+        Ok(receivers) => Ok(format!("Test event sent successfully to {} receivers", receivers)),
+        Err(e) => Err(e),
     }
-
-    // Return success even if there were no receivers
-    Ok("Test event sent successfully".to_string())
 }
 
 /// Initialize the Zelan plugin
