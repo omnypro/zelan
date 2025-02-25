@@ -1,5 +1,5 @@
-pub mod test;
 pub mod obs;
+pub mod test;
 
-pub use test::TestAdapter;
 pub use obs::ObsAdapter;
+pub use test::TestAdapter;

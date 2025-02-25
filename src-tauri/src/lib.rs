@@ -30,6 +30,15 @@ const EVENT_BUS_CAPACITY: usize = 1000;
 const RECONNECT_DELAY_MS: u64 = 5000;
 const DEFAULT_WS_PORT: u16 = 9000;
 
+/// Configuration for the entire application
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    /// WebSocket server configuration
+    pub websocket: WebSocketConfig,
+    /// Adapter settings keyed by adapter name
+    pub adapters: HashMap<String, AdapterSettings>,
+}
+
 /// Configuration for the WebSocket server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketConfig {
@@ -295,6 +304,30 @@ impl StreamService {
         }
     }
 
+    /// Load configuration from app storage
+    pub fn from_config(config: Config) -> Self {
+        let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
+        let adapter_settings = Arc::new(RwLock::new(config.adapters));
+
+        Self {
+            event_bus,
+            adapters: Arc::new(RwLock::new(HashMap::new())),
+            status: Arc::new(RwLock::new(HashMap::new())),
+            adapter_settings,
+            ws_server_handle: None,
+            shutdown_sender: None,
+            ws_config: config.websocket,
+        }
+    }
+
+    /// Export the current configuration
+    pub async fn export_config(&self) -> Config {
+        Config {
+            websocket: self.ws_config.clone(),
+            adapters: self.adapter_settings.read().await.clone(),
+        }
+    }
+
     /// Get the current WebSocket configuration
     pub fn ws_config(&self) -> &WebSocketConfig {
         &self.ws_config
@@ -394,7 +427,7 @@ impl StreamService {
                     .write()
                     .await
                     .insert(name.to_string(), ServiceStatus::Disconnected);
-                
+
                 // Automatically connect the adapter when enabled
                 let adapter_clone = self.adapters.read().await.get(name).cloned();
                 if let Some(adapter) = adapter_clone {
