@@ -36,3 +36,5 @@ See `.env.example` for reference and instructions to obtain a client ID.
 - Document public APIs and complex functions
 - Handle errors explicitly rather than panicking
 - Use consistent formatting (2-space indentation for TS/JS, 4-space for Rust)
+- Prefer the simplest solution that uses what the libraries provide
+- Do not recreate functionality unless absolutely necessary
