@@ -67,7 +67,7 @@ impl ObsAdapter {
             shutdown_signal: Mutex::new(None),
         }
     }
-    
+
     /// Creates a new OBS adapter with the given configuration
     pub fn with_config(event_bus: Arc<EventBus>, config: ObsConfig) -> Self {
         Self {
@@ -387,7 +387,10 @@ impl ServiceAdapter for ObsAdapter {
         };
 
         // Log the actual connection parameters to confirm they're being used
-        println!("Using connection parameters - host: {}, port: {}", connect_opts.host, connect_opts.port);
+        println!(
+            "Using connection parameters - host: {}, port: {}",
+            connect_opts.host, connect_opts.port
+        );
 
         // Attempt to connect
         match Client::connect_with_config(connect_opts).await {

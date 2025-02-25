@@ -17,6 +17,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::sleep;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
 // Re-export Adapters
 pub mod adapters;
@@ -636,12 +637,14 @@ impl StreamService {
     }
 
     /// Start the WebSocket server for external clients
+    #[instrument(skip(self), level = "debug")]
     pub async fn start_websocket_server(&mut self) -> Result<()> {
         if self.ws_server_handle.is_some() {
+            warn!("WebSocket server already running");
             return Err(anyhow!("WebSocket server already running"));
         }
 
-        println!("Starting WebSocket server...");
+        info!("Starting WebSocket server");
         let event_bus = self.event_bus.clone();
         let (shutdown_sender, mut shutdown_receiver) = mpsc::channel::<()>(1);
 
@@ -652,56 +655,64 @@ impl StreamService {
         let ws_port = self.ws_config.port;
 
         // Start WebSocket server in a separate task
-        let handle = tokio::spawn(async move {
-            let socket_addr = format!("127.0.0.1:{}", ws_port)
-                .parse::<std::net::SocketAddr>()
-                .unwrap();
-            let listener = match TcpListener::bind(socket_addr).await {
-                Ok(listener) => listener,
-                Err(e) => {
-                    eprintln!("Failed to bind WebSocket server: {}", e);
-                    return;
-                }
-            };
-
-            // Print a helpful message for connecting to the WebSocket server
-            println!("WebSocket server listening on: {}", socket_addr);
-            println!("💡 Debugging tip: Connect to the event stream using a WebSocket client:");
-            println!("   - URI: ws://127.0.0.1:{}", ws_port);
-            println!("   - With wscat: wscat -c ws://127.0.0.1:{}", ws_port);
-            println!("   - With websocat: websocat ws://127.0.0.1:{}", ws_port);
-
-            // Handle incoming connections
-            loop {
-                tokio::select! {
-                    // Check for shutdown signal
-                    _ = shutdown_receiver.recv() => {
-                        println!("WebSocket server shutting down");
-                        break;
+        let handle = tokio::spawn(
+            async move {
+                let socket_addr = format!("127.0.0.1:{}", ws_port)
+                    .parse::<std::net::SocketAddr>()
+                    .unwrap();
+                let listener = match TcpListener::bind(socket_addr).await {
+                    Ok(listener) => listener,
+                    Err(e) => {
+                        error!(error = %e, "Failed to bind WebSocket server");
+                        return;
                     }
+                };
 
-                    // Accept new connections
-                    accept_result = listener.accept() => {
-                        match accept_result {
-                            Ok((stream, addr)) => {
-                                println!("New WebSocket connection from: {}", addr);
+                // Print a helpful message for connecting to the WebSocket server
+                info!(address = %socket_addr, "WebSocket server listening");
+                info!(
+                    uri = format!("ws://127.0.0.1:{}", ws_port),
+                    "WebSocket server available at"
+                );
+                debug!("Connect with: wscat -c ws://127.0.0.1:{}", ws_port);
+                debug!("Connect with: websocat ws://127.0.0.1:{}", ws_port);
 
-                                // Handle each connection in a separate task
-                                let event_bus_clone = event_bus.clone();
-                                tokio::spawn(async move {
-                                    if let Err(e) = handle_websocket_client(stream, event_bus_clone).await {
-                                        eprintln!("Error in WebSocket connection: {}", e);
-                                    }
-                                });
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to accept WebSocket connection: {}", e);
+                // Handle incoming connections
+                loop {
+                    tokio::select! {
+                        // Check for shutdown signal
+                        _ = shutdown_receiver.recv() => {
+                            info!("WebSocket server shutting down");
+                            break;
+                        }
+
+                        // Accept new connections
+                        accept_result = listener.accept() => {
+                            match accept_result {
+                                Ok((stream, addr)) => {
+                                    info!(client = %addr, "New WebSocket connection");
+
+                                    // Handle each connection in a separate task
+                                    let event_bus_clone = event_bus.clone();
+                                    tokio::spawn(
+                                        async move {
+                                            if let Err(e) = handle_websocket_client(stream, event_bus_clone).await {
+                                                error!(error = %e, client = %addr, "Error in WebSocket connection");
+                                            }
+                                        }
+                                        .in_current_span()
+                                    );
+                                }
+                                Err(e) => {
+                                    error!(error = %e, "Failed to accept WebSocket connection");
+                                }
                             }
                         }
                     }
                 }
             }
-        });
+            .instrument(span!(Level::INFO, "ws_server", port = ws_port))
+        );
 
         self.ws_server_handle = Some(handle);
         Ok(())
@@ -747,10 +758,6 @@ impl StreamService {
         let http_port = self.ws_config.port + 1; // Use next port for HTTP
         tokio::spawn(async move {
             println!("Starting HTTP API server on port {}", http_port);
-            println!(
-                "💡 API endpoints available at http://127.0.0.1:{}",
-                http_port
-            );
             let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", http_port))
                 .await
                 .unwrap();
@@ -857,6 +864,7 @@ async fn disconnect_adapter_handler(
 }
 
 /// Handler for WebSocket client connections
+#[instrument(skip(stream, event_bus), fields(client = ?stream.peer_addr().map_or("unknown".to_string(), |addr| addr.to_string())))]
 async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) -> ZelanResult<()> {
     // Get client IP for logging
     let peer_addr = stream
@@ -868,19 +876,23 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
         match tokio::time::timeout(std::time::Duration::from_secs(5), accept_async(stream)).await {
             Ok(result) => match result {
                 Ok(ws) => ws,
-                Err(e) => return Err(error::websocket_accept_failed(e)),
+                Err(e) => {
+                    error!(error = %e, "WebSocket handshake failed");
+                    return Err(error::websocket_accept_failed(e));
+                }
             },
             Err(_) => {
+                error!("WebSocket handshake timed out");
                 return Err(ZelanError {
                     code: ErrorCode::WebSocketAcceptFailed,
                     message: "WebSocket connection timed out during handshake".to_string(),
                     context: Some(format!("Client: {}", peer_addr)),
                     severity: ErrorSeverity::Warning,
-                })
+                });
             }
         };
 
-    println!("WebSocket client connected: {}", peer_addr);
+    info!(client = %peer_addr, "WebSocket client connected");
 
     // Create a receiver from the event bus
     let mut receiver = event_bus.subscribe();
@@ -900,9 +912,10 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
     loop {
         // Check for client inactivity timeout (5 minutes)
         if last_activity.elapsed() > std::time::Duration::from_secs(300) {
-            println!(
-                "WebSocket client {} timed out (inactive for 5 minutes)",
-                peer_addr
+            info!(
+                client = %peer_addr,
+                duration = ?last_activity.elapsed(),
+                "WebSocket client timed out due to inactivity"
             );
             break;
         }
@@ -914,6 +927,13 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                     Ok(event) => {
                         // Create a key for the event type+source
                         let event_key = format!("{}.{}", event.source(), event.event_type());
+
+                        debug!(
+                            client = %peer_addr,
+                            event_source = %event.source(),
+                            event_type = %event.event_type(),
+                            "Forwarding event to client"
+                        );
 
                         // Check if we've already serialized this exact event type+source
                         let json = if let Some((cached_key, cached_json)) = &event_cache {
@@ -927,7 +947,12 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                                         json
                                     },
                                     Err(e) => {
-                                        eprintln!("Error serializing event: {}", e);
+                                        error!(
+                                            error = %e,
+                                            event_source = %event.source(),
+                                            event_type = %event.event_type(),
+                                            "Error serializing event"
+                                        );
                                         continue;
                                     }
                                 }
@@ -940,7 +965,12 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                                     json
                                 },
                                 Err(e) => {
-                                    eprintln!("Error serializing event: {}", e);
+                                    error!(
+                                        error = %e,
+                                        event_source = %event.source(),
+                                        event_type = %event.event_type(),
+                                        "Error serializing event"
+                                    );
                                     continue;
                                 }
                             }
@@ -948,7 +978,11 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
 
                         // Send serialized event to client
                         if let Err(e) = ws_sender.send(Message::Text(json.into())).await {
-                            eprintln!("Error sending WebSocket message to {}: {}", peer_addr, e);
+                            error!(
+                                error = %e,
+                                client = %peer_addr,
+                                "Error sending WebSocket message"
+                            );
                             break;
                         }
 
@@ -959,11 +993,18 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                     Err(e) => {
                         // Don't report lagged errors, just reconnect to the event bus
                         if e.to_string().contains("lagged") {
-                            println!("WebSocket client {} lagged behind, reconnecting to event bus", peer_addr);
+                            warn!(
+                                client = %peer_addr,
+                                "WebSocket client lagged behind, reconnecting to event bus"
+                            );
                             receiver = event_bus.subscribe();
                             continue;
                         } else {
-                            eprintln!("Error receiving from event bus for client {}: {}", peer_addr, e);
+                            error!(
+                                error = %e,
+                                client = %peer_addr,
+                                "Error receiving from event bus"
+                            );
                             break;
                         }
                     }
@@ -980,34 +1021,39 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                         // Handle client messages
                         match msg {
                             Message::Text(text) => {
+                                debug!(client = %peer_addr, message = %text, "Received text message");
+
                                 // Process client commands - could implement filtering/subscriptions here
                                 if text == "ping" {
                                     if let Err(e) = ws_sender.send(Message::Text("pong".into())).await {
-                                        eprintln!("Error sending pong to {}: {}", peer_addr, e);
+                                        error!(error = %e, client = %peer_addr, "Error sending pong");
                                         break;
                                     }
                                 }
                             },
                             Message::Close(_) => {
-                                println!("WebSocket client {} requested close", peer_addr);
+                                info!(client = %peer_addr, "WebSocket client requested close");
                                 break;
                             },
                             Message::Ping(data) => {
+                                debug!(client = %peer_addr, "Received ping");
                                 // Automatically respond to pings
                                 if let Err(e) = ws_sender.send(Message::Pong(data)).await {
-                                    eprintln!("Error responding to ping from {}: {}", peer_addr, e);
+                                    error!(error = %e, client = %peer_addr, "Error responding to ping");
                                     break;
                                 }
                             },
-                            _ => {} // Ignore other message types
+                            _ => {
+                                debug!(client = %peer_addr, message_type = ?msg, "Received other message type");
+                            } // Ignore other message types
                         }
                     }
                     Some(Err(e)) => {
-                        eprintln!("WebSocket error from client {}: {}", peer_addr, e);
+                        error!(error = %e, client = %peer_addr, "WebSocket error from client");
                         break;
                     }
                     None => {
-                        println!("WebSocket client {} disconnected", peer_addr);
+                        info!(client = %peer_addr, "WebSocket client disconnected");
                         break;
                     }
                 }
@@ -1015,9 +1061,10 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
 
             // Add a timeout to check client activity periodically
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {
+                debug!(client = %peer_addr, "Sending ping to check if client is alive");
                 // Send ping to check if client is still alive
                 if let Err(e) = ws_sender.send(Message::Ping(vec![].into())).await {
-                    eprintln!("Error sending ping to {}: {}", peer_addr, e);
+                    error!(error = %e, client = %peer_addr, "Error sending ping");
                     break;
                 }
             }
@@ -1026,9 +1073,11 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
 
     // Log connection statistics
     let duration = connection_start.elapsed();
-    println!(
-        "WebSocket client {} disconnected after {:?}, sent {} messages",
-        peer_addr, duration, messages_sent
+    info!(
+        client = %peer_addr,
+        duration = ?duration,
+        messages = messages_sent,
+        "WebSocket client disconnected"
     );
 
     Ok(())

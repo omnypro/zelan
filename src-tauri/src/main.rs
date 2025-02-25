@@ -1,12 +1,29 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use serde_json::json;
 use tauri::Manager;
 use tauri_plugin_store::StoreExt;
+use tracing::{debug, error, info};
+use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 use zelan_lib::{plugin, Config, StreamService};
-use serde_json::json;
 
 fn main() {
+    // Initialize the tracing subscriber for structured logging
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            // Default to info level if RUST_LOG is not set
+            if cfg!(debug_assertions) {
+                "zelan_lib=debug,warn".into()
+            } else {
+                "zelan_lib=info,warn".into()
+            }
+        }))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    info!("Zelan application starting");
+
     // Build and run the Tauri application with our plugin
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -18,46 +35,46 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
-            println!("Tauri application starting up");
+            info!("Setting up Tauri application");
 
             // Create the Zelan state
             let zelan_state = plugin::init_state();
 
             // Create/get the store using the simpler approach
             let store = app.store("zelan.config.json");
-            
+
             if let Ok(store) = &store {
-                println!("Store successfully opened");
+                debug!("Store successfully opened");
                 // Check if we have a configuration
                 if store.has("config".to_string()) {
-                    println!("Found existing configuration in store");
+                    info!("Found existing configuration in store");
                     // Get the config value
                     if let Some(config_value) = store.get("config".to_string()) {
-                    // Deserialize the config
-                    println!("Config value from store: {}", config_value);
-                    match serde_json::from_value::<Config>(config_value.clone()) {
-                        Ok(config) => {
-                            println!("Successfully deserialized config, creating service");
-                            // Create a StreamService from config and store it
-                            let new_service = StreamService::from_config(config);
+                        // Deserialize the config
+                        debug!(config = ?config_value, "Config value from store");
+                        match serde_json::from_value::<Config>(config_value.clone()) {
+                            Ok(config) => {
+                                info!("Successfully deserialized config, creating service");
+                                // Create a StreamService from config and store it
+                                let new_service = StreamService::from_config(config);
 
-                            // Clone the state before moving it into the async block
-                            let zelan_state_clone = zelan_state.clone();
+                                // Clone the state before moving it into the async block
+                                let zelan_state_clone = zelan_state.clone();
 
-                            // Spawn a task to update the service
-                            tauri::async_runtime::spawn(async move {
-                                let mut service = zelan_state_clone.service.lock().await;
-                                *service = new_service;
-                                println!("Loaded configuration from persistent storage");
-                            });
+                                // Spawn a task to update the service
+                                tauri::async_runtime::spawn(async move {
+                                    let mut service = zelan_state_clone.service.lock().await;
+                                    *service = new_service;
+                                    info!("Loaded configuration from persistent storage");
+                                });
+                            }
+                            Err(e) => {
+                                error!(%e, "Failed to deserialize config");
+                            }
                         }
-                        Err(e) => {
-                            println!("Failed to deserialize config: {}", e);
-                        }
-                    }
                     }
                 } else {
-                    println!("No existing configuration found, creating default");
+                    info!("No existing configuration found, creating default");
 
                     // Create a default configuration
                     let default_config = Config {
@@ -68,28 +85,28 @@ fn main() {
                     // Save the default config
                     store.set("config".to_string(), json!(default_config));
                     if let Err(e) = store.save() {
-                        println!("Failed to save initial config: {}", e);
+                        error!(%e, "Failed to save initial config");
                     } else {
-                        println!("Default configuration saved to store");
+                        info!("Default configuration saved to store");
                     }
                 }
             } else {
-                println!("Failed to access store");
+                error!("Failed to access configuration store");
             }
 
             // Store as state for other components to access
             app.manage(store);
 
             // Initialize services properly using Tauri's async runtime
-            println!("Starting service initialization...");
+            info!("Starting service initialization");
             let zelan_state_clone = zelan_state.clone();
             tauri::async_runtime::spawn(async move {
                 match zelan_state_clone.init_services().await {
-                    Ok(_) => println!("Successfully initialized services"),
-                    Err(e) => eprintln!("Failed to initialize services: {}", e),
+                    Ok(_) => info!("Successfully initialized services"),
+                    Err(e) => error!(%e, "Failed to initialize services"),
                 }
             });
-            println!("Service initialization task spawned");
+            debug!("Service initialization task spawned");
 
             // Store the state for later use
             app.manage(zelan_state);

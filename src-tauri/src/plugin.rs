@@ -1,13 +1,14 @@
 use crate::{
-    adapters::{self, ObsAdapter, TestAdapter},
+    adapters::{ObsAdapter, TestAdapter},
     AdapterSettings, ErrorCode, ErrorSeverity, StreamService, ZelanError,
 };
-use serde_json::json;
 use anyhow::{anyhow, Result};
+use serde_json::json;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
+use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
 /// State object to store the stream service
 pub struct ZelanState {
@@ -35,97 +36,122 @@ impl ZelanState {
         })
     }
 
-    /// Export configuration 
+    /// Export configuration
     pub async fn export_config(&self) -> Result<crate::Config> {
         // Get the current configuration and export it
         let service = self.service.lock().await;
         let config = service.export_config().await;
         Ok(config)
     }
-    
+
     /// Save configuration to the store
+    #[instrument(skip(self, app), level = "debug")]
     pub async fn save_config_to_store(&self, app: &AppHandle) -> Result<()> {
         // Export the current config
         let config = self.export_config().await?;
-        println!("Config to be saved: {:?}", config);
-        
+        debug!(config = ?config, "Config to be saved");
+
         // Convert to JSON for storing
         let config_json = json!(config);
-        println!("JSON representation: {}", config_json);
-        
+        debug!(json = %config_json, "JSON representation");
+
         // Get the store
         if let Ok(store) = app.store("zelan.config.json") {
-            println!("Got store reference, setting config");
-            
+            debug!("Got store reference, setting config");
+
             // Save to store
             store.set("config".to_string(), config_json);
-            println!("Config set in store, saving...");
-            
-            store.save().map_err(|e| anyhow!("Failed to save to store: {}", e))?;
-            
-            println!("Configuration successfully saved to store");
-            return Ok(());
+            debug!("Config set in store, saving...");
+
+            match store.save() {
+                Ok(_) => {
+                    info!("Configuration successfully saved to store");
+                    Ok(())
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to save to store");
+                    Err(anyhow!("Failed to save to store: {}", e))
+                }
+            }
+        } else {
+            // If we get here, we couldn't access the store
+            error!("Failed to get store reference");
+            Err(anyhow!("Failed to access store"))
         }
-        
-        // If we get here, we couldn't access the store
-        println!("Failed to get store reference");
-        Err(anyhow!("Failed to access store"))
     }
 
     /// Initialize background services
+    #[instrument(skip(self), level = "debug")]
     pub async fn init_services(&self) -> Result<()> {
         let service = self.service.clone();
 
         // We initialize services in a separate task to avoid blocking
-        tokio::spawn(async move {
-            // Get service with exclusive access
-            let mut service_guard = service.lock().await;
-
-            // First, get the event bus and create a persistent dummy subscriber to keep it alive
-            let event_bus = service_guard.event_bus();
-            let mut _dummy_subscriber = event_bus.subscribe();
-
-            // Start the WebSocket server
-            if let Err(e) = service_guard.start_websocket_server().await {
-                eprintln!("Failed to start WebSocket server: {}", e);
-            }
-
-            // Start the HTTP API
-            if let Err(e) = service_guard.start_http_api().await {
-                eprintln!("Failed to start HTTP API: {}", e);
-            }
-
-            // Fetch already saved adapter settings
-            let adapter_settings = service_guard.get_all_adapter_settings().await;
-            
-            // Register the test adapter with settings
-            if let Some(saved_test_settings) = adapter_settings.get("test") {
-                println!("Found saved Test adapter settings: {:?}", saved_test_settings);
+        tokio::spawn(
+            async move {
+                info!("Starting background service initialization");
                 
-                // Register with saved settings
-                let test_adapter = TestAdapter::new(service_guard.event_bus());
-                service_guard.register_adapter(test_adapter, Some(saved_test_settings.clone())).await;
-                println!("Registered Test adapter with saved settings");
-            } else {
-                println!("No saved Test adapter settings found, using defaults");
-                let test_adapter = TestAdapter::new(service_guard.event_bus());
-                let test_settings = AdapterSettings {
-                    enabled: true,
-                    config: serde_json::json!({
-                        "interval_ms": 1000, // Generate events every second
-                        "generate_special_events": true,
-                    }),
-                    display_name: "Test Adapter".to_string(),
-                    description: "A test adapter that generates sample events at regular intervals for development and debugging".to_string(),
-                };
-                service_guard
-                    .register_adapter(test_adapter, Some(test_settings))
-                    .await;
-            }
+                // Get service with exclusive access
+                let mut service_guard = service.lock().await;
+
+                // First, get the event bus and create a persistent dummy subscriber to keep it alive
+                let event_bus = service_guard.event_bus();
+                let mut _dummy_subscriber = event_bus.subscribe();
+                debug!("Created dummy event bus subscriber to keep bus alive");
+
+                // Start the WebSocket server
+                match service_guard.start_websocket_server().await {
+                    Ok(_) => info!("WebSocket server started successfully"),
+                    Err(e) => error!(error = %e, "Failed to start WebSocket server"),
+                }
+
+                // Start the HTTP API
+                match service_guard.start_http_api().await {
+                    Ok(_) => info!("HTTP API server started successfully"),
+                    Err(e) => error!(error = %e, "Failed to start HTTP API server"),
+                }
+
+                // Fetch already saved adapter settings
+                let adapter_settings = service_guard.get_all_adapter_settings().await;
+                debug!(
+                    adapter_count = adapter_settings.len(), 
+                    "Found saved adapter settings"
+                );
+                
+                // Register the test adapter with settings
+                if let Some(saved_test_settings) = adapter_settings.get("test") {
+                    info!(
+                        enabled = saved_test_settings.enabled,
+                        "Found saved Test adapter settings"
+                    );
+                    
+                    // Register with saved settings
+                    let test_adapter = TestAdapter::new(service_guard.event_bus());
+                    service_guard.register_adapter(test_adapter, Some(saved_test_settings.clone())).await;
+                    info!("Registered Test adapter with saved settings");
+                } else {
+                    info!("No saved Test adapter settings found, using defaults");
+                    let test_adapter = TestAdapter::new(service_guard.event_bus());
+                    let test_settings = AdapterSettings {
+                        enabled: true,
+                        config: serde_json::json!({
+                            "interval_ms": 1000, // Generate events every second
+                            "generate_special_events": true,
+                        }),
+                        display_name: "Test Adapter".to_string(),
+                        description: "A test adapter that generates sample events at regular intervals for development and debugging".to_string(),
+                    };
+                    service_guard
+                        .register_adapter(test_adapter, Some(test_settings))
+                        .await;
+                    debug!("Registered Test adapter with default settings");
+                }
 
             // Register the OBS adapter with settings
             if let Some(saved_obs_settings) = adapter_settings.get("obs") {
-                println!("Found saved OBS settings: {:?}", saved_obs_settings);
+                info!(
+                    enabled = saved_obs_settings.enabled,
+                    "Found saved OBS adapter settings"
+                );
                 
                 // Extract the saved OBS configuration from the settings
                 let config = if let Some(config_value) = saved_obs_settings.config.as_object() {
@@ -164,18 +190,19 @@ impl ZelanState {
                 } else {
                     // Import the OBS adapter config from the adapters module
                     use crate::adapters::obs::ObsConfig;
+                    warn!("No valid OBS configuration found, using defaults");
                     ObsConfig::default()
                 };
                 
                 // Create the adapter with the loaded configuration
-                println!("Initializing OBS adapter with host: {}, port: {}", config.host, config.port);
+                info!(host = %config.host, port = config.port, "Initializing OBS adapter");
                 let obs_adapter = ObsAdapter::with_config(service_guard.event_bus(), config);
                 
                 // Register the adapter with its settings
                 service_guard.register_adapter(obs_adapter, Some(saved_obs_settings.clone())).await;
-                println!("Registered OBS adapter with saved settings");
+                info!("Registered OBS adapter with saved settings");
             } else {
-                println!("No saved OBS settings found, using defaults");
+                info!("No saved OBS settings found, using defaults");
                 let obs_adapter = ObsAdapter::new(service_guard.event_bus());
                 let obs_settings = AdapterSettings {
                     enabled: true,
@@ -192,14 +219,16 @@ impl ZelanState {
                 service_guard
                     .register_adapter(obs_adapter, Some(obs_settings))
                     .await;
+                debug!("Registered OBS adapter with default settings");
             }
             
             // Connect all adapters
-            if let Err(e) = service_guard.connect_all_adapters().await {
-                eprintln!("Failed to connect adapters: {}", e);
+            match service_guard.connect_all_adapters().await {
+                Ok(_) => info!("All adapters connected successfully"),
+                Err(e) => error!(error = %e, "Failed to connect adapters"),
             }
 
-            println!("Zelan background services started successfully!");
+            info!("Zelan background services started successfully");
 
             // Release the lock on the service
             drop(service_guard);
@@ -209,21 +238,23 @@ impl ZelanState {
                 // Process the dummy subscription to keep it alive
                 match _dummy_subscriber.recv().await {
                     Ok(event) => {
-                        println!(
-                            "Background listener received event: {}.{}",
-                            event.source(),
-                            event.event_type()
+                        debug!(
+                            source = %event.source(),
+                            event_type = %event.event_type(),
+                            "Background listener received event"
                         );
                     }
                     Err(e) => {
                         // Only log errors that are not lagged messages
                         if !e.to_string().contains("lagged") {
-                            eprintln!("Background listener error: {}", e);
+                            error!(error = %e, "Background listener error");
                         }
                     }
                 }
             }
-        });
+            }
+            .instrument(span!(Level::INFO, "service_initialization"))
+        );
 
         Ok(())
     }
@@ -297,16 +328,20 @@ pub async fn get_adapter_settings(
 
 /// Update adapter settings
 #[tauri::command]
+#[instrument(skip(app, settings, state), fields(adapter_name = %adapterName), level = "debug")]
 pub async fn update_adapter_settings(
     app: AppHandle,
     adapterName: String,
     settings: serde_json::Value,
     state: State<'_, ZelanState>,
 ) -> Result<String, ZelanError> {
+    info!(adapter = %adapterName, "Updating adapter settings");
+
     // Deserialize the settings
     let adapter_settings: AdapterSettings = match serde_json::from_value(settings) {
         Ok(s) => s,
         Err(e) => {
+            error!(error = %e, "Invalid adapter settings format");
             return Err(ZelanError {
                 code: ErrorCode::ConfigInvalid,
                 message: "Invalid adapter settings format".to_string(),
@@ -324,43 +359,49 @@ pub async fn update_adapter_settings(
     drop(service);
 
     // Update the settings
-    println!(
-        "Updating adapter settings for {} with enabled={}",
-        adapterName, adapter_settings.enabled
+    debug!(
+        adapter = %adapterName,
+        enabled = adapter_settings.enabled,
+        "Updating adapter settings"
     );
+
     match service_clone
         .update_adapter_settings(&adapterName, adapter_settings.clone())
         .await
     {
         Ok(_) => {
-            println!("Successfully updated adapter settings for {}", adapterName);
+            info!(adapter = %adapterName, "Successfully updated adapter settings");
 
             // If adapter is enabled, explicitly try to connect it
             if adapter_settings.enabled {
-                println!(
-                    "Adapter {} is enabled, attempting to connect...",
-                    adapterName
-                );
-                if let Err(connect_err) = service_clone.connect_adapter(&adapterName).await {
-                    println!(
-                        "Warning: Failed to connect adapter after settings update: {}",
-                        connect_err
-                    );
-                    // We'll continue and save settings anyway
-                } else {
-                    println!("Successfully connected adapter {}", adapterName);
+                info!(adapter = %adapterName, "Adapter is enabled, attempting connection");
+
+                match service_clone.connect_adapter(&adapterName).await {
+                    Ok(_) => info!(adapter = %adapterName, "Successfully connected adapter"),
+                    Err(connect_err) => {
+                        warn!(
+                            error = %connect_err,
+                            adapter = %adapterName,
+                            "Failed to connect adapter after settings update"
+                        );
+                        // We'll continue and save settings anyway
+                    }
                 }
             }
 
             // Get the current config for debugging
             match state.export_config().await {
-                Ok(config) => println!("Current config to save: {:?}", config),
-                Err(e) => println!("Failed to export config for debugging: {}", e),
+                Ok(config) => debug!(config = ?config, "Current config to save"),
+                Err(e) => warn!(error = %e, "Failed to export config for debugging"),
             }
-            
+
             // Save the current config to the store
             if let Err(e) = state.save_config_to_store(&app).await {
-                eprintln!("Failed to save configuration after updating adapter settings: {}", e);
+                error!(
+                    error = %e,
+                    adapter = %adapterName,
+                    "Failed to save configuration after updating adapter settings"
+                );
                 return Err(ZelanError {
                     code: ErrorCode::Internal,
                     message: "Failed to save configuration".to_string(),
@@ -368,17 +409,14 @@ pub async fn update_adapter_settings(
                     severity: ErrorSeverity::Warning,
                 });
             } else {
-                println!("Successfully saved config to store");
+                info!("Successfully saved config to store");
             }
 
-            // Success, return ok
-            println!(
-                "Settings successfully updated and saved for {}",
-                adapterName
-            );
+            // Success, log completion
+            info!(adapter = %adapterName, "Settings successfully updated and saved");
         }
         Err(e) => {
-            eprintln!("Failed to update adapter settings: {}", e);
+            error!(error = %e, adapter = %adapterName, "Failed to update adapter settings");
             return Err(e);
         }
     }
@@ -470,7 +508,10 @@ pub async fn set_websocket_port(
 
     // Save the current config to the store
     if let Err(e) = state.save_config_to_store(&app).await {
-        eprintln!("Failed to save configuration after updating WebSocket port: {}", e);
+        eprintln!(
+            "Failed to save configuration after updating WebSocket port: {}",
+            e
+        );
         return Err(ZelanError {
             code: ErrorCode::Internal,
             message: "Failed to save configuration".to_string(),
