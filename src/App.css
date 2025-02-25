@@ -425,6 +425,304 @@ li {
   font-style: italic;
 }
 
+/* Tab Navigation */
+.tabs {
+  display: flex;
+  justify-content: center;
+  margin: 2rem 0;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 1px;
+}
+
+.tab-button {
+  padding: 0.8rem 1.5rem;
+  font-size: 1rem;
+  border: none;
+  background: none;
+  color: #757575;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.3s;
+}
+
+.tab-button:hover {
+  color: #2196f3;
+}
+
+.tab-button.active {
+  color: #2196f3;
+  font-weight: 600;
+}
+
+.tab-button.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background-color: #2196f3;
+  border-radius: 3px 3px 0 0;
+}
+
+/* Adapter Settings Styles */
+.settings-section {
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.settings-description {
+  margin-bottom: 2rem;
+  color: #757575;
+}
+
+.adapters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.adapter-card {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 1.5rem;
+  transition: box-shadow 0.3s, opacity 0.3s;
+  position: relative;
+}
+
+.adapter-card.disabled {
+  opacity: 0.7;
+}
+
+.adapter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.adapter-header h3 {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.adapter-status {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.status-connected {
+  background-color: #c8e6c9;
+  color: #2e7d32;
+}
+
+.status-connecting {
+  background-color: #fff9c4;
+  color: #f57f17;
+}
+
+.status-disconnected {
+  background-color: #e0e0e0;
+  color: #616161;
+}
+
+.status-disabled {
+  background-color: #eeeeee;
+  color: #9e9e9e;
+}
+
+.status-error {
+  background-color: #ffcdd2;
+  color: #c62828;
+}
+
+.adapter-description {
+  color: #666;
+  margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+}
+
+.adapter-config {
+  background-color: #f5f5f5;
+  border-radius: 6px;
+  padding: 0.8rem;
+  margin-bottom: 1.5rem;
+}
+
+.config-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.config-label {
+  font-weight: 500;
+  color: #333;
+}
+
+.config-value {
+  color: #666;
+}
+
+.adapter-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.toggle-button, .config-button {
+  flex: 1;
+  padding: 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.toggle-button.enabled {
+  background-color: #f5f5f5;
+  color: #f44336;
+}
+
+.toggle-button.disabled {
+  background-color: #f5f5f5;
+  color: #4caf50;
+}
+
+.toggle-button:hover {
+  background-color: #eeeeee;
+}
+
+.config-button {
+  background-color: #e3f2fd;
+  color: #1976d2;
+}
+
+.config-button:hover {
+  background-color: #bbdefb;
+}
+
+.config-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background-color: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  animation: modalAppear 0.3s ease-out;
+}
+
+@keyframes modalAppear {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.2rem 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #757575;
+}
+
+.modal-content {
+  padding: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.2rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.form-group input, .form-group select {
+  width: 100%;
+  padding: 0.8rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.cancel-button, .save-button {
+  padding: 0.8rem 1.2rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.cancel-button {
+  background-color: #f5f5f5;
+  color: #333;
+  border: 1px solid #e0e0e0;
+}
+
+.save-button {
+  background-color: #2196f3;
+  color: white;
+  border: none;
+}
+
+.save-button:hover {
+  background-color: #1976d2;
+}
+
 /* WebSocket Config Styles */
 .websocket-info {
   text-align: left;

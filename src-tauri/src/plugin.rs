@@ -214,7 +214,7 @@ pub async fn get_adapter_settings(
 /// Update adapter settings
 #[tauri::command]
 pub async fn update_adapter_settings(
-    adapter_name: String,
+    adapterName: String,
     settings: serde_json::Value,
     state: State<'_, ZelanState>,
 ) -> Result<String, ZelanError> {
@@ -246,12 +246,12 @@ pub async fn update_adapter_settings(
 
     // Update the settings
     service_clone
-        .update_adapter_settings(&adapter_name, adapter_settings)
+        .update_adapter_settings(&adapterName, adapter_settings)
         .await?;
 
     Ok(format!(
         "Successfully updated settings for adapter '{}'",
-        adapter_name
+        adapterName
     ))
 }
 

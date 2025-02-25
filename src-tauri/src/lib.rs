@@ -394,6 +394,18 @@ impl StreamService {
                     .write()
                     .await
                     .insert(name.to_string(), ServiceStatus::Disconnected);
+                
+                // Automatically connect the adapter when enabled
+                let adapter_clone = self.adapters.read().await.get(name).cloned();
+                if let Some(adapter) = adapter_clone {
+                    println!("Auto-connecting newly enabled adapter: {}", name);
+                    let name_clone = name.to_string(); // Clone the name to satisfy lifetime requirements
+                    tokio::spawn(async move {
+                        if let Err(e) = adapter.connect().await {
+                            eprintln!("Failed to auto-connect adapter '{}': {}", name_clone, e);
+                        }
+                    });
+                }
             } else {
                 // Changed from enabled to disabled - disconnect if connected
                 let current_status = self.status.read().await.get(name).cloned();
