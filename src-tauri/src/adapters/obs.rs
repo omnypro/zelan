@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::{sleep, Duration};
+use tracing::{debug, error, info, instrument, warn, Instrument};
 
 // Default connection settings
 const DEFAULT_HOST: &str = "localhost";
@@ -82,6 +83,7 @@ impl ObsAdapter {
     }
 
     /// Handles incoming OBS events and converts them to StreamEvents
+    #[instrument(skip(client, event_bus, config, connected, shutdown_rx), level = "debug")]
     async fn handle_obs_events(
         client: Arc<Client>,
         event_bus: Arc<EventBus>,
@@ -90,10 +92,16 @@ impl ObsAdapter {
         mut shutdown_rx: mpsc::Receiver<()>,
     ) -> Result<()> {
         // Set up OBS event listener
-        let events = client.events()?;
+        let events = match client.events() {
+            Ok(events) => events,
+            Err(e) => {
+                error!(error = %e, "Failed to create OBS event stream");
+                return Err(anyhow!("Failed to create OBS event stream: {}", e));
+            }
+        };
+        
         pin_mut!(events);
-
-        println!("OBS event listener started");
+        info!("OBS event listener started");
 
         // Continue as long as connected is true and no shutdown signal is received
         loop {
@@ -101,16 +109,17 @@ impl ObsAdapter {
             let maybe_event = tokio::select! {
                 // Check for shutdown signal
                 _ = shutdown_rx.recv() => {
-                    println!("Received shutdown signal for OBS event handler");
+                    info!("Received shutdown signal for OBS event handler");
                     break;
                 }
 
                 // Check connection status periodically
                 _ = sleep(Duration::from_secs(5)) => {
                     if !connected.load(Ordering::SeqCst) {
-                        println!("Connection flag set to false, stopping OBS event handler");
+                        info!("Connection flag set to false, stopping OBS event handler");
                         break;
                     }
+                    debug!("Connection check passed, OBS event handler still active");
                     continue;
                 }
 
@@ -119,7 +128,7 @@ impl ObsAdapter {
             };
 
             if !connected.load(Ordering::SeqCst) {
-                println!("Connection flag set to false, stopping OBS event handler");
+                info!("Connection flag set to false, stopping OBS event handler");
                 break;
             }
 
@@ -129,20 +138,30 @@ impl ObsAdapter {
                     // Convert OBS event to our internal format
                     match event {
                         obws::events::Event::CurrentProgramSceneChanged { id } => {
+                            let scene_name = id.name.clone();
+                            debug!(scene = %scene_name, "OBS scene changed");
+                            
                             let mut payload = json!({
-                                "scene_name": id.name,
+                                "scene_name": scene_name,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             });
 
                             // If configured to include scene details, gather them
                             if config.include_scene_details {
-                                if let Ok(scene_list) = client.scenes().list().await {
-                                    // Find the current scene in the list
-                                    if let Some(scene) =
-                                        scene_list.scenes.iter().find(|s| s.id.name == id.name)
-                                    {
-                                        // Add additional scene information
-                                        payload["scene_index"] = json!(scene.index);
+                                debug!("Fetching additional scene details");
+                                match client.scenes().list().await {
+                                    Ok(scene_list) => {
+                                        // Find the current scene in the list
+                                        if let Some(scene) =
+                                            scene_list.scenes.iter().find(|s| s.id.name == id.name)
+                                        {
+                                            // Add additional scene information
+                                            payload["scene_index"] = json!(scene.index);
+                                            debug!(scene_index = scene.index, "Added scene details");
+                                        }
+                                    },
+                                    Err(e) => {
+                                        warn!(error = %e, "Failed to fetch scene details");
                                     }
                                 }
                             }
@@ -150,7 +169,9 @@ impl ObsAdapter {
                             // Create and publish the event
                             let stream_event = StreamEvent::new("obs", "scene.changed", payload);
                             if let Err(e) = event_bus.publish(stream_event).await {
-                                eprintln!("Failed to publish OBS scene change event: {}", e);
+                                error!(error = %e, "Failed to publish OBS scene change event");
+                            } else {
+                                debug!(scene = %scene_name, "Published scene change event");
                             }
                         }
                         obws::events::Event::SceneItemEnableStateChanged {
@@ -159,6 +180,13 @@ impl ObsAdapter {
                             enabled,
                             ..
                         } => {
+                            debug!(
+                                scene = ?scene,
+                                item_id = ?item_id,
+                                enabled = enabled,
+                                "Scene item visibility changed"
+                            );
+                            
                             let payload = json!({
                                 "scene_name": scene,
                                 "scene_item_id": item_id,
@@ -169,7 +197,7 @@ impl ObsAdapter {
                             let stream_event =
                                 StreamEvent::new("obs", "scene_item.visibility_changed", payload);
                             if let Err(e) = event_bus.publish(stream_event).await {
-                                eprintln!("Failed to publish OBS scene item event: {}", e);
+                                error!(error = %e, "Failed to publish OBS scene item event");
                             }
                         }
                         obws::events::Event::StreamStateChanged { active, .. } => {
@@ -179,6 +207,12 @@ impl ObsAdapter {
                                 "stream.stopped"
                             };
 
+                            info!(
+                                active = active,
+                                event_type = %event_type,
+                                "OBS stream state changed"
+                            );
+                            
                             let payload = json!({
                                 "active": active,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -186,7 +220,7 @@ impl ObsAdapter {
 
                             let stream_event = StreamEvent::new("obs", event_type, payload);
                             if let Err(e) = event_bus.publish(stream_event).await {
-                                eprintln!("Failed to publish OBS stream state event: {}", e);
+                                error!(error = %e, "Failed to publish OBS stream state event");
                             }
                         }
                         obws::events::Event::RecordStateChanged { active, .. } => {
@@ -196,6 +230,12 @@ impl ObsAdapter {
                                 "recording.stopped"
                             };
 
+                            info!(
+                                active = active,
+                                event_type = %event_type,
+                                "OBS recording state changed"
+                            );
+                            
                             let payload = json!({
                                 "active": active,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -203,11 +243,13 @@ impl ObsAdapter {
 
                             let stream_event = StreamEvent::new("obs", event_type, payload);
                             if let Err(e) = event_bus.publish(stream_event).await {
-                                eprintln!("Failed to publish OBS recording state event: {}", e);
+                                error!(error = %e, "Failed to publish OBS recording state event");
                             }
                         }
                         // Provide connection events
                         obws::events::Event::ExitStarted => {
+                            warn!("OBS is shutting down");
+                            
                             let payload = json!({
                                 "message": "OBS is shutting down",
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -216,7 +258,7 @@ impl ObsAdapter {
                             let stream_event =
                                 StreamEvent::new("obs", "connection.closing", payload);
                             if let Err(e) = event_bus.publish(stream_event).await {
-                                eprintln!("Failed to publish OBS exit event: {}", e);
+                                error!(error = %e, "Failed to publish OBS exit event");
                             }
 
                             // OBS is shutting down, so we should stop
@@ -227,6 +269,7 @@ impl ObsAdapter {
                         _ => {
                             // We can add specific handling for more event types as needed
                             let event_name = format!("{:?}", event);
+                            debug!(event = %event_name, "Received other OBS event");
 
                             // Create a simple payload with event details
                             let payload = json!({
@@ -236,20 +279,21 @@ impl ObsAdapter {
 
                             let stream_event = StreamEvent::new("obs", "event.generic", payload);
                             if let Err(e) = event_bus.publish(stream_event).await {
-                                eprintln!("Failed to publish generic OBS event: {}", e);
+                                error!(error = %e, "Failed to publish generic OBS event");
                             }
                         }
                     }
                 }
                 // In obws 0.14 the events stream returns Event directly, not Result<Event, Error>
                 // This branch is kept for future compatibility or in case errors are added
-                // None => {
                 None => {
                     // End of events stream usually means connection closed
-                    println!("OBS events stream ended");
+                    info!("OBS events stream ended");
 
                     // If we're still supposed to be connected, this is unexpected
                     if connected.load(Ordering::SeqCst) {
+                        warn!("OBS WebSocket connection closed unexpectedly while still enabled");
+                        
                         // Send a disconnection event
                         let payload = json!({
                             "message": "OBS WebSocket connection closed unexpectedly",
@@ -258,11 +302,13 @@ impl ObsAdapter {
 
                         let stream_event = StreamEvent::new("obs", "connection.closed", payload);
                         if let Err(e) = event_bus.publish(stream_event).await {
-                            eprintln!("Failed to publish OBS disconnection event: {}", e);
+                            error!(error = %e, "Failed to publish OBS disconnection event");
                         }
 
                         // We're no longer connected
                         connected.store(false, Ordering::SeqCst);
+                    } else {
+                        debug!("OBS events stream ended normally (adapter was disabled)");
                     }
 
                     break;
@@ -270,95 +316,140 @@ impl ObsAdapter {
             }
         }
 
-        println!("OBS event handler stopped");
+        info!("OBS event handler stopped");
         Ok(())
     }
 
     /// Get current scenes and publish an initial state
+    #[instrument(skip(client, event_bus), level = "debug")]
     async fn publish_initial_state(client: &Arc<Client>, event_bus: &Arc<EventBus>) -> Result<()> {
-        println!("Publishing initial OBS state...");
+        info!("Publishing initial OBS state");
 
         // Get version information
-        if let Ok(version) = client.general().version().await {
-            let payload = json!({
-                "obs_version": version.obs_version,
-                "websocket_version": version.obs_web_socket_version,
-                "platform": version.platform,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            });
+        match client.general().version().await {
+            Ok(version) => {
+                info!(
+                    obs_version = %version.obs_version,
+                    websocket_version = %version.obs_web_socket_version,
+                    platform = %version.platform,
+                    "OBS system info"
+                );
+                
+                let payload = json!({
+                    "obs_version": version.obs_version,
+                    "websocket_version": version.obs_web_socket_version,
+                    "platform": version.platform,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                });
 
-            let stream_event = StreamEvent::new("obs", "system.info", payload);
-            if let Err(e) = event_bus.publish(stream_event).await {
-                eprintln!("Failed to publish OBS version info: {}", e);
+                let stream_event = StreamEvent::new("obs", "system.info", payload);
+                if let Err(e) = event_bus.publish(stream_event).await {
+                    error!(error = %e, "Failed to publish OBS version info");
+                }
+            },
+            Err(e) => {
+                warn!(error = %e, "Failed to fetch OBS version info");
             }
         }
 
         // Get current scene
-        if let Ok(current_scene) = client.scenes().current_program_scene().await {
-            let payload = json!({
-                "scene_name": current_scene,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-                "initial": true,
-            });
+        match client.scenes().current_program_scene().await {
+            Ok(current_scene) => {
+                info!(scene = ?current_scene, "Current scene");
+                
+                let payload = json!({
+                    "scene_name": current_scene,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "initial": true,
+                });
 
-            let stream_event = StreamEvent::new("obs", "scene.current", payload);
-            if let Err(e) = event_bus.publish(stream_event).await {
-                eprintln!("Failed to publish current scene: {}", e);
+                let stream_event = StreamEvent::new("obs", "scene.current", payload);
+                if let Err(e) = event_bus.publish(stream_event).await {
+                    error!(error = %e, "Failed to publish current scene");
+                }
+            },
+            Err(e) => {
+                warn!(error = %e, "Failed to fetch current scene");
             }
         }
 
         // Get all scenes
-        if let Ok(scenes) = client.scenes().list().await {
-            let payload = json!({
-                "scenes": scenes.scenes,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            });
+        match client.scenes().list().await {
+            Ok(scenes) => {
+                debug!(
+                    scene_count = scenes.scenes.len(),
+                    "Retrieved scene list"
+                );
+                
+                let payload = json!({
+                    "scenes": scenes.scenes,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                });
 
-            let stream_event = StreamEvent::new("obs", "scenes.list", payload);
-            if let Err(e) = event_bus.publish(stream_event).await {
-                eprintln!("Failed to publish scenes list: {}", e);
+                let stream_event = StreamEvent::new("obs", "scenes.list", payload);
+                if let Err(e) = event_bus.publish(stream_event).await {
+                    error!(error = %e, "Failed to publish scenes list");
+                }
+            },
+            Err(e) => {
+                warn!(error = %e, "Failed to fetch scenes list");
             }
         }
 
         // Get stream status
-        if let Ok(status) = client.streaming().status().await {
-            let payload = json!({
-                "active": status.active,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-                "initial": true,
-            });
+        match client.streaming().status().await {
+            Ok(status) => {
+                info!(active = status.active, "Stream status");
+                
+                let payload = json!({
+                    "active": status.active,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "initial": true,
+                });
 
-            let stream_event = StreamEvent::new("obs", "stream.status", payload);
-            if let Err(e) = event_bus.publish(stream_event).await {
-                eprintln!("Failed to publish stream status: {}", e);
+                let stream_event = StreamEvent::new("obs", "stream.status", payload);
+                if let Err(e) = event_bus.publish(stream_event).await {
+                    error!(error = %e, "Failed to publish stream status");
+                }
+            },
+            Err(e) => {
+                warn!(error = %e, "Failed to fetch stream status");
             }
         }
 
         // Get recording status
-        if let Ok(status) = client.recording().status().await {
-            let payload = json!({
-                "active": status.active,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-                "initial": true,
-            });
+        match client.recording().status().await {
+            Ok(status) => {
+                info!(active = status.active, "Recording status");
+                
+                let payload = json!({
+                    "active": status.active,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "initial": true,
+                });
 
-            let stream_event = StreamEvent::new("obs", "recording.status", payload);
-            if let Err(e) = event_bus.publish(stream_event).await {
-                eprintln!("Failed to publish recording status: {}", e);
+                let stream_event = StreamEvent::new("obs", "recording.status", payload);
+                if let Err(e) = event_bus.publish(stream_event).await {
+                    error!(error = %e, "Failed to publish recording status");
+                }
+            },
+            Err(e) => {
+                warn!(error = %e, "Failed to fetch recording status");
             }
         }
 
-        println!("Initial OBS state published");
+        info!("Initial OBS state published");
         Ok(())
     }
 }
 
 #[async_trait]
 impl ServiceAdapter for ObsAdapter {
+    #[instrument(skip(self), fields(adapter = "obs"), level = "debug")]
     async fn connect(&self) -> Result<()> {
         // Check if already connected
         if self.connected.load(Ordering::SeqCst) {
-            println!("OBS adapter is already connected");
+            info!("OBS adapter is already connected");
             return Ok(());
         }
 
@@ -366,9 +457,10 @@ impl ServiceAdapter for ObsAdapter {
         let config = self.config.read().await.clone();
 
         // Connect to OBS WebSocket server
-        println!(
-            "Connecting to OBS WebSocket at {}:{}",
-            config.host, config.port
+        info!(
+            host = %config.host,
+            port = config.port,
+            "Connecting to OBS WebSocket"
         );
 
         // Build the connection options - using password only if provided
@@ -376,8 +468,10 @@ impl ServiceAdapter for ObsAdapter {
             host: config.host.clone(),
             port: config.port,
             password: if config.password.is_empty() {
+                debug!("No password provided for OBS connection");
                 None
             } else {
+                debug!("Using password for OBS connection");
                 Some(config.password.clone())
             },
             event_subscriptions: Some(EventSubscription::ALL),
@@ -387,9 +481,10 @@ impl ServiceAdapter for ObsAdapter {
         };
 
         // Log the actual connection parameters to confirm they're being used
-        println!(
-            "Using connection parameters - host: {}, port: {}",
-            connect_opts.host, connect_opts.port
+        debug!(
+            host = %connect_opts.host,
+            port = connect_opts.port,
+            "Using OBS connection parameters"
         );
 
         // Attempt to connect
@@ -404,11 +499,12 @@ impl ServiceAdapter for ObsAdapter {
                 // Mark as connected
                 self.connected.store(true, Ordering::SeqCst);
 
-                println!("Connected to OBS WebSocket server");
+                info!("Connected to OBS WebSocket server");
 
                 // Publish initial state
-                if let Err(e) = Self::publish_initial_state(&client, &self.event_bus).await {
-                    eprintln!("Failed to publish initial OBS state: {}", e);
+                match Self::publish_initial_state(&client, &self.event_bus).await {
+                    Ok(_) => debug!("Published initial OBS state"),
+                    Err(e) => error!(error = %e, "Failed to publish initial OBS state"),
                 }
 
                 // Create channel for shutdown signaling
@@ -422,19 +518,23 @@ impl ServiceAdapter for ObsAdapter {
                 let client_clone = Arc::clone(&client);
                 let event_bus_clone = Arc::clone(&self.event_bus);
                 let config_clone = config.clone();
-                let handle = tokio::spawn(async move {
-                    if let Err(e) = Self::handle_obs_events(
-                        client_clone,
-                        event_bus_clone,
-                        config_clone,
-                        connected_flag,
-                        shutdown_rx,
-                    )
-                    .await
-                    {
-                        eprintln!("OBS event handler error: {}", e);
+                
+                let handle = tokio::spawn(
+                    async move {
+                        if let Err(e) = Self::handle_obs_events(
+                            client_clone,
+                            event_bus_clone,
+                            config_clone,
+                            connected_flag,
+                            shutdown_rx,
+                        )
+                        .await
+                        {
+                            error!(error = %e, "OBS event handler error");
+                        }
                     }
-                });
+                    .in_current_span()
+                );
 
                 // Store the event handler
                 *self.event_handler.lock().await = Some(handle);
@@ -448,29 +548,38 @@ impl ServiceAdapter for ObsAdapter {
 
                 let stream_event = StreamEvent::new("obs", "connection.established", payload);
                 if let Err(e) = self.event_bus.publish(stream_event).await {
-                    eprintln!("Failed to publish OBS connection event: {}", e);
+                    error!(error = %e, "Failed to publish OBS connection event");
+                } else {
+                    debug!("Published OBS connection event");
                 }
 
                 Ok(())
             }
             Err(e) => {
                 let error_msg = format!("Failed to connect to OBS WebSocket: {}", e);
-                eprintln!("{}", error_msg);
+                error!(
+                    error = %e,
+                    host = %config.host,
+                    port = config.port,
+                    "Failed to connect to OBS WebSocket"
+                );
 
                 // Publish connection failed event
                 let payload = json!({
                     "host": config.host,
                     "port": config.port,
-                    "error": error_msg,
+                    "error": error_msg.clone(),
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 });
 
                 let stream_event = StreamEvent::new("obs", "connection.failed", payload);
                 if let Err(publish_err) = self.event_bus.publish(stream_event).await {
-                    eprintln!(
-                        "Failed to publish OBS connection failure event: {}",
-                        publish_err
+                    error!(
+                        error = %publish_err,
+                        "Failed to publish OBS connection failure event"
                     );
+                } else {
+                    debug!("Published OBS connection failure event");
                 }
 
                 Err(anyhow!(error_msg))
@@ -478,31 +587,43 @@ impl ServiceAdapter for ObsAdapter {
         }
     }
 
+    #[instrument(skip(self), fields(adapter = "obs"), level = "debug")]
     async fn disconnect(&self) -> Result<()> {
         // Only disconnect if currently connected
         if !self.connected.load(Ordering::SeqCst) {
+            debug!("OBS adapter already disconnected");
             return Ok(());
         }
 
+        info!("Disconnecting OBS adapter");
+        
         // Set disconnected state to stop event handling
         self.connected.store(false, Ordering::SeqCst);
 
         // Send shutdown signal if exists
         if let Some(shutdown_sender) = self.shutdown_signal.lock().await.take() {
-            let _ = shutdown_sender.send(()).await;
+            debug!("Sending shutdown signal to OBS event handler");
+            if let Err(e) = shutdown_sender.send(()).await {
+                warn!(error = %e, "Failed to send shutdown signal to OBS event handler");
+            }
             // Small delay to allow shutdown signal to be processed
             sleep(Duration::from_millis(100)).await;
+        } else {
+            debug!("No shutdown signal channel available");
         }
 
         // Cancel the event handler task if it's still running
         if let Some(handle) = self.event_handler.lock().await.take() {
             // Simplest solution - just abort the task
-            println!("Aborting OBS event handler");
+            debug!("Aborting OBS event handler task");
             handle.abort();
+        } else {
+            debug!("No event handler task to abort");
         }
 
         // Clear the client
         *self.client.lock().await = None;
+        debug!("Cleared OBS client reference");
 
         // Publish disconnection event
         let payload = json!({
@@ -512,10 +633,12 @@ impl ServiceAdapter for ObsAdapter {
 
         let stream_event = StreamEvent::new("obs", "connection.closed", payload);
         if let Err(e) = self.event_bus.publish(stream_event).await {
-            eprintln!("Failed to publish OBS disconnection event: {}", e);
+            error!(error = %e, "Failed to publish OBS disconnection event");
+        } else {
+            debug!("Published OBS disconnection event");
         }
 
-        println!("Disconnected from OBS WebSocket");
+        info!("Disconnected from OBS WebSocket");
         Ok(())
     }
 
@@ -527,28 +650,53 @@ impl ServiceAdapter for ObsAdapter {
         &self.name
     }
 
+    #[instrument(skip(self, config), fields(adapter = "obs"), level = "debug")]
     async fn configure(&self, config: serde_json::Value) -> Result<()> {
+        info!("Configuring OBS adapter");
         let current_config = self.config.read().await.clone();
         let mut new_config = current_config.clone();
+        
+        // Track if any connection-related settings changed
+        let mut connection_settings_changed = false;
 
         // Update host if provided
         if let Some(host) = config.get("host").and_then(|v| v.as_str()) {
-            new_config.host = host.to_string();
+            if host != current_config.host {
+                info!(old_host = %current_config.host, new_host = %host, "Updating OBS host");
+                new_config.host = host.to_string();
+                connection_settings_changed = true;
+            }
         }
 
         // Update port if provided
         if let Some(port) = config.get("port").and_then(|v| v.as_u64()) {
-            new_config.port = port as u16;
+            let port = port as u16;
+            if port != current_config.port {
+                info!(old_port = current_config.port, new_port = port, "Updating OBS port");
+                new_config.port = port;
+                connection_settings_changed = true;
+            }
         }
 
         // Update password if provided
         if let Some(password) = config.get("password").and_then(|v| v.as_str()) {
-            new_config.password = password.to_string();
+            if password != current_config.password {
+                debug!("Updating OBS password");
+                new_config.password = password.to_string();
+                connection_settings_changed = true;
+            }
         }
 
         // Update auto_connect if provided
         if let Some(auto_connect) = config.get("auto_connect").and_then(|v| v.as_bool()) {
-            new_config.auto_connect = auto_connect;
+            if auto_connect != current_config.auto_connect {
+                info!(
+                    old_auto_connect = current_config.auto_connect,
+                    new_auto_connect = auto_connect,
+                    "Updating OBS auto_connect setting"
+                );
+                new_config.auto_connect = auto_connect;
+            }
         }
 
         // Update include_scene_details if provided
@@ -556,28 +704,45 @@ impl ServiceAdapter for ObsAdapter {
             .get("include_scene_details")
             .and_then(|v| v.as_bool())
         {
-            new_config.include_scene_details = include_details;
+            if include_details != current_config.include_scene_details {
+                info!(
+                    old_value = current_config.include_scene_details,
+                    new_value = include_details,
+                    "Updating OBS include_scene_details setting"
+                );
+                new_config.include_scene_details = include_details;
+            }
         }
 
         // Store the updated configuration
         *self.config.write().await = new_config.clone();
+        debug!("Updated OBS adapter configuration");
 
         // If connection settings changed and we're connected, disconnect and reconnect
-        if (new_config.host != current_config.host
-            || new_config.port != current_config.port
-            || new_config.password != current_config.password)
-            && self.connected.load(Ordering::SeqCst)
-        {
-            println!("OBS connection settings changed, reconnecting...");
+        if connection_settings_changed && self.connected.load(Ordering::SeqCst) {
+            info!(
+                host = %new_config.host,
+                port = new_config.port,
+                "OBS connection settings changed, reconnecting"
+            );
+            
             self.disconnect().await?;
 
             // Wait a bit before reconnecting
+            debug!("Waiting {}ms before reconnecting to OBS", RECONNECT_DELAY_MS);
             sleep(Duration::from_millis(RECONNECT_DELAY_MS)).await;
 
             // Only reconnect if auto_connect is true
             if new_config.auto_connect {
+                info!("Auto-reconnecting OBS adapter with new settings");
                 self.connect().await?;
+            } else {
+                info!("Not auto-reconnecting OBS adapter (auto_connect is disabled)");
             }
+        } else if connection_settings_changed {
+            debug!("Connection settings changed but adapter not currently connected");
+        } else {
+            debug!("No connection-relevant settings changed");
         }
 
         Ok(())

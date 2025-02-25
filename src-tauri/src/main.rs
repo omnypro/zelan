@@ -14,15 +14,22 @@ fn main() {
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
             // Default to info level if RUST_LOG is not set
             if cfg!(debug_assertions) {
-                "zelan_lib=debug,warn".into()
+                // More verbose in debug mode
+                "zelan_lib=debug,zelan_lib::adapters::obs=debug,warn".into()
             } else {
-                "zelan_lib=info,warn".into()
+                // Less verbose in release mode
+                "zelan_lib=info,zelan_lib::adapters::obs=info,warn".into()
             }
         }))
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_target(true))
         .init();
 
     info!("Zelan application starting");
+    
+    // Print log level configuration hint for developers
+    debug!("Logging initialized. Set RUST_LOG environment variable to control log levels");
+    debug!("Example: RUST_LOG=zelan_lib=trace,zelan_lib::adapters::obs=debug");
+    debug!("Available modules: zelan_lib, zelan_lib::adapters::obs, zelan_lib::plugin");
 
     // Build and run the Tauri application with our plugin
     tauri::Builder::default()

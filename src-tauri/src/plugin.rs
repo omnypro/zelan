@@ -124,22 +124,50 @@ impl ZelanState {
                         "Found saved Test adapter settings"
                     );
                     
+                    // Import the TestConfig type and AdapterConfig trait
+                    use crate::adapters::{base::AdapterConfig, test::TestConfig};
+                    
+                    // Create the adapter with the saved configuration if possible
+                    let test_adapter = match TestAdapter::config_from_json(&saved_test_settings.config) {
+                        Ok(config) => {
+                            info!(
+                                interval_ms = config.interval_ms,
+                                generate_special = config.generate_special_events,
+                                "Using saved Test adapter configuration"
+                            );
+                            TestAdapter::with_config(service_guard.event_bus(), config)
+                        },
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                "Failed to parse saved Test adapter config, using defaults"
+                            );
+                            TestAdapter::new(service_guard.event_bus())
+                        }
+                    };
+                    
                     // Register with saved settings
-                    let test_adapter = TestAdapter::new(service_guard.event_bus());
                     service_guard.register_adapter(test_adapter, Some(saved_test_settings.clone())).await;
                     info!("Registered Test adapter with saved settings");
                 } else {
                     info!("No saved Test adapter settings found, using defaults");
+                    
+                    // Import the TestConfig type and AdapterConfig trait
+                    use crate::adapters::{base::AdapterConfig, test::TestConfig};
+                    
+                    // Create a default test adapter
                     let test_adapter = TestAdapter::new(service_guard.event_bus());
+                    
+                    // Define default settings with the proper config
+                    let default_config = TestConfig::default();
                     let test_settings = AdapterSettings {
                         enabled: true,
-                        config: serde_json::json!({
-                            "interval_ms": 1000, // Generate events every second
-                            "generate_special_events": true,
-                        }),
+                        config: default_config.to_json(),
                         display_name: "Test Adapter".to_string(),
                         description: "A test adapter that generates sample events at regular intervals for development and debugging".to_string(),
                     };
+                    
+                    // Register the adapter
                     service_guard
                         .register_adapter(test_adapter, Some(test_settings))
                         .await;

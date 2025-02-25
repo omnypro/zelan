@@ -114,7 +114,9 @@ impl Default for EventBusStats {
 }
 
 impl EventBus {
+    #[instrument(level = "debug")]
     pub fn new(capacity: usize) -> Self {
+        info!(capacity, "Creating new event bus");
         let (sender, _) = broadcast::channel(capacity);
         Self {
             sender,
@@ -124,15 +126,20 @@ impl EventBus {
     }
 
     /// Get a subscriber to receive events
+    #[instrument(skip(self), level = "debug")]
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
+        debug!("New subscriber registered to event bus");
         self.sender.subscribe()
     }
 
     /// Publish an event to all subscribers with optimized statistics handling
+    #[instrument(skip(self, event), fields(source = %event.source(), event_type = %event.event_type()), level = "debug")]
     pub async fn publish(&self, event: StreamEvent) -> ZelanResult<usize> {
         // Cache event details before acquiring lock
         let source = event.source.clone();
         let event_type = event.event_type.clone();
+        
+        debug!("Publishing event to bus");
 
         // Attempt to send the event first (most common operation)
         match self.sender.send(event) {
@@ -145,6 +152,8 @@ impl EventBus {
                     *stats_guard.source_counts.entry(source).or_insert(0) += 1;
                     *stats_guard.type_counts.entry(event_type).or_insert(0) += 1;
                 });
+                
+                debug!(receivers, "Event published successfully");
                 Ok(receivers)
             }
             Err(err) => {
@@ -159,9 +168,10 @@ impl EventBus {
                         stats_guard.events_dropped += 1;
                     });
 
-                    println!(
-                        "No receivers for event {}.{}, event dropped",
-                        source, event_type
+                    debug!(
+                        source = %source,
+                        event_type = %event_type,
+                        "No receivers for event, message dropped"
                     );
                     Ok(0) // Return 0 receivers instead of an error
                 } else {
@@ -172,6 +182,7 @@ impl EventBus {
                         stats_guard.events_dropped += 1;
                     });
 
+                    error!(error = %err, "Failed to publish event");
                     Err(error::event_bus_publish_failed(err))
                 }
             }
@@ -179,17 +190,29 @@ impl EventBus {
     }
 
     /// Get current event bus statistics
+    #[instrument(skip(self), level = "debug")]
     pub async fn get_stats(&self) -> EventBusStats {
-        self.stats.read().await.clone()
+        let stats = self.stats.read().await.clone();
+        debug!(
+            events_published = stats.events_published,
+            events_dropped = stats.events_dropped,
+            "Retrieved event bus statistics"
+        );
+        stats
     }
 
     /// Reset all statistics counters
+    #[instrument(skip(self), level = "debug")]
     pub async fn reset_stats(&self) {
+        info!("Resetting event bus statistics");
         *self.stats.write().await = EventBusStats::default();
+        debug!("Event bus statistics reset to defaults");
     }
 
     /// Get the configured capacity of the event bus
+    #[instrument(skip(self), level = "debug")]
     pub fn capacity(&self) -> usize {
+        debug!(capacity = self.buffer_size, "Retrieved event bus capacity");
         self.buffer_size
     }
 }
@@ -276,7 +299,9 @@ impl Clone for StreamService {
 }
 
 impl StreamService {
+    #[instrument(level = "info")]
     pub fn new() -> Self {
+        info!("Creating new StreamService with default configuration");
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         Self {
             event_bus,
@@ -292,7 +317,9 @@ impl StreamService {
     }
 
     /// Create a new StreamService with custom WebSocket configuration
+    #[instrument(fields(port = ws_config.port), level = "info")]
     pub fn with_config(ws_config: WebSocketConfig) -> Self {
+        info!("Creating new StreamService with custom WebSocket configuration");
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         Self {
             event_bus,
@@ -306,7 +333,14 @@ impl StreamService {
     }
 
     /// Load configuration from app storage
+    #[instrument(skip(config), level = "info")]
     pub fn from_config(config: Config) -> Self {
+        info!(
+            adapter_count = config.adapters.len(),
+            ws_port = config.websocket.port,
+            "Creating StreamService from stored configuration"
+        );
+        
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         let adapter_settings = Arc::new(RwLock::new(config.adapters));
 
@@ -322,21 +356,37 @@ impl StreamService {
     }
 
     /// Export the current configuration
+    #[instrument(skip(self), level = "debug")]
     pub async fn export_config(&self) -> Config {
-        Config {
+        debug!("Exporting current StreamService configuration");
+        let adapter_settings = self.adapter_settings.read().await.clone();
+        let config = Config {
             websocket: self.ws_config.clone(),
-            adapters: self.adapter_settings.read().await.clone(),
-        }
+            adapters: adapter_settings,
+        };
+        
+        debug!(
+            ws_port = config.websocket.port,
+            adapter_count = config.adapters.len(),
+            "Configuration exported"
+        );
+        
+        config
     }
 
     /// Get the current WebSocket configuration
+    #[instrument(skip(self), level = "debug")]
     pub fn ws_config(&self) -> &WebSocketConfig {
+        debug!(port = self.ws_config.port, "Retrieved WebSocket configuration");
         &self.ws_config
     }
 
     /// Update the WebSocket configuration
+    #[instrument(skip(self), fields(old_port = self.ws_config.port, new_port = config.port), level = "info")]
     pub fn set_ws_config(&mut self, config: WebSocketConfig) {
+        info!("Updating WebSocket configuration");
         self.ws_config = config;
+        debug!("WebSocket configuration updated");
     }
 
     /// Register a new adapter with the service

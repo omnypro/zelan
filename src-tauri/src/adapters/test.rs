@@ -1,84 +1,164 @@
 // src/adapters/test.rs
-use crate::{EventBus, ServiceAdapter, StreamEvent};
+use crate::{adapters::base::{AdapterConfig, BaseAdapter}, EventBus, ServiceAdapter};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::json;
-use std::sync::atomic::{AtomicBool, Ordering};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tokio::time::sleep;
+use tracing::{debug, error, info, instrument, warn};
 
 /// A simple test adapter that generates events at regular intervals
 /// Useful for testing the event bus and WebSocket server without external services
 pub struct TestAdapter {
-    name: String,
-    event_bus: Arc<EventBus>,
-    connected: AtomicBool,
-    task_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
-    config: tokio::sync::RwLock<TestAdapterConfig>,
+    /// Base adapter implementation
+    base: BaseAdapter,
+    /// Configuration specific to the TestAdapter
+    config: RwLock<TestConfig>,
 }
 
 /// Configuration for the test adapter
-#[derive(Debug, Clone)]
-struct TestAdapterConfig {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestConfig {
     /// Interval between events in milliseconds
-    interval_ms: u64,
+    pub interval_ms: u64,
     /// Whether to generate special events
-    generate_special_events: bool,
+    pub generate_special_events: bool,
+}
+
+impl Default for TestConfig {
+    fn default() -> Self {
+        Self {
+            interval_ms: 1000, // Default: 1 second
+            generate_special_events: true,
+        }
+    }
+}
+
+impl AdapterConfig for TestConfig {
+    fn to_json(&self) -> Value {
+        json!({
+            "interval_ms": self.interval_ms,
+            "generate_special_events": self.generate_special_events,
+        })
+    }
+    
+    fn from_json(json: &Value) -> Result<Self> {
+        let mut config = TestConfig::default();
+        
+        // Extract the interval if provided
+        if let Some(interval_ms) = json.get("interval_ms").and_then(|v| v.as_u64()) {
+            // Ensure interval is reasonable (minimum 100ms, maximum 60000ms)
+            config.interval_ms = interval_ms.clamp(100, 60000);
+        }
+        
+        // Extract the generate_special_events flag if provided
+        if let Some(generate_special) = json.get("generate_special_events").and_then(|v| v.as_bool()) {
+            config.generate_special_events = generate_special;
+        }
+        
+        Ok(config)
+    }
+    
+    fn adapter_type() -> &'static str {
+        "test"
+    }
+    
+    fn validate(&self) -> Result<()> {
+        // Ensure interval is reasonable
+        if self.interval_ms < 100 || self.interval_ms > 60000 {
+            return Err(anyhow::anyhow!("Interval must be between 100ms and 60000ms"));
+        }
+        
+        Ok(())
+    }
 }
 
 impl TestAdapter {
+    #[instrument(skip(event_bus), level = "debug")]
     pub fn new(event_bus: Arc<EventBus>) -> Self {
+        info!("Creating new test adapter");
         Self {
-            name: "test".to_string(),
-            event_bus,
-            connected: AtomicBool::new(false),
-            task_handle: tokio::sync::Mutex::new(None),
-            config: tokio::sync::RwLock::new(TestAdapterConfig {
-                interval_ms: 1000, // Default: 1 second
-                generate_special_events: true,
-            }),
+            base: BaseAdapter::new("test", event_bus),
+            config: RwLock::new(TestConfig::default()),
         }
+    }
+    
+    #[instrument(skip(event_bus), level = "debug")]
+    pub fn with_config(event_bus: Arc<EventBus>, config: TestConfig) -> Self {
+        info!(
+            interval_ms = config.interval_ms,
+            generate_special = config.generate_special_events,
+            "Creating test adapter with custom config"
+        );
+        Self {
+            base: BaseAdapter::new("test", event_bus),
+            config: RwLock::new(config),
+        }
+    }
+    
+    /// Convert a JSON config to a TestConfig
+    #[instrument(skip(config_json), level = "debug")]
+    pub fn config_from_json(config_json: &Value) -> Result<TestConfig> {
+        TestConfig::from_json(config_json)
     }
 
     /// Generate test events at a regular interval
-    async fn generate_events(&self) -> Result<()> {
+    #[instrument(skip(self, shutdown_rx), level = "debug")]
+    async fn generate_events(&self, mut shutdown_rx: tokio::sync::mpsc::Receiver<()>) -> Result<()> {
+        info!("Starting test event generator");
         let mut counter = 0;
 
-        while self.connected.load(Ordering::SeqCst) {
+        loop {
+            // Check for shutdown signal
+            let maybe_shutdown = tokio::time::timeout(
+                tokio::time::Duration::from_millis(10), 
+                shutdown_rx.recv()
+            ).await;
+            
+            if maybe_shutdown.is_ok() {
+                info!("Received shutdown signal for test event generator");
+                break;
+            }
+            
+            // Check if we're still connected
+            if !self.base.is_connected() {
+                info!("Test adapter no longer connected, stopping event generator");
+                break;
+            }
+            
             // Get current config (read lock)
             let config = self.config.read().await.clone();
 
             // Generate a test event
-            let event = StreamEvent::new(
-                "test",
-                "test.event",
-                json!({
-                    "counter": counter,
-                    "message": format!("Test event #{}", counter),
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                }),
-            );
-
-            // Publish the event
-            if let Err(e) = self.event_bus.publish(event).await {
-                eprintln!("Failed to publish test event: {}", e);
+            let payload = json!({
+                "counter": counter,
+                "message": format!("Test event #{}", counter),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            });
+            
+            debug!(counter, "Publishing regular test event");
+            
+            // Use BaseAdapter to publish the event
+            if let Err(e) = self.base.publish_event("test.event", payload).await {
+                error!(error = %e, counter, "Failed to publish test event");
             }
 
             // Generate a different event every 5 counts if enabled
             if config.generate_special_events && counter % 5 == 0 {
-                let event = StreamEvent::new(
-                    "test",
-                    "test.special",
-                    json!({
-                        "counter": counter,
-                        "special": true,
-                        "message": "This is a special test event",
-                    }),
-                );
-
-                if let Err(e) = self.event_bus.publish(event).await {
-                    eprintln!("Failed to publish special test event: {}", e);
+                let special_payload = json!({
+                    "counter": counter,
+                    "special": true,
+                    "message": "This is a special test event",
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                });
+                
+                debug!(counter, "Publishing special test event");
+                
+                if let Err(e) = self.base.publish_event("test.special", special_payload).await {
+                    error!(error = %e, counter, "Failed to publish special test event");
                 }
             }
 
@@ -86,98 +166,106 @@ impl TestAdapter {
             sleep(Duration::from_millis(config.interval_ms)).await;
         }
 
+        info!("Test event generator stopped");
         Ok(())
     }
 }
 
 #[async_trait]
 impl ServiceAdapter for TestAdapter {
+    #[instrument(skip(self), level = "debug")]
     async fn connect(&self) -> Result<()> {
         // Only connect if not already connected
-        if self.connected.load(Ordering::SeqCst) {
+        if self.base.is_connected() {
+            info!("Test adapter is already connected");
             return Ok(());
         }
 
+        info!("Connecting test adapter");
+        
+        // Create the shutdown channel
+        let (_, shutdown_rx) = self.base.create_shutdown_channel().await;
+        
         // Set connected state
-        self.connected.store(true, Ordering::SeqCst);
+        self.base.set_connected(true);
 
         // Start generating events in a background task
         let self_clone = self.clone();
         let handle = tokio::spawn(async move {
-            if let Err(e) = self_clone.generate_events().await {
-                eprintln!("Error in test event generator: {}", e);
+            if let Err(e) = self_clone.generate_events(shutdown_rx).await {
+                error!(error = %e, "Error in test event generator");
             }
         });
 
-        // Store the task handle
-        *self.task_handle.lock().await = Some(handle);
+        // Store the event handler task using BaseAdapter
+        self.base.set_event_handler(handle).await;
 
-        println!("Test adapter connected and generating events");
+        info!("Test adapter connected and generating events");
         Ok(())
     }
 
+    #[instrument(skip(self), level = "debug")]
     async fn disconnect(&self) -> Result<()> {
-        // Set disconnected state to stop event generation
-        self.connected.store(false, Ordering::SeqCst);
-
-        // Wait for the task to complete
-        if let Some(handle) = self.task_handle.lock().await.take() {
-            // We don't want to await the handle here as it might be waiting
-            // for the connected flag to change, which we just did above
-            handle.abort();
+        // Only disconnect if connected
+        if !self.base.is_connected() {
+            debug!("Test adapter is already disconnected");
+            return Ok(());
         }
+        
+        info!("Disconnecting test adapter");
+        
+        // Set disconnected state to stop event generation
+        self.base.set_connected(false);
 
-        println!("Test adapter disconnected");
+        // Stop the event handler (send shutdown signal and abort the task)
+        self.base.stop_event_handler().await?;
+
+        info!("Test adapter disconnected");
         Ok(())
     }
 
     fn is_connected(&self) -> bool {
-        self.connected.load(Ordering::SeqCst)
+        self.base.is_connected()
     }
 
     fn get_name(&self) -> &str {
-        &self.name
+        self.base.name()
     }
 
+    #[instrument(skip(self, config), level = "debug")]
     async fn configure(&self, config: serde_json::Value) -> Result<()> {
-        // Update our configuration based on the provided JSON
+        info!("Configuring test adapter");
+        
+        // Parse the config using our AdapterConfig trait implementation
+        let new_config = TestConfig::from_json(&config)?;
+        
+        // Validate the new configuration
+        new_config.validate()?;
+        
+        // Update our configuration
         let mut current_config = self.config.write().await;
-
-        // Extract the interval if provided
-        if let Some(interval_ms) = config.get("interval_ms").and_then(|v| v.as_u64()) {
-            // Ensure interval is reasonable (minimum 100ms, maximum 60000ms)
-            let interval = interval_ms.clamp(100, 60000);
-            current_config.interval_ms = interval;
-            println!("Test adapter interval set to: {}ms", interval);
-        }
-
-        // Extract the generate_special_events flag if provided
-        if let Some(generate_special) = config
-            .get("generate_special_events")
-            .and_then(|v| v.as_bool())
-        {
-            current_config.generate_special_events = generate_special;
-            println!("Test adapter special events: {}", generate_special);
-        }
-
-        println!("Test adapter configured with: {}", config);
+        *current_config = new_config.clone();
+        
+        info!(
+            interval_ms = new_config.interval_ms,
+            generate_special = new_config.generate_special_events,
+            "Test adapter configured"
+        );
+        
         Ok(())
     }
 }
 
 impl Clone for TestAdapter {
     fn clone(&self) -> Self {
-        // Create a new instance with default config
+        // Create a new instance with the same event bus and config
         // This avoids blocking in clone which is bad practice
+        let event_bus = self.base.event_bus();
+        
+        // We have to assume a default config here without blocking
         Self {
-            name: self.name.clone(),
-            event_bus: Arc::clone(&self.event_bus),
-            connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
-            task_handle: tokio::sync::Mutex::new(None),
-            config: tokio::sync::RwLock::new(TestAdapterConfig {
-                interval_ms: 1000,             // Default value
-                generate_special_events: true, // Default value
-            }),
+            base: BaseAdapter::new("test", event_bus),
+            config: RwLock::new(TestConfig::default()),
         }
     }
 }
