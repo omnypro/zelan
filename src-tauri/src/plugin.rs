@@ -741,14 +741,14 @@ pub async fn get_adapter_settings(
 
 /// Update adapter settings
 #[tauri::command]
-#[instrument(skip(app, settings, state), fields(adapter_name = %adapterName), level = "debug")]
+#[instrument(skip(app, settings, state), fields(adapter_name = %adapter_name), level = "debug")]
 pub async fn update_adapter_settings(
     app: AppHandle,
-    adapterName: String,
+    adapter_name: String,
     settings: serde_json::Value,
     state: State<'_, ZelanState>,
 ) -> Result<String, ZelanError> {
-    info!(adapter = %adapterName, "Updating adapter settings");
+    info!(adapter = %adapter_name, "Updating adapter settings");
 
     // Deserialize the settings
     let mut adapter_settings: AdapterSettings = match serde_json::from_value(settings.clone()) {
@@ -765,7 +765,7 @@ pub async fn update_adapter_settings(
     };
 
     // Special handling for Twitch adapter - extract and store tokens securely
-    if adapterName == "twitch" {
+    if adapter_name == "twitch" {
         debug!("Processing Twitch adapter with secure token handling");
 
         // Log the raw settings to understand what's coming in
@@ -839,7 +839,7 @@ pub async fn update_adapter_settings(
             debug!("Storing Twitch tokens securely");
             if let Err(e) = store_secure_tokens(
                 &app,
-                &adapterName,
+                &adapter_name,
                 serde_json::Value::Object(tokens_to_store.clone()),
             )
             .await
@@ -867,24 +867,24 @@ pub async fn update_adapter_settings(
 
     // Update the settings
     debug!(
-        adapter = %adapterName,
+        adapter = %adapter_name,
         enabled = adapter_settings.enabled,
         "Updating adapter settings"
     );
 
     match service_clone
-        .update_adapter_settings(&adapterName, adapter_settings.clone())
+        .update_adapter_settings(&adapter_name, adapter_settings.clone())
         .await
     {
         Ok(_) => {
-            info!(adapter = %adapterName, "Successfully updated adapter settings");
+            info!(adapter = %adapter_name, "Successfully updated adapter settings");
 
             // For Twitch, check for secure tokens and provide them to the adapter if needed
-            if adapterName == "twitch" {
+            if adapter_name == "twitch" {
                 debug!("Checking for secure Twitch tokens");
 
                 // See if we have secure tokens stored
-                match retrieve_secure_tokens(&app, &adapterName).await {
+                match retrieve_secure_tokens(&app, &adapter_name).await {
                     Ok(Some(tokens)) => {
                         info!("Found secure tokens for Twitch, applying to adapter");
                         debug!(tokens = ?tokens, "Secure tokens to apply");
@@ -919,7 +919,7 @@ pub async fn update_adapter_settings(
                         // Let the adapter handle the tokens (don't error on failure)
                         if let Err(e) = service_clone
                             .update_adapter_settings(
-                                &adapterName,
+                                &adapter_name,
                                 AdapterSettings {
                                     enabled: adapter_settings.enabled,
                                     config: full_config,
@@ -940,9 +940,9 @@ pub async fn update_adapter_settings(
             }
 
             // For Twitch, monitor for tokens provided directly by the auth flow
-            if adapterName == "twitch" && adapter_settings.enabled {
+            if adapter_name == "twitch" && adapter_settings.enabled {
                 // Start a background task to periodically check if tokens appear that need to be secured
-                let adapter_name_clone = adapterName.clone();
+                let adapter_name_clone = adapter_name.clone();
                 let service_clone2 = service_clone.clone();
 
                 tauri::async_runtime::spawn(async move {
@@ -974,14 +974,14 @@ pub async fn update_adapter_settings(
 
             // If adapter is enabled, explicitly try to connect it
             if adapter_settings.enabled {
-                info!(adapter = %adapterName, "Adapter is enabled, attempting connection");
+                info!(adapter = %adapter_name, "Adapter is enabled, attempting connection");
 
-                match service_clone.connect_adapter(&adapterName).await {
-                    Ok(_) => info!(adapter = %adapterName, "Successfully connected adapter"),
+                match service_clone.connect_adapter(&adapter_name).await {
+                    Ok(_) => info!(adapter = %adapter_name, "Successfully connected adapter"),
                     Err(connect_err) => {
                         warn!(
                             error = %connect_err,
-                            adapter = %adapterName,
+                            adapter = %adapter_name,
                             "Failed to connect adapter after settings update"
                         );
                         // We'll continue and save settings anyway
@@ -999,7 +999,7 @@ pub async fn update_adapter_settings(
             if let Err(e) = state.save_config_to_store(&app).await {
                 error!(
                     error = %e,
-                    adapter = %adapterName,
+                    adapter = %adapter_name,
                     "Failed to save configuration after updating adapter settings"
                 );
                 return Err(ZelanError {
@@ -1013,17 +1013,17 @@ pub async fn update_adapter_settings(
             }
 
             // Success, log completion
-            info!(adapter = %adapterName, "Settings successfully updated and saved");
+            info!(adapter = %adapter_name, "Settings successfully updated and saved");
         }
         Err(e) => {
-            error!(error = %e, adapter = %adapterName, "Failed to update adapter settings");
+            error!(error = %e, adapter = %adapter_name, "Failed to update adapter settings");
             return Err(e);
         }
     }
 
     Ok(format!(
         "Successfully updated settings for adapter '{}'",
-        adapterName
+        adapter_name
     ))
 }
 
@@ -1129,6 +1129,122 @@ pub async fn set_websocket_port(
         "WebSocket port updated to {}. Restart the application for changes to take effect.",
         port
     ))
+}
+
+/// Connect an adapter by name
+#[tauri::command]
+#[instrument(skip(app, state), fields(adapter_name = %adapter_name), level = "debug")]
+pub async fn connect_adapter(
+    app: AppHandle,
+    state: State<'_, ZelanState>,
+    adapter_name: String,
+) -> Result<String, ZelanError> {
+    debug!("Connecting adapter: {}", adapter_name);
+    
+    // Access the service
+    let service = state.service.lock().await;
+    
+    // Connect the adapter
+    match service.connect_adapter(&adapter_name).await {
+        Ok(_) => {
+            info!("Successfully connected adapter: {}", adapter_name);
+            Ok(format!("Connected adapter: {}", adapter_name))
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to connect adapter: {}", adapter_name);
+            Err(e)
+        }
+    }
+}
+
+/// Disconnect an adapter by name
+#[tauri::command]
+#[instrument(skip(app, state), fields(adapter_name = %adapter_name), level = "debug")]
+pub async fn disconnect_adapter(
+    app: AppHandle,
+    state: State<'_, ZelanState>,
+    adapter_name: String,
+) -> Result<String, ZelanError> {
+    debug!("Disconnecting adapter: {}", adapter_name);
+    
+    // Access the service
+    let service = state.service.lock().await;
+    
+    // Disconnect the adapter
+    match service.disconnect_adapter(&adapter_name).await {
+        Ok(_) => {
+            info!("Successfully disconnected adapter: {}", adapter_name);
+            Ok(format!("Disconnected adapter: {}", adapter_name))
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to disconnect adapter: {}", adapter_name);
+            Err(e)
+        }
+    }
+}
+
+/// Get authentication status for an adapter
+#[tauri::command]
+#[instrument(skip(app, state), fields(adapter_name = %adapter_name), level = "debug")]
+pub async fn get_adapter_auth_status(
+    app: AppHandle,
+    state: State<'_, ZelanState>,
+    adapter_name: String,
+) -> Result<serde_json::Value, ZelanError> {
+    debug!("Getting auth status for adapter: {}", adapter_name);
+    
+    // Access the service
+    let service = state.service.lock().await;
+    
+    // Check if we have settings for this adapter
+    let settings = match service.get_adapter_settings(&adapter_name).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!(error = %e, "Failed to get settings for adapter: {}", adapter_name);
+            return Err(ZelanError {
+                code: ErrorCode::AdapterNotFound,
+                message: format!("Adapter '{}' not found", adapter_name),
+                context: None,
+                severity: ErrorSeverity::Error,
+            });
+        }
+    };
+    
+    // For Twitch adapter, check if we have access token in config
+    if adapter_name == "twitch" {
+        // Check if there's an access token in the settings
+        let has_token = settings.config.get("access_token")
+            .and_then(|t| t.as_str())
+            .filter(|s| !s.is_empty())
+            .is_some();
+            
+        // Check for token in secure storage
+        let tokens = match retrieve_secure_tokens(&app, &adapter_name).await {
+            Ok(Some(tokens)) => tokens,
+            _ => serde_json::json!(null),
+        };
+        
+        let has_secure_token = tokens.get("access_token")
+            .and_then(|t| t.as_str())
+            .filter(|s| !s.is_empty())
+            .is_some();
+            
+        return Ok(serde_json::json!({
+            "adapter": adapter_name,
+            "has_token": has_token || has_secure_token,
+            "is_authenticated": has_token || has_secure_token,
+            "auth_method": "device_code",
+            "scopes": ["user:read:email", "channel:read:subscriptions"],
+        }));
+    }
+    
+    // Default response for other adapters
+    Ok(serde_json::json!({
+        "adapter": adapter_name,
+        "has_token": false,
+        "is_authenticated": true, // Most other adapters don't require auth
+        "auth_method": "none",
+    }))
 }
 
 /// Initialize the Zelan state
