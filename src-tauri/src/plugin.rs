@@ -4,9 +4,9 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use serde_json::json;
+use std::any::Any;
 use std::sync::Arc;
 use tauri::async_runtime;
-use std::any::Any;
 use tauri::{AppHandle, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
@@ -102,7 +102,7 @@ pub async fn remove_secure_tokens(app: &AppHandle, adapter_name: &str) -> Result
         if store.has(secure_key.clone()) {
             let deleted = store.delete(secure_key);
             debug!(deleted = %deleted, "Deletion result");
-            
+
             if let Err(e) = store.save() {
                 error!(error = %e, "Failed to save secure store after deletion");
                 return Err(anyhow!("Failed to save secure store: {}", e));
@@ -236,7 +236,7 @@ impl ZelanState {
 
         // Pass the app handle to the initialization task
         let app_handle = app.clone();
-        
+
         // We initialize services in a separate task to avoid blocking
         tauri::async_runtime::spawn(
             async move {
@@ -658,7 +658,7 @@ pub async fn update_adapter_settings(
     // Special handling for Twitch adapter - extract and store tokens securely
     if adapterName == "twitch" {
         debug!("Processing Twitch adapter with secure token handling");
-        
+
         // Log the raw settings to understand what's coming in
         debug!(settings = ?adapter_settings, "Raw adapter settings for inspection");
 
@@ -668,14 +668,14 @@ pub async fn update_adapter_settings(
             .as_object()
             .cloned()
             .unwrap_or_default();
-            
+
         debug!(config_obj = ?config_obj, "Config object to inspect for tokens");
         let mut tokens_to_store = serde_json::Map::new();
 
         // Check if access_token and refresh_token are in the config
         if let Some(token) = config_obj.get("access_token").cloned() {
             debug!(access_token = ?token, "Checking access token value");
-            
+
             // Log more specific details about the token
             if token.is_null() {
                 debug!("Access token is null");
@@ -688,7 +688,7 @@ pub async fn update_adapter_settings(
             } else {
                 debug!(token_type = ?token.type_id(), "Access token is not a string or null");
             }
-            
+
             if !token.is_null() && token.as_str().filter(|t| !t.is_empty()).is_some() {
                 debug!("Found access_token in config, moving to secure storage");
                 tokens_to_store.insert("access_token".to_string(), token.clone());
@@ -701,7 +701,7 @@ pub async fn update_adapter_settings(
 
         if let Some(token) = config_obj.get("refresh_token").cloned() {
             debug!(refresh_token = ?token, "Checking refresh token value");
-            
+
             // Log more specific details about the token
             if token.is_null() {
                 debug!("Refresh token is null");
@@ -714,7 +714,7 @@ pub async fn update_adapter_settings(
             } else {
                 debug!(token_type = ?token.type_id(), "Refresh token is not a string or null");
             }
-            
+
             if !token.is_null() && token.as_str().filter(|t| !t.is_empty()).is_some() {
                 debug!("Found refresh_token in config, moving to secure storage");
                 tokens_to_store.insert("refresh_token".to_string(), token.clone());
@@ -786,7 +786,7 @@ pub async fn update_adapter_settings(
                             .as_object()
                             .cloned()
                             .unwrap_or_default();
-                            
+
                         debug!(before_tokens = ?config, "Config before adding tokens");
 
                         // Add tokens back for adapter configuration
@@ -836,19 +836,25 @@ pub async fn update_adapter_settings(
                 let app_handle = app.clone();
                 let adapter_name_clone = adapterName.clone();
                 let service_clone2 = service_clone.clone();
-                
+
                 tauri::async_runtime::spawn(async move {
                     // Wait a bit for authentication to complete if it's ongoing
                     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                    
+
                     // Check adapter settings for tokens
-                    if let Ok(current_settings) = service_clone2.get_adapter_settings(&adapter_name_clone).await {
+                    if let Ok(current_settings) = service_clone2
+                        .get_adapter_settings(&adapter_name_clone)
+                        .await
+                    {
                         if let Some(config_obj) = current_settings.config.as_object() {
                             // Check for access token
-                            let has_token = config_obj.get("access_token")
-                                .filter(|t| !t.is_null() && t.as_str().filter(|s| !s.is_empty()).is_some())
+                            let has_token = config_obj
+                                .get("access_token")
+                                .filter(|t| {
+                                    !t.is_null() && t.as_str().filter(|s| !s.is_empty()).is_some()
+                                })
                                 .is_some();
-                                
+
                             if has_token {
                                 info!("Found access token in Twitch adapter after delay, should be moved to secure storage");
                                 // Next settings update will handle this automatically
@@ -857,7 +863,7 @@ pub async fn update_adapter_settings(
                     }
                 });
             }
-            
+
             // If adapter is enabled, explicitly try to connect it
             if adapter_settings.enabled {
                 info!(adapter = %adapterName, "Adapter is enabled, attempting connection");

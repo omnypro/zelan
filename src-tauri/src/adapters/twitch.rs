@@ -5,9 +5,9 @@ use crate::{
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tauri::async_runtime;
 use serde_json::{json, Value};
 use std::{env, sync::Arc};
+use tauri::async_runtime;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::Duration;
 use tracing::{debug, error, info, instrument, warn};
@@ -556,7 +556,7 @@ impl TwitchAdapter {
                         let mut config = self_clone.config.write().await;
                         config.access_token = Some(access_token.clone());
                         config.refresh_token = refresh_token.clone();
-                        
+
                         // Log that we've saved tokens
                         info!(
                             "Saved authentication tokens to adapter config. access_token_len={}, refresh_token={}",

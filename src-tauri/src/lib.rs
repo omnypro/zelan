@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use tauri::async_runtime;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -14,6 +13,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use tauri::async_runtime;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::sleep;
