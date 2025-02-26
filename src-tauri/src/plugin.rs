@@ -694,6 +694,8 @@ pub async fn get_event_bus_status(
         message: "Failed to serialize event bus stats".to_string(),
         context: Some(e.to_string()),
         severity: ErrorSeverity::Error,
+        category: Some(crate::ErrorCategory::Internal),
+        error_id: None,
     })
 }
 
@@ -715,6 +717,8 @@ pub async fn get_adapter_statuses(
         message: "Failed to serialize adapter statuses".to_string(),
         context: Some(e.to_string()),
         severity: ErrorSeverity::Error,
+        category: Some(crate::ErrorCategory::Internal),
+        error_id: None,
     })
 }
 
@@ -736,6 +740,8 @@ pub async fn get_adapter_settings(
         message: "Failed to serialize adapter settings".to_string(),
         context: Some(e.to_string()),
         severity: ErrorSeverity::Error,
+        category: Some(crate::ErrorCategory::Internal),
+        error_id: None,
     })
 }
 
@@ -760,6 +766,8 @@ pub async fn update_adapter_settings(
                 message: "Invalid adapter settings format".to_string(),
                 context: Some(e.to_string()),
                 severity: ErrorSeverity::Error,
+                category: Some(crate::ErrorCategory::Configuration),
+                error_id: None,
             });
         }
     };
@@ -1007,6 +1015,8 @@ pub async fn update_adapter_settings(
                     message: "Failed to save configuration".to_string(),
                     context: Some(e.to_string()),
                     severity: ErrorSeverity::Warning,
+                    category: Some(crate::ErrorCategory::Internal),
+                    error_id: None,
                 });
             } else {
                 info!("Successfully saved config to store");
@@ -1094,6 +1104,8 @@ pub async fn set_websocket_port(
             message: "Invalid port number".to_string(),
             context: Some(format!("Port must be between 1024 and 65535, got {}", port)),
             severity: ErrorSeverity::Error,
+            category: Some(crate::ErrorCategory::Configuration),
+            error_id: None,
         });
     }
 
@@ -1117,6 +1129,8 @@ pub async fn set_websocket_port(
             message: "Failed to save configuration".to_string(),
             context: Some(e.to_string()),
             severity: ErrorSeverity::Warning,
+            category: Some(crate::ErrorCategory::Internal),
+            error_id: None,
         });
     }
 
@@ -1139,10 +1153,10 @@ pub async fn connect_adapter(
     adapter_name: String,
 ) -> Result<String, ZelanError> {
     debug!("Connecting adapter: {}", adapter_name);
-    
+
     // Access the service
     let service = state.service.lock().await;
-    
+
     // Connect the adapter
     match service.connect_adapter(&adapter_name).await {
         Ok(_) => {
@@ -1164,10 +1178,10 @@ pub async fn disconnect_adapter(
     adapter_name: String,
 ) -> Result<String, ZelanError> {
     debug!("Disconnecting adapter: {}", adapter_name);
-    
+
     // Access the service
     let service = state.service.lock().await;
-    
+
     // Disconnect the adapter
     match service.disconnect_adapter(&adapter_name).await {
         Ok(_) => {
@@ -1190,10 +1204,10 @@ pub async fn get_adapter_auth_status(
     adapter_name: String,
 ) -> Result<serde_json::Value, ZelanError> {
     debug!("Getting auth status for adapter: {}", adapter_name);
-    
+
     // Access the service
     let service = state.service.lock().await;
-    
+
     // Check if we have settings for this adapter
     let settings = match service.get_adapter_settings(&adapter_name).await {
         Ok(s) => s,
@@ -1204,29 +1218,34 @@ pub async fn get_adapter_auth_status(
                 message: format!("Adapter '{}' not found", adapter_name),
                 context: None,
                 severity: ErrorSeverity::Error,
+                category: Some(crate::ErrorCategory::NotFound),
+                error_id: None,
             });
         }
     };
-    
+
     // For Twitch adapter, check if we have access token in config
     if adapter_name == "twitch" {
         // Check if there's an access token in the settings
-        let has_token = settings.config.get("access_token")
+        let has_token = settings
+            .config
+            .get("access_token")
             .and_then(|t| t.as_str())
             .filter(|s| !s.is_empty())
             .is_some();
-            
+
         // Check for token in secure storage
         let tokens = match retrieve_secure_tokens(&app, &adapter_name).await {
             Ok(Some(tokens)) => tokens,
             _ => serde_json::json!(null),
         };
-        
-        let has_secure_token = tokens.get("access_token")
+
+        let has_secure_token = tokens
+            .get("access_token")
             .and_then(|t| t.as_str())
             .filter(|s| !s.is_empty())
             .is_some();
-            
+
         return Ok(serde_json::json!({
             "adapter": adapter_name,
             "has_token": has_token || has_secure_token,
@@ -1235,7 +1254,7 @@ pub async fn get_adapter_auth_status(
             "scopes": ["user:read:email", "channel:read:subscriptions"],
         }));
     }
-    
+
     // Default response for other adapters
     Ok(serde_json::json!({
         "adapter": adapter_name,

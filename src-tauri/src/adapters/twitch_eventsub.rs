@@ -12,10 +12,7 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, error, info, warn};
 use twitch_api::{
-    eventsub::{
-        Event,
-        event::websocket::EventsubWebsocketData
-    },
+    eventsub::{event::websocket::EventsubWebsocketData, Event},
     types::UserId,
 };
 use twitch_oauth2::{ClientId, UserToken};
@@ -211,13 +208,17 @@ impl EventSubClient {
                 let reconnect_delay = if reconnect_attempts == 0 {
                     0 // First attempt, no delay
                 } else {
-                    let base_delay = DEFAULT_RECONNECT_DELAY_SECS * 2u64.pow(reconnect_attempts as u32);
+                    let base_delay =
+                        DEFAULT_RECONNECT_DELAY_SECS * 2u64.pow(reconnect_attempts as u32);
                     std::cmp::min(base_delay, MAX_RECONNECT_DELAY_SECS)
                 };
 
                 // Wait for reconnect delay if needed
                 if reconnect_delay > 0 {
-                    info!("Reconnecting to Twitch EventSub in {} seconds", reconnect_delay);
+                    info!(
+                        "Reconnecting to Twitch EventSub in {} seconds",
+                        reconnect_delay
+                    );
                     tokio::time::sleep(Duration::from_secs(reconnect_delay)).await;
                 }
 
@@ -311,13 +312,13 @@ impl EventSubClient {
                             Ok(EventsubWebsocketData::Welcome { payload, .. }) => {
                                 // Extract session ID
                                 let session_id = payload.session.id.into_owned();
-                                
+
                                 // Store session ID
                                 conn.session_id = session_id.clone();
-                                
+
                                 // Update connection
                                 *connection.write().await = Some(conn);
-                                
+
                                 return Ok(session_id);
                             }
                             Ok(_) => {
@@ -357,7 +358,10 @@ impl EventSubClient {
         let response = client
             .get("https://api.twitch.tv/helix/users")
             .header("Client-ID", client_id.as_str())
-            .header("Authorization", format!("Bearer {}", token.access_token.secret()))
+            .header(
+                "Authorization",
+                format!("Bearer {}", token.access_token.secret()),
+            )
             .send()
             .await?;
 
@@ -365,7 +369,11 @@ impl EventSubClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await?;
-            return Err(anyhow!("Failed to get user info: HTTP {} - {}", status, error_text));
+            return Err(anyhow!(
+                "Failed to get user info: HTTP {} - {}",
+                status,
+                error_text
+            ));
         }
 
         // Parse response
@@ -392,7 +400,8 @@ impl EventSubClient {
         info!("Started processing EventSub messages");
 
         // Create ping timer
-        let mut ping_interval = tokio::time::interval(Duration::from_secs(WEBSOCKET_PING_INTERVAL_SECS));
+        let mut ping_interval =
+            tokio::time::interval(Duration::from_secs(WEBSOCKET_PING_INTERVAL_SECS));
 
         // Set up a task to send periodic pings
         let connection_ping = connection.clone();
@@ -437,7 +446,7 @@ impl EventSubClient {
                 Ok(Some(Ok(msg))) => {
                     match msg {
                         WsMessage::Text(text) => {
-                            // Try to parse using the twitch_api event parser 
+                            // Try to parse using the twitch_api event parser
                             match Event::parse_websocket(&text) {
                                 Ok(websocket_data) => {
                                     // Process based on message type
@@ -447,38 +456,52 @@ impl EventSubClient {
                                             conn.last_keepalive = std::time::Instant::now();
                                         }
                                         EventsubWebsocketData::Reconnect { payload, .. } => {
-                                            if let Some(reconnect_url) = &payload.session.reconnect_url {
-                                                info!("Received reconnect message, url: {}", reconnect_url);
-                                                
+                                            if let Some(reconnect_url) =
+                                                &payload.session.reconnect_url
+                                            {
+                                                info!(
+                                                    "Received reconnect message, url: {}",
+                                                    reconnect_url
+                                                );
+
                                                 // We'll drop the connection and let the main loop reconnect
                                                 drop(conn_guard);
                                                 break;
                                             }
                                         }
-                                        EventsubWebsocketData::Notification { payload, metadata } => {
+                                        EventsubWebsocketData::Notification {
+                                            payload,
+                                            metadata,
+                                        } => {
                                             // Process the event
-                                            info!("Received notification: {} ({})", 
-                                                metadata.message_id,
-                                                metadata.subscription_type);
-                                                
+                                            info!(
+                                                "Received notification: {} ({})",
+                                                metadata.message_id, metadata.subscription_type
+                                            );
+
                                             // Convert to JSON for our simple EventBus
                                             match serde_json::to_value(&payload) {
                                                 Ok(event_json) => {
                                                     // broadcaster_id is retrieved but not used in this function
                                                     // keeping for future implementation that might need it
-                                                    let _broadcaster_id = user_id.read().await.clone();
-                                                    
+                                                    let _broadcaster_id =
+                                                        user_id.read().await.clone();
+
                                                     // Map the event type to our internal format
-                                                    let event_type = match metadata.subscription_type.to_str() {
-                                                        "stream.online" => "stream.online",
-                                                        "stream.offline" => "stream.offline",
-                                                        "channel.update" => "channel.updated",
-                                                        _ => {
-                                                            warn!("Unhandled event type: {}", metadata.subscription_type);
-                                                            continue;
-                                                        }
-                                                    };
-                                                    
+                                                    let event_type =
+                                                        match metadata.subscription_type.to_str() {
+                                                            "stream.online" => "stream.online",
+                                                            "stream.offline" => "stream.offline",
+                                                            "channel.update" => "channel.updated",
+                                                            _ => {
+                                                                warn!(
+                                                                    "Unhandled event type: {}",
+                                                                    metadata.subscription_type
+                                                                );
+                                                                continue;
+                                                            }
+                                                        };
+
                                                     // Create payload based on event type
                                                     let payload = match event_type {
                                                         "stream.online" => {
@@ -500,40 +523,48 @@ impl EventSubClient {
                                                         }
                                                         _ => json!({}),
                                                     };
-                                                    
+
                                                     // Publish the event
-                                                    let event = StreamEvent::new("twitch", event_type, payload);
+                                                    let event = StreamEvent::new(
+                                                        "twitch", event_type, payload,
+                                                    );
                                                     if let Err(e) = event_bus.publish(event).await {
                                                         error!("Failed to publish event: {}", e);
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    error!("Failed to convert event to JSON: {}", e);
+                                                    error!(
+                                                        "Failed to convert event to JSON: {}",
+                                                        e
+                                                    );
                                                 }
                                             }
                                         }
                                         EventsubWebsocketData::Revocation { payload, metadata } => {
                                             // Get the subscription ID from the event
-                                            let subscription_id = match serde_json::to_value(&payload) {
-                                                Ok(Value::Object(obj)) => {
-                                                    match obj.get("subscription") {
-                                                        Some(Value::Object(sub)) => {
-                                                            match sub.get("id") {
-                                                                Some(Value::String(id)) => id.clone(),
-                                                                _ => String::from("unknown")
+                                            let subscription_id =
+                                                match serde_json::to_value(&payload) {
+                                                    Ok(Value::Object(obj)) => {
+                                                        match obj.get("subscription") {
+                                                            Some(Value::Object(sub)) => {
+                                                                match sub.get("id") {
+                                                                    Some(Value::String(id)) => {
+                                                                        id.clone()
+                                                                    }
+                                                                    _ => String::from("unknown"),
+                                                                }
                                                             }
-                                                        },
-                                                        _ => String::from("unknown")
+                                                            _ => String::from("unknown"),
+                                                        }
                                                     }
-                                                },
-                                                _ => String::from("unknown")
-                                            };
-                                            
+                                                    _ => String::from("unknown"),
+                                                };
+
                                             warn!(
                                                 "Subscription revoked: {} ({})",
                                                 subscription_id, metadata.subscription_type
                                             );
-                                            
+
                                             // Publish revocation event
                                             let payload = json!({
                                                 "event": "subscription_revoked",
@@ -541,13 +572,13 @@ impl EventSubClient {
                                                 "subscription_type": metadata.subscription_type,
                                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                             });
-                                            
+
                                             let event = StreamEvent::new(
                                                 "twitch",
                                                 "eventsub.revoked",
                                                 payload,
                                             );
-                                            
+
                                             if let Err(e) = event_bus.publish(event).await {
                                                 error!("Failed to publish revocation event: {}", e);
                                             }
@@ -555,7 +586,7 @@ impl EventSubClient {
                                         EventsubWebsocketData::Welcome { .. } => {
                                             // This should have been handled during connection
                                             debug!("Received welcome message after connection was established");
-                                        },
+                                        }
                                         // Catch all for any new message types added in the future
                                         _ => {
                                             debug!("Received unhandled EventSub message type");

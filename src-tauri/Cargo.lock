@@ -6038,6 +6038,7 @@ dependencies = [
  "axum",
  "chrono",
  "dotenvy",
+ "fastrand",
  "futures",
  "futures-util",
  "obws",

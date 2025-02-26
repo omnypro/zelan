@@ -379,21 +379,27 @@ impl TwitchAuthManager {
             Err(e) => {
                 // Instead of complex token reconstruction, just report that token is invalid and needs re-auth
                 info!("Token validation failed: {}. Re-authentication required", e);
-                
+
                 // If we have a refresh token, log that we couldn't use it
                 if refresh_token_obj.is_some() {
                     warn!("Had a refresh token but couldn't use it automatically. Re-authentication required.");
                 }
-                
+
                 // Send token expired event
-                if let Err(event_err) = self.send_event(AuthEvent::TokenExpired {
-                    error: format!("Token validation failed: {}", e),
-                }).await {
+                if let Err(event_err) = self
+                    .send_event(AuthEvent::TokenExpired {
+                        error: format!("Token validation failed: {}", e),
+                    })
+                    .await
+                {
                     warn!("Failed to send token expired event: {}", event_err);
                 }
-                
+
                 // Return with clear message
-                Err(anyhow!("Token validation failed: {}. Need to re-authenticate", e))
+                Err(anyhow!(
+                    "Token validation failed: {}. Need to re-authenticate",
+                    e
+                ))
             }
         }
     }

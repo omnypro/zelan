@@ -2,6 +2,7 @@ use crate::{
     adapters::base::{AdapterConfig, BaseAdapter},
     adapters::twitch_eventsub::EventSubClient,
     auth::token_manager::{TokenData, TokenManager},
+    recovery::{AdapterRecovery, RecoveryManager},
     EventBus, ServiceAdapter, StreamEvent,
 };
 use anyhow::{anyhow, Result};
@@ -125,7 +126,7 @@ impl AdapterConfig for TwitchConfig {
         if let Some(monitor_stream) = json.get("monitor_stream_status").and_then(|v| v.as_bool()) {
             config.monitor_stream_status = monitor_stream;
         }
-        
+
         // Extract EventSub flag
         if let Some(use_eventsub) = json.get("use_eventsub").and_then(|v| v.as_bool()) {
             config.use_eventsub = use_eventsub;
@@ -192,6 +193,8 @@ pub struct TwitchAdapter {
     token_manager: Option<Arc<TokenManager>>,
     /// EventSub client for WebSocket-based events
     eventsub_client: Arc<RwLock<Option<EventSubClient>>>,
+    /// Recovery manager for error handling and retries
+    recovery_manager: Option<Arc<RecoveryManager>>,
 }
 
 impl TwitchAdapter {
@@ -222,12 +225,18 @@ impl TwitchAdapter {
             state: Arc::new(RwLock::new(TwitchState::default())),
             token_manager: None, // Will be set when connected to StreamService
             eventsub_client: Arc::new(RwLock::new(None)),
+            recovery_manager: None, // Will be set when connected to StreamService
         }
     }
 
     /// Set the token manager
     pub fn set_token_manager(&mut self, token_manager: Arc<TokenManager>) {
         self.token_manager = Some(token_manager);
+    }
+
+    /// Set the recovery manager
+    pub fn set_recovery_manager(&mut self, recovery_manager: Arc<RecoveryManager>) {
+        self.recovery_manager = Some(recovery_manager);
     }
 
     /// Attempt to load tokens from the TokenManager
@@ -349,7 +358,7 @@ impl TwitchAdapter {
                     info!("Auth manager has valid token");
                     drop(auth_manager);
                     token
-                },
+                }
                 None => {
                     warn!("Auth manager has no token despite config having one");
                     // Try to restore from config
@@ -357,7 +366,7 @@ impl TwitchAdapter {
                     if let Err(e) = self.restore_token_auth_state().await {
                         warn!("Failed to restore auth state: {}", e);
                     }
-                    
+
                     // Try again
                     let auth_manager = self.auth_manager.read().await;
                     match auth_manager.get_token().await {
@@ -365,9 +374,11 @@ impl TwitchAdapter {
                             info!("Successfully restored token from config");
                             drop(auth_manager);
                             token
-                        },
+                        }
                         None => {
-                            return Err(anyhow!("No access token available after restoration attempt"));
+                            return Err(anyhow!(
+                                "No access token available after restoration attempt"
+                            ));
                         }
                     }
                 }
@@ -445,6 +456,7 @@ impl TwitchAdapter {
             state: Arc::new(RwLock::new(TwitchState::default())),
             token_manager: None, // Will be set when connected to service
             eventsub_client: Arc::new(RwLock::new(None)),
+            recovery_manager: None, // Will be set when connected to service
         };
 
         // Set up auth callback
@@ -631,6 +643,7 @@ impl TwitchAdapter {
             state: Arc::clone(&self.state),
             token_manager: self.token_manager.clone(),
             eventsub_client: Arc::clone(&self.eventsub_client),
+            recovery_manager: self.recovery_manager.clone(),
         };
 
         // Start the authentication process in a background task to avoid blocking
@@ -845,7 +858,7 @@ impl TwitchAdapter {
 
                         // Save tokens to secure store
                         // NOTE: Adapter name was previously unused - removed
-                        
+
                         // Use the auth manager's method to get tokens for storage
                         // TODO: This creates tokens but doesn't actually store them - incomplete feature
                         let _tokens = if let Some((access, refresh)) = self_clone
@@ -1311,16 +1324,16 @@ impl ServiceAdapter for TwitchAdapter {
             info!("Successfully loaded tokens from TokenManager");
         } else {
             debug!("No tokens loaded from TokenManager, will authenticate if needed");
-            
+
             // Try to restore from config if available
             let config = self.config.read().await;
             if config.access_token.is_some() {
                 info!("Found access token in config, attempting to restore auth state");
                 drop(config);
-                
+
                 match self.restore_token_auth_state().await {
                     Ok(_) => info!("Successfully restored auth state from config"),
-                    Err(e) => warn!("Failed to restore auth state from config: {}", e)
+                    Err(e) => warn!("Failed to restore auth state from config: {}", e),
                 }
             } else {
                 drop(config);
@@ -1337,10 +1350,10 @@ impl ServiceAdapter for TwitchAdapter {
         let config = self.config.read().await;
         let use_eventsub = config.use_eventsub;
         drop(config);
-        
+
         if use_eventsub {
             info!("Using EventSub for Twitch events");
-            
+
             // Start EventSub in a background task
             let self_clone = self.clone();
             let handle = tauri::async_runtime::spawn(async move {
@@ -1351,12 +1364,12 @@ impl ServiceAdapter for TwitchAdapter {
                     }
                     Err(e) => {
                         error!("Failed to start EventSub: {}", e);
-                        
+
                         // Fall back to polling if EventSub fails
                         let mut config = self_clone.config.write().await;
                         config.use_eventsub = false;
                         drop(config);
-                        
+
                         // Start polling as fallback
                         info!("Falling back to polling for Twitch updates");
                         if let Err(e) = self_clone.poll_twitch_updates(shutdown_rx).await {
@@ -1365,14 +1378,14 @@ impl ServiceAdapter for TwitchAdapter {
                     }
                 }
             });
-            
+
             // Store the event handler task
             self.base.set_event_handler(handle).await;
-            
+
             info!("Twitch adapter connected with EventSub");
         } else {
             info!("Using polling for Twitch events");
-            
+
             // Start polling in a background task
             let self_clone = self.clone();
             let handle = tauri::async_runtime::spawn(async move {
@@ -1383,10 +1396,10 @@ impl ServiceAdapter for TwitchAdapter {
 
             // Store the event handler task
             self.base.set_event_handler(handle).await;
-            
+
             info!("Twitch adapter connected and polling for updates");
         }
-        
+
         Ok(())
     }
 
@@ -1407,7 +1420,7 @@ impl ServiceAdapter for TwitchAdapter {
         let config = self.config.read().await;
         let use_eventsub = config.use_eventsub;
         drop(config);
-        
+
         if use_eventsub {
             // Stop EventSub client
             if let Err(e) = self.stop_eventsub().await {
@@ -1449,22 +1462,22 @@ impl ServiceAdapter for TwitchAdapter {
         // Check if channel changed
         let channel_changed = current_config.channel_id != new_config.channel_id
             || current_config.channel_login != new_config.channel_login;
-            
+
         // Check if EventSub setting changed
         let eventsub_changed = current_config.use_eventsub != new_config.use_eventsub;
 
         // Update our configuration
         let mut current_config = self.config.write().await;
         *current_config = new_config.clone();
-        
+
         // Handle EventSub setting changes
         if eventsub_changed {
             info!("EventSub setting changed to: {}", new_config.use_eventsub);
-            
+
             // If we're connected, we need to restart with the new setting
             if self.is_connected() {
                 info!("Adapter is connected, will restart with new EventSub setting");
-                
+
                 // Stop existing EventSub if it's running and we're switching to polling
                 if !new_config.use_eventsub {
                     if let Err(e) = self.stop_eventsub().await {
@@ -1572,6 +1585,20 @@ impl Clone for TwitchAdapter {
             state: Arc::clone(&self.state),
             token_manager: self.token_manager.clone(),
             eventsub_client: Arc::clone(&self.eventsub_client),
+            recovery_manager: self.recovery_manager.clone(),
         }
+    }
+}
+
+// Implement AdapterRecovery trait
+impl AdapterRecovery for TwitchAdapter {
+    fn recovery_manager(&self) -> Arc<RecoveryManager> {
+        self.recovery_manager
+            .clone()
+            .expect("Recovery manager not set")
+    }
+
+    fn adapter_name(&self) -> &str {
+        self.base.name()
     }
 }

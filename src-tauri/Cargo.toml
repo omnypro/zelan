@@ -47,6 +47,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Error Handling
 anyhow = "1.0.42"
+fastrand = "2.0.1"
 
 # Utilities
 uuid = { version = "1.7.0", features = ["v4", "serde"] }

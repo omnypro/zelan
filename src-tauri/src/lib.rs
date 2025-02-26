@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+// use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tauri::async_runtime::RwLock;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
-use tokio::time::sleep;
+// use tokio::time::sleep;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
@@ -25,12 +25,17 @@ pub mod adapters;
 pub mod auth;
 pub mod error;
 pub mod plugin;
+pub mod recovery;
 
-pub use error::{ErrorCode, ErrorSeverity, ZelanError, ZelanResult};
+pub use error::{ErrorCategory, ErrorCode, ErrorSeverity, RetryPolicy, ZelanError, ZelanResult};
+pub use recovery::{AdapterRecovery, RecoveryManager};
+
+// Import specific adapters for type casting in helper methods
+// use crate::adapters::twitch::TwitchAdapter;
 
 // Constants for event bus configuration
 const EVENT_BUS_CAPACITY: usize = 1000;
-const RECONNECT_DELAY_MS: u64 = 5000;
+// const RECONNECT_DELAY_MS: u64 = 5000; // Currently unused
 const DEFAULT_WS_PORT: u16 = 9000;
 
 /// Configuration for the entire application
@@ -284,6 +289,7 @@ pub struct StreamService {
     shutdown_sender: Option<mpsc::Sender<()>>,
     ws_config: WebSocketConfig,
     pub token_manager: Arc<auth::TokenManager>,
+    pub recovery_manager: Arc<RecoveryManager>,
 }
 
 // Implement Clone for StreamService so it can be used in async contexts
@@ -298,6 +304,7 @@ impl Clone for StreamService {
             shutdown_sender: None,  // We don't clone the shutdown sender
             ws_config: self.ws_config.clone(),
             token_manager: self.token_manager.clone(),
+            recovery_manager: self.recovery_manager.clone(),
         }
     }
 }
@@ -308,6 +315,7 @@ impl StreamService {
         info!("Creating new StreamService with default configuration");
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         let token_manager = Arc::new(auth::TokenManager::new());
+        let recovery_manager = Arc::new(RecoveryManager::new());
 
         Self {
             event_bus,
@@ -320,6 +328,7 @@ impl StreamService {
                 port: DEFAULT_WS_PORT,
             },
             token_manager,
+            recovery_manager,
         }
     }
 
@@ -329,6 +338,7 @@ impl StreamService {
         info!("Creating new StreamService with custom WebSocket configuration");
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         let token_manager = Arc::new(auth::TokenManager::new());
+        let recovery_manager = Arc::new(RecoveryManager::new());
 
         Self {
             event_bus,
@@ -339,6 +349,7 @@ impl StreamService {
             shutdown_sender: None,
             ws_config,
             token_manager,
+            recovery_manager,
         }
     }
 
@@ -354,6 +365,7 @@ impl StreamService {
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         let adapter_settings = Arc::new(RwLock::new(config.adapters));
         let token_manager = Arc::new(auth::TokenManager::new());
+        let recovery_manager = Arc::new(RecoveryManager::new());
 
         Self {
             event_bus,
@@ -364,6 +376,7 @@ impl StreamService {
             shutdown_sender: None,
             ws_config: config.websocket,
             token_manager,
+            recovery_manager,
         }
     }
 
@@ -410,13 +423,21 @@ impl StreamService {
         A: ServiceAdapter + 'static,
     {
         let name = adapter.get_name().to_string();
+
+        // Box and store the adapter first
         let adapter_box = Arc::new(Box::new(adapter) as Box<dyn ServiceAdapter>);
 
         // Store the adapter
         self.adapters
             .write()
             .await
-            .insert(name.clone(), adapter_box);
+            .insert(name.clone(), adapter_box.clone());
+
+        // For Twitch adapters, we handle token management and recovery differently
+        // We'll just emit a log message as this approach doesn't work with the ownership
+        if name == "twitch" {
+            info!("Registered Twitch adapter - note that token manager and recovery manager will need to be set separately");
+        }
 
         // Create default settings if none provided
         let adapter_settings = settings.unwrap_or_else(|| AdapterSettings {
@@ -447,6 +468,21 @@ impl StreamService {
         };
 
         self.status.write().await.insert(name, initial_status);
+    }
+
+    // This function is kept for reference but not actively used
+    // The approach needs to be rethought to properly handle ownership and mutation
+    #[allow(dead_code)]
+    fn adapter_as_twitch<A>(adapter: &A) -> Option<adapters::twitch::TwitchAdapter>
+    where
+        A: ServiceAdapter + 'static,
+    {
+        // This is a safe way to attempt a conversion using Any
+        // It will return None if the adapter is not a TwitchAdapter
+        let any_adapter = adapter as &dyn std::any::Any;
+        any_adapter
+            .downcast_ref::<adapters::twitch::TwitchAdapter>()
+            .cloned()
     }
 
     /// Get adapter settings
@@ -537,6 +573,8 @@ impl StreamService {
                         message: format!("Failed to configure adapter '{}'", name),
                         context: Some(e.to_string()),
                         severity: ErrorSeverity::Warning,
+                        category: Some(ErrorCategory::Configuration),
+                        error_id: None,
                     });
                 }
             }
@@ -591,6 +629,8 @@ impl StreamService {
                 message: format!("Adapter '{}' is disabled", name),
                 context: Some("Enable the adapter in settings before connecting".to_string()),
                 severity: ErrorSeverity::Warning,
+                category: Some(ErrorCategory::Configuration),
+                error_id: None,
             });
         }
 
@@ -599,56 +639,64 @@ impl StreamService {
             status.insert(name.to_string(), ServiceStatus::Connecting);
         }
 
-        // Spawn a task for connection with retry logic
+        // Spawn a task for connection with enhanced retry logic and circuit breaker
         let adapter_clone = adapter.clone();
         let name_clone = name.to_string();
         let status_clone = Arc::clone(&self.status);
+        let recovery_manager = self.recovery_manager.clone();
 
-        // Track connection attempts for exponential backoff
-        let max_retries = 5; // Maximum number of retries
-        let mut retry_count = 0;
+        // Create a specific operation name for this adapter connection
+        let operation_name = format!("connect_adapter_{}", name);
+
+        // Get a circuit breaker for this specific adapter
+        let _breaker = recovery_manager.get_circuit_breaker(&operation_name).await;
 
         tauri::async_runtime::spawn(async move {
-            loop {
-                match adapter_clone.connect().await {
-                    Ok(()) => {
-                        status_clone
-                            .write()
-                            .await
-                            .insert(name_clone.clone(), ServiceStatus::Connected);
-                        println!("Adapter '{}' connected successfully", name_clone);
-                        break;
-                    }
-                    Err(e) => {
-                        retry_count += 1;
-                        let err = error::adapter_connection_failed(&name_clone, &e);
-
-                        // Calculate backoff time with exponential increase
-                        let backoff_ms = if retry_count >= max_retries {
-                            RECONNECT_DELAY_MS * 5 // Cap at 5x the base delay
-                        } else {
-                            RECONNECT_DELAY_MS * (1 << retry_count.min(6)) // Exponential backoff with a reasonable cap
-                        };
-
-                        eprintln!(
-                            "{}. Retry {}/{} in {}ms...",
-                            err, retry_count, max_retries, backoff_ms
-                        );
-
-                        status_clone
-                            .write()
-                            .await
-                            .insert(name_clone.clone(), ServiceStatus::Error);
-
-                        // If we've reached max retries, wait longer between attempts
-                        sleep(Duration::from_millis(backoff_ms)).await;
-
-                        // Consider breaking if too many retries, but continue for now
-                        if retry_count > 100 {
-                            eprintln!("Too many retries for adapter '{}', giving up", name_clone);
-                            break;
+            // Define a closure for the connection attempt that can be retried
+            let connect_fn = || {
+                let adapter = adapter_clone.clone();
+                let name = name_clone.clone();
+                async move {
+                    match adapter.connect().await {
+                        Ok(()) => {
+                            debug!(adapter = %name, "Successfully connected adapter");
+                            Ok(())
+                        }
+                        Err(e) => {
+                            // Convert anyhow::Error to ZelanError with appropriate category
+                            let zelan_err = error::adapter_connection_failed(&name, &e);
+                            // Ensure category is set for retryable errors
+                            Err(zelan_err)
                         }
                     }
+                }
+            };
+
+            // Use the circuit breaker combined with category-based retry policy
+            let result = recovery_manager
+                .with_protection(&operation_name, connect_fn)
+                .await;
+
+            // Update status based on the final result
+            match result {
+                Ok(()) => {
+                    status_clone
+                        .write()
+                        .await
+                        .insert(name_clone.clone(), ServiceStatus::Connected);
+                    info!(adapter = %name_clone, "Adapter connected successfully");
+                }
+                Err(err) => {
+                    status_clone
+                        .write()
+                        .await
+                        .insert(name_clone.clone(), ServiceStatus::Error);
+                    error!(
+                        adapter = %name_clone,
+                        error = %err,
+                        category = ?err.category,
+                        "Failed to connect adapter after retries"
+                    );
                 }
             }
         });
@@ -679,6 +727,8 @@ impl StreamService {
                 message: format!("Failed to disconnect adapter '{}'", name),
                 context: Some(e.to_string()),
                 severity: ErrorSeverity::Warning,
+                category: Some(ErrorCategory::Network),
+                error_id: None,
             }),
         }
     }
@@ -953,6 +1003,8 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                     message: "WebSocket connection timed out during handshake".to_string(),
                     context: Some(format!("Client: {}", peer_addr)),
                     severity: ErrorSeverity::Warning,
+                    category: Some(ErrorCategory::Network),
+                    error_id: None,
                 });
             }
         };
