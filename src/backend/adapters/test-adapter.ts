@@ -6,7 +6,7 @@
 import { BaseAdapter, ServiceAdapter } from './base-adapter';
 import { EventBus } from '../event-bus';
 import { TestAdapterConfig } from '../types';
-import { getEventBus } from '../index';
+import { eventBusInstance } from '../state';
 
 // Singleton instance
 let testAdapterInstance: TestAdapter | null = null;
@@ -16,8 +16,7 @@ let testAdapterInstance: TestAdapter | null = null;
  */
 export function getTestAdapter(): TestAdapter {
   if (!testAdapterInstance) {
-    const eventBus = getEventBus();
-    testAdapterInstance = new TestAdapter(eventBus);
+    testAdapterInstance = new TestAdapter(eventBusInstance);
   }
   return testAdapterInstance;
 }

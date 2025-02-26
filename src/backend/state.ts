@@ -5,7 +5,6 @@
 import { create } from 'zustand';
 import { EventBus } from './event-bus';
 import { ServiceStatus, AdapterSettings } from './types';
-import { getEventBus } from './index';
 
 /**
  * State interface for the whole application
@@ -19,11 +18,11 @@ interface ZelanState {
     source_counts: Record<string, number>;
     type_counts: Record<string, number>;
   };
-  
+
   // Adapters state
   adapterStatuses: Record<string, ServiceStatus>;
   adapterSettings: Record<string, AdapterSettings>;
-  
+
   // WebSocket configuration
   wsConfig: {
     port: number;
@@ -37,12 +36,15 @@ interface ZelanState {
   registerAdapter: (name: string, settings: AdapterSettings) => void;
 }
 
+// Create an EventBus instance to be used in the store
+export const eventBusInstance = new EventBus();
+
 /**
  * Create the Zustand store
  */
 export const useZelanStore = create<ZelanState>((set, get) => ({
   // Initial state
-  eventBus: getEventBus(),
+  eventBus: eventBusInstance,
   eventBusStats: {
     events_published: 0,
     events_dropped: 0,
@@ -52,44 +54,50 @@ export const useZelanStore = create<ZelanState>((set, get) => ({
   adapterStatuses: {},
   adapterSettings: {},
   wsConfig: {
-    port: 9000
+    port: 9000,
   },
-  
+
   // Actions
-  updateAdapterStatus: (name, status) => set(state => ({
-    adapterStatuses: {
-      ...state.adapterStatuses,
-      [name]: status
-    }
-  })),
-  
-  updateAdapterSettings: (name, settings) => set(state => ({
-    adapterSettings: {
-      ...state.adapterSettings,
-      [name]: settings
-    }
-  })),
-  
-  updateWsConfig: (port) => set({
-    wsConfig: { port }
-  }),
-  
+  updateAdapterStatus: (name, status) =>
+    set((state) => ({
+      adapterStatuses: {
+        ...state.adapterStatuses,
+        [name]: status,
+      },
+    })),
+
+  updateAdapterSettings: (name, settings) =>
+    set((state) => ({
+      adapterSettings: {
+        ...state.adapterSettings,
+        [name]: settings,
+      },
+    })),
+
+  updateWsConfig: (port) =>
+    set({
+      wsConfig: { port },
+    }),
+
   updateEventBusStats: async () => {
     const { eventBus } = get();
     const stats = await eventBus.getStats();
     set({ eventBusStats: stats });
   },
-  
-  registerAdapter: (name, settings) => set(state => ({
-    adapterSettings: {
-      ...state.adapterSettings,
-      [name]: settings
-    },
-    adapterStatuses: {
-      ...state.adapterStatuses,
-      [name]: settings.enabled ? ServiceStatus.Disconnected : ServiceStatus.Disabled
-    }
-  })),
+
+  registerAdapter: (name, settings) =>
+    set((state) => ({
+      adapterSettings: {
+        ...state.adapterSettings,
+        [name]: settings,
+      },
+      adapterStatuses: {
+        ...state.adapterStatuses,
+        [name]: settings.enabled
+          ? ServiceStatus.Disconnected
+          : ServiceStatus.Disabled,
+      },
+    })),
 }));
 
 /**

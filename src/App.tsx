@@ -119,10 +119,10 @@ function App() {
   // Helper function to handle invoke errors
   const safeInvoke = async <T,>(
     command: string,
-    ...args: any[]
+    args?: Record<string, any>
   ): Promise<T> => {
     try {
-      return await invoke<T>(command, ...args);
+      return await invoke<T>(command, args);
     } catch (error) {
       // Handle both string errors and structured errors
       if (typeof error === 'object' && error !== null) {
@@ -140,21 +140,17 @@ function App() {
       try {
         setLoading(true);
 
-        // Get event bus stats
-        const stats = await safeInvoke('get_event_bus_status');
+        // Get event bus stats directly from Rust backend
+        const stats = await safeInvoke<any>('get_event_bus_stats');
         setEventBusStats(stats);
 
-        // Get adapter statuses
-        const statuses = await safeInvoke<AdapterStatusMap>(
-          'get_adapter_statuses'
-        );
-        setAdapterStatuses(statuses);
+        // Get adapter statuses directly from Rust backend
+        const statusesResponse = await safeInvoke<any>('get_adapter_statuses');
+        setAdapterStatuses(statusesResponse || {});
 
-        // Get adapter settings
-        const settings = await safeInvoke<AdapterSettingsMap>(
-          'get_adapter_settings'
-        );
-        setAdapterSettings(settings);
+        // Get adapter settings directly from Rust backend
+        const settingsResponse = await safeInvoke<any>('get_adapter_settings');
+        setAdapterSettings(settingsResponse || {});
 
         // Get WebSocket info
         const info = await safeInvoke<WebSocketInfo>('get_websocket_info');
@@ -204,12 +200,13 @@ function App() {
         return;
       }
 
-      const result = await safeInvoke<string>('set_websocket_port', { port });
+      // Use direct command instead of old bridge method
+      await safeInvoke<void>('set_websocket_port', { port });
 
       // Show the result as a notification
       addError({
         code: 'INFO',
-        message: result,
+        message: 'WebSocket port updated successfully',
         severity: 'info',
       });
 
@@ -227,8 +224,9 @@ function App() {
       setLoading(true);
       setTestEventResult('');
 
-      const result = await safeInvoke<string>('send_test_event');
-      setTestEventResult(result);
+      // Use direct command instead of old bridge method
+      await safeInvoke<void>('send_test_event');
+      setTestEventResult('Test event sent successfully');
 
       // Refresh stats after sending an event
       setRefreshKey((prev) => prev + 1);
@@ -245,16 +243,16 @@ function App() {
   };
 
   // Toggle adapter enabled status
-  const toggleAdapterEnabled = async (adapterName: string) => {
+  const toggleAdapterEnabled = async (adapter_name: string) => {
     if (!adapterSettings) return;
 
     try {
       setLoading(true);
 
       // Get the current settings for this adapter
-      const currentSettings = adapterSettings[adapterName];
+      const currentSettings = adapterSettings[adapter_name];
       if (!currentSettings) {
-        throw new Error(`Settings for adapter '${adapterName}' not found`);
+        throw new Error(`Settings for adapter '${adapter_name}' not found`);
       }
 
       // Create updated settings with toggled enabled status
@@ -263,11 +261,23 @@ function App() {
         enabled: !currentSettings.enabled,
       };
 
-      // Update settings on the backend
-      await safeInvoke('update_adapter_settings', {
-        adapterName: adapterName,
+      // Update settings directly on the Rust backend using camelCase parameter names
+      await safeInvoke<void>('update_adapter_settings', {
+        adapterName: adapter_name,
         settings: updatedSettings,
       });
+
+      // If enabling, connect the adapter
+      if (updatedSettings.enabled) {
+        await safeInvoke<void>('connect_adapter', {
+          adapterName: adapter_name,
+        });
+      } else {
+        // If disabling, disconnect the adapter
+        await safeInvoke<void>('disconnect_adapter', {
+          adapterName: adapter_name,
+        });
+      }
 
       // Show success message
       addError({
@@ -288,7 +298,7 @@ function App() {
 
   // Update adapter configuration
   const updateAdapterConfig = async (
-    adapterName: string,
+    adapter_name: string,
     configUpdates: any
   ) => {
     if (!adapterSettings) return;
@@ -297,9 +307,9 @@ function App() {
       setLoading(true);
 
       // Get the current settings for this adapter
-      const currentSettings = adapterSettings[adapterName];
+      const currentSettings = adapterSettings[adapter_name];
       if (!currentSettings) {
-        throw new Error(`Settings for adapter '${adapterName}' not found`);
+        throw new Error(`Settings for adapter '${adapter_name}' not found`);
       }
 
       // Create updated settings with merged config
@@ -311,9 +321,9 @@ function App() {
         },
       };
 
-      // Update settings on the backend
-      await safeInvoke('update_adapter_settings', {
-        adapterName: adapterName,
+      // Update settings directly on the Rust backend using camelCase parameter names
+      await safeInvoke<void>('update_adapter_settings', {
+        adapterName: adapter_name,
         settings: updatedSettings,
       });
 
@@ -404,12 +414,12 @@ function App() {
             <div className="adapters-grid">
               {adapterSettings &&
                 Object.entries(adapterSettings).map(
-                  ([adapterName, settings]) => {
+                  ([adapter_name, settings]) => {
                     const status =
-                      adapterStatuses?.[adapterName] || 'Disconnected';
+                      adapterStatuses?.[adapter_name] || 'Disconnected';
                     return (
                       <div
-                        key={adapterName}
+                        key={adapter_name}
                         className={`adapter-card ${
                           settings.enabled ? '' : 'disabled'
                         }`}
@@ -449,14 +459,16 @@ function App() {
                             className={`toggle-button ${
                               settings.enabled ? 'enabled' : 'disabled'
                             }`}
-                            onClick={() => toggleAdapterEnabled(adapterName)}
+                            onClick={() => toggleAdapterEnabled(adapter_name)}
                           >
                             {settings.enabled ? 'Disable' : 'Enable'}
                           </button>
 
                           <button
                             className="config-button"
-                            onClick={() => setEditingAdapterConfig(adapterName)}
+                            onClick={() =>
+                              setEditingAdapterConfig(adapter_name)
+                            }
                             disabled={!settings.enabled}
                           >
                             Configure
@@ -643,7 +655,7 @@ function App() {
 
             <div className="modal-content">
               <ConfigurationForm
-                adapterName={editingAdapterConfig}
+                adapter_name={editingAdapterConfig}
                 config={adapterSettings[editingAdapterConfig]?.config || {}}
                 onSave={(configUpdates) => {
                   updateAdapterConfig(editingAdapterConfig, configUpdates);
@@ -691,12 +703,12 @@ function TwitchAuthInfo({
 
 // Configuration form component for adapter settings
 function ConfigurationForm({
-  adapterName,
+  adapter_name,
   config,
   onSave,
   onCancel,
 }: {
-  adapterName: string;
+  adapter_name: string;
   config: any;
   onSave: (config: any) => void;
   onCancel: () => void;
@@ -733,22 +745,23 @@ function ConfigurationForm({
   return (
     <div>
       {/* If Twitch adapter, show authentication info */}
-      {adapterName === 'twitch' && (
+      {adapter_name === 'twitch' && (
         <div className="auth-section">
           {/* Show requirements notice */}
           <div className="auth-requirements">
             <p className="note">
-              <strong>Note:</strong> For Twitch integration to work properly, you'll need to set 
-              either a Channel ID (numeric) or Channel Login (username) below. These are used 
-              after authentication to fetch channel and stream information.
+              <strong>Note:</strong> For Twitch integration to work properly,
+              you'll need to set either a Channel ID (numeric) or Channel Login
+              (username) below. These are used after authentication to fetch
+              channel and stream information.
             </p>
           </div>
-          
+
           <TwitchAuthInfo hasToken={hasToken} />
-          
+
           {hasToken && (
             <div className="auth-actions">
-              <button 
+              <button
                 className="action-button small"
                 onClick={() => {
                   // Clear tokens and reset auth status
@@ -764,11 +777,11 @@ function ConfigurationForm({
               </button>
             </div>
           )}
-          
+
           <hr className="section-divider" />
         </div>
       )}
-      
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -777,10 +790,13 @@ function ConfigurationForm({
       >
         {Object.entries(config).map(([key, value]) => {
           // For Twitch adapter, hide token fields from editing
-          if (adapterName === 'twitch' && (key === 'access_token' || key === 'refresh_token')) {
+          if (
+            adapter_name === 'twitch' &&
+            (key === 'access_token' || key === 'refresh_token')
+          ) {
             return null;
           }
-        
+
           // Render appropriate input based on value type
           if (typeof value === 'boolean') {
             return (
@@ -804,7 +820,9 @@ function ConfigurationForm({
                 <input
                   type="number"
                   value={formState[key] || 0}
-                  onChange={(e) => handleInputChange(key, Number(e.target.value))}
+                  onChange={(e) =>
+                    handleInputChange(key, Number(e.target.value))
+                  }
                 />
               </div>
             );

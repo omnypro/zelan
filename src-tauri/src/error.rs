@@ -22,6 +22,7 @@ pub enum ErrorCode {
     // General errors
     Unknown,
     Internal,
+    Timeout,
 
     // Adapter related errors
     AdapterNotFound,
@@ -37,6 +38,9 @@ pub enum ErrorCode {
     WebSocketBindFailed,
     WebSocketAcceptFailed,
     WebSocketSendFailed,
+
+    // TypeScript bridge errors
+    TsBackendError,
 
     // API related errors
     ApiRequestFailed,
@@ -74,6 +78,7 @@ impl fmt::Display for ErrorCode {
         match self {
             ErrorCode::Unknown => write!(f, "UNKNOWN"),
             ErrorCode::Internal => write!(f, "INTERNAL"),
+            ErrorCode::Timeout => write!(f, "TIMEOUT"),
             ErrorCode::AdapterNotFound => write!(f, "ADAPTER_NOT_FOUND"),
             ErrorCode::AdapterConnectionFailed => write!(f, "ADAPTER_CONNECTION_FAILED"),
             ErrorCode::AdapterDisconnectFailed => write!(f, "ADAPTER_DISCONNECT_FAILED"),
@@ -83,6 +88,7 @@ impl fmt::Display for ErrorCode {
             ErrorCode::WebSocketBindFailed => write!(f, "WEBSOCKET_BIND_FAILED"),
             ErrorCode::WebSocketAcceptFailed => write!(f, "WEBSOCKET_ACCEPT_FAILED"),
             ErrorCode::WebSocketSendFailed => write!(f, "WEBSOCKET_SEND_FAILED"),
+            ErrorCode::TsBackendError => write!(f, "TS_BACKEND_ERROR"),
             ErrorCode::ApiRequestFailed => write!(f, "API_REQUEST_FAILED"),
             ErrorCode::ConfigInvalid => write!(f, "CONFIG_INVALID"),
         }

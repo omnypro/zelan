@@ -59,6 +59,7 @@ twitch_oauth2 = { version = "0.15.1", features = ["client", "reqwest"] }
 dotenvy = "*"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tauri-plugin-log = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"

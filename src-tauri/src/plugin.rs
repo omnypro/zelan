@@ -283,13 +283,13 @@ impl ZelanState {
 
         // Since we can't easily update the TokenManager with an AppHandle,
         // we'll use the app handle directly in the existing background loop
-        
+
         // Store the app handle where it can be accessed globally
         app.manage(app.clone());
-        
+
         // No need for a separate listener - already handled in the background loop
         info!("Configured direct token storage with AppHandle");
-        
+
         // Log that we've set up the token manager
         info!("TokenManager initialized with AppHandle for persistent storage");
 
@@ -751,14 +751,14 @@ pub async fn get_adapter_settings(
 
 /// Update adapter settings
 #[tauri::command]
-#[instrument(skip(app, settings, state), fields(adapter_name = %adapterName), level = "debug")]
+#[instrument(skip(app, settings, state), fields(adapter_name = %adapter_name), level = "debug")]
 pub async fn update_adapter_settings(
     app: AppHandle,
-    adapterName: String,
+    adapter_name: String,
     settings: serde_json::Value,
     state: State<'_, ZelanState>,
 ) -> Result<String, ZelanError> {
-    info!(adapter = %adapterName, "Updating adapter settings");
+    info!(adapter = %adapter_name, "Updating adapter settings");
 
     // Deserialize the settings
     let mut adapter_settings: AdapterSettings = match serde_json::from_value(settings.clone()) {
@@ -775,7 +775,7 @@ pub async fn update_adapter_settings(
     };
 
     // Special handling for Twitch adapter - extract and store tokens securely
-    if adapterName == "twitch" {
+    if adapter_name == "twitch" {
         debug!("Processing Twitch adapter with secure token handling");
 
         // Log the raw settings to understand what's coming in
@@ -849,7 +849,7 @@ pub async fn update_adapter_settings(
             debug!("Storing Twitch tokens securely");
             if let Err(e) = store_secure_tokens(
                 &app,
-                &adapterName,
+                &adapter_name,
                 serde_json::Value::Object(tokens_to_store.clone()),
             )
             .await
@@ -877,24 +877,24 @@ pub async fn update_adapter_settings(
 
     // Update the settings
     debug!(
-        adapter = %adapterName,
+        adapter = %adapter_name,
         enabled = adapter_settings.enabled,
         "Updating adapter settings"
     );
 
     match service_clone
-        .update_adapter_settings(&adapterName, adapter_settings.clone())
+        .update_adapter_settings(&adapter_name, adapter_settings.clone())
         .await
     {
         Ok(_) => {
-            info!(adapter = %adapterName, "Successfully updated adapter settings");
+            info!(adapter = %adapter_name, "Successfully updated adapter settings");
 
             // For Twitch, check for secure tokens and provide them to the adapter if needed
-            if adapterName == "twitch" {
+            if adapter_name == "twitch" {
                 debug!("Checking for secure Twitch tokens");
 
                 // See if we have secure tokens stored
-                match retrieve_secure_tokens(&app, &adapterName).await {
+                match retrieve_secure_tokens(&app, &adapter_name).await {
                     Ok(Some(tokens)) => {
                         info!("Found secure tokens for Twitch, applying to adapter");
                         debug!(tokens = ?tokens, "Secure tokens to apply");
@@ -929,7 +929,7 @@ pub async fn update_adapter_settings(
                         // Let the adapter handle the tokens (don't error on failure)
                         if let Err(e) = service_clone
                             .update_adapter_settings(
-                                &adapterName,
+                                &adapter_name,
                                 AdapterSettings {
                                     enabled: adapter_settings.enabled,
                                     config: full_config,
@@ -950,9 +950,9 @@ pub async fn update_adapter_settings(
             }
 
             // For Twitch, monitor for tokens provided directly by the auth flow
-            if adapterName == "twitch" && adapter_settings.enabled {
+            if adapter_name == "twitch" && adapter_settings.enabled {
                 // Start a background task to periodically check if tokens appear that need to be secured
-                let adapter_name_clone = adapterName.clone();
+                let adapter_name_clone = adapter_name.clone();
                 let service_clone2 = service_clone.clone();
 
                 tauri::async_runtime::spawn(async move {
@@ -984,14 +984,14 @@ pub async fn update_adapter_settings(
 
             // If adapter is enabled, explicitly try to connect it
             if adapter_settings.enabled {
-                info!(adapter = %adapterName, "Adapter is enabled, attempting connection");
+                info!(adapter = %adapter_name, "Adapter is enabled, attempting connection");
 
-                match service_clone.connect_adapter(&adapterName).await {
-                    Ok(_) => info!(adapter = %adapterName, "Successfully connected adapter"),
+                match service_clone.connect_adapter(&adapter_name).await {
+                    Ok(_) => info!(adapter = %adapter_name, "Successfully connected adapter"),
                     Err(connect_err) => {
                         warn!(
                             error = %connect_err,
-                            adapter = %adapterName,
+                            adapter = %adapter_name,
                             "Failed to connect adapter after settings update"
                         );
                         // We'll continue and save settings anyway
@@ -1009,7 +1009,7 @@ pub async fn update_adapter_settings(
             if let Err(e) = state.save_config_to_store(&app).await {
                 error!(
                     error = %e,
-                    adapter = %adapterName,
+                    adapter = %adapter_name,
                     "Failed to save configuration after updating adapter settings"
                 );
                 return Err(ZelanError {
@@ -1023,17 +1023,17 @@ pub async fn update_adapter_settings(
             }
 
             // Success, log completion
-            info!(adapter = %adapterName, "Settings successfully updated and saved");
+            info!(adapter = %adapter_name, "Settings successfully updated and saved");
         }
         Err(e) => {
-            error!(error = %e, adapter = %adapterName, "Failed to update adapter settings");
+            error!(error = %e, adapter = %adapter_name, "Failed to update adapter settings");
             return Err(e);
         }
     }
 
     Ok(format!(
         "Successfully updated settings for adapter '{}'",
-        adapterName
+        adapter_name
     ))
 }
 

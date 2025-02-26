@@ -376,20 +376,29 @@ impl TwitchAuthManager {
                 // If the token is invalid and we have a refresh token, we need to re-authenticate
                 // We can't use the refresh token directly without a valid user token
                 if let Some(refresh_token_str) = refresh_token {
-                    info!("Token validation failed ({}), but we have a refresh token", e);
+                    info!(
+                        "Token validation failed ({}), but we have a refresh token",
+                        e
+                    );
                     warn!("Refresh tokens can only be used with an existing valid token structure");
                     warn!("User will need to re-authenticate to get a new token");
                 }
-                
+
                 // Send token expired event
-                if let Err(event_err) = self.send_event(AuthEvent::TokenExpired {
-                    error: format!("Token validation failed: {}", e),
-                }).await {
+                if let Err(event_err) = self
+                    .send_event(AuthEvent::TokenExpired {
+                        error: format!("Token validation failed: {}", e),
+                    })
+                    .await
+                {
                     warn!("Failed to send token expired event: {}", event_err);
                 }
-                
+
                 // Return with clear message
-                Err(anyhow!("Token validation failed: {}. Need to re-authenticate", e))
+                Err(anyhow!(
+                    "Token validation failed: {}. Need to re-authenticate",
+                    e
+                ))
             }
         }
     }

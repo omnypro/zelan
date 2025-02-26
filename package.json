@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-log": "^2.2.2",
     "@tauri-apps/plugin-opener": "^2.2.5",
     "@twurple/api": "^7.2.1",
     "@twurple/auth": "^7.2.1",

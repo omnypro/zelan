@@ -2,13 +2,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use anyhow::{anyhow, Result};
+use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::Listener;
+use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_store::{Store, StoreExt};
 use tracing::{debug, error, info};
 use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-use zelan_lib::{plugin, Config, StreamService};
+use zelan_lib::{plugin, AdapterSettings, Config, ErrorCode, ErrorSeverity, StreamService, ZelanError, plugin::ZelanState};
 
 /// Initialize all stores used by the application
 fn initialize_stores<R: Runtime>(app: &AppHandle<R>) -> Result<(Arc<Store<R>>, Arc<Store<R>>)> {
@@ -120,17 +125,168 @@ fn main() {
     debug!("Available modules: zelan_lib, zelan_lib::adapters::obs, zelan_lib::plugin");
 
     // Build and run the Tauri application with our plugin
+    // A much simpler bridge using Tauri's recommended invoke pattern
+    #[tauri::command]
+    fn call_ts_backend(
+        app: AppHandle,
+        command: String,
+        args: Option<serde_json::Value>,
+    ) -> serde_json::Value {
+        debug!(command = %command, "Delegating command to TypeScript backend");
+
+        // For the legacy bridge, just return a placeholder response
+        // This is a fallback while migrating to direct commands
+        serde_json::json!({
+            "status": "success",
+            "command": command,
+            "args": args,
+            "message": "Using direct Rust commands now - this is a placeholder response. Please use the new direct commands instead."
+        })
+    }
+
+    // No longer need response handlers since we're using direct commands
+    
+    // Direct commands for frontend to use - using proper Tauri 2.0 command style
+    #[tauri::command]
+    fn get_adapter_statuses(
+        state: State<ZelanState>,
+    ) -> Result<serde_json::Value, ZelanError> {
+        // Clone the state to move into the async block
+        let state_clone = state.inner().clone();
+        
+        // Execute the async code in a blocking manner
+        tauri::async_runtime::block_on(async move {
+            let service = state_clone.service.lock().await;
+            let statuses = service.get_all_statuses().await;
+            
+            // Convert to JSON
+            serde_json::to_value(statuses).map_err(|e| {
+                error!("Failed to serialize adapter statuses: {}", e);
+                ZelanError {
+                    code: ErrorCode::Internal,
+                    message: "Failed to serialize adapter statuses".to_string(),
+                    context: Some(e.to_string()),
+                    severity: ErrorSeverity::Error,
+                }
+            })
+        })
+    }
+    
+    #[tauri::command]
+    fn get_adapter_settings(
+        state: State<ZelanState>,
+    ) -> Result<serde_json::Value, ZelanError> {
+        // Clone the state to move into the async block
+        let state_clone = state.inner().clone();
+        
+        // Pull the data out of the state synchronously
+        // This is a simpler approach for commands that don't need async processing
+        tauri::async_runtime::block_on(async move {
+            let service = state_clone.service.lock().await;
+            let settings = service.get_all_adapter_settings().await;
+            
+            // Convert to JSON
+            serde_json::to_value(settings).map_err(|e| {
+                error!("Failed to serialize adapter settings: {}", e);
+                ZelanError {
+                    code: ErrorCode::Internal,
+                    message: "Failed to serialize adapter settings".to_string(),
+                    context: Some(e.to_string()),
+                    severity: ErrorSeverity::Error,
+                }
+            })
+        })
+    }
+    
+    #[tauri::command]
+    fn get_event_bus_stats(
+        state: State<ZelanState>,
+    ) -> Result<serde_json::Value, ZelanError> {
+        // Clone the state to move into the async block
+        let state_clone = state.inner().clone();
+        
+        // Execute the async code in a blocking manner for the command
+        tauri::async_runtime::block_on(async move {
+            let service = state_clone.service.lock().await;
+            let event_bus = service.event_bus().clone();
+            let stats = event_bus.get_stats().await;
+            
+            // Convert to JSON
+            serde_json::to_value(stats).map_err(|e| {
+                error!("Failed to serialize event bus stats: {}", e);
+                ZelanError {
+                    code: ErrorCode::Internal,
+                    message: "Failed to serialize event bus stats".to_string(),
+                    context: Some(e.to_string()),
+                    severity: ErrorSeverity::Error,
+                }
+            })
+        })
+    }
+    
+    #[tauri::command]
+    fn connect_adapter(
+        state: State<ZelanState>,
+        #[serde(rename = "adapterName")] adapter_name: String,
+    ) -> Result<(), ZelanError> {
+        // Clone the state and parameters for the async block
+        let state_clone = state.inner().clone();
+        let adapter_name_clone = adapter_name.clone();
+        
+        // Execute the async code in a blocking manner
+        tauri::async_runtime::block_on(async move {
+            let service = state_clone.service.lock().await;
+            service.connect_adapter(&adapter_name_clone).await
+        })
+    }
+    
+    #[tauri::command]
+    fn disconnect_adapter(
+        state: State<ZelanState>,
+        #[serde(rename = "adapterName")] adapter_name: String,
+    ) -> Result<(), ZelanError> {
+        // Clone the state and parameters for the async block
+        let state_clone = state.inner().clone();
+        let adapter_name_clone = adapter_name.clone();
+        
+        // Execute the async code in a blocking manner
+        tauri::async_runtime::block_on(async move {
+            let service = state_clone.service.lock().await;
+            service.disconnect_adapter(&adapter_name_clone).await
+        })
+    }
+    
+    #[tauri::command]
+    fn update_adapter_settings(
+        state: State<ZelanState>,
+        #[serde(rename = "adapterName")] adapter_name: String,
+        settings: AdapterSettings,
+    ) -> Result<(), ZelanError> {
+        // Clone the state and parameters for the async block
+        let state_clone = state.inner().clone();
+        let adapter_name_clone = adapter_name.clone();
+        let settings_clone = settings.clone();
+        
+        // Execute the async code in a blocking manner
+        tauri::async_runtime::block_on(async move {
+            let service = state_clone.service.lock().await;
+            service.update_adapter_settings(&adapter_name_clone, settings_clone).await
+        })
+    }
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let _ = app
                 .get_webview_window("main")
                 .expect("no main window")
                 .set_focus();
         }))
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             info!("Setting up Tauri application");
+
+            // No longer need ts-response listener since we're using direct commands
 
             // Create the Zelan state
             let zelan_state = plugin::init_state();
@@ -178,10 +334,15 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            plugin::get_event_bus_status,
-            plugin::get_adapter_statuses,
-            plugin::get_adapter_settings,
-            plugin::update_adapter_settings,
+            // Direct commands
+            get_adapter_statuses,
+            get_adapter_settings,
+            get_event_bus_stats,
+            connect_adapter,
+            disconnect_adapter,
+            update_adapter_settings,
+            // Legacy commands
+            call_ts_backend,
             plugin::send_test_event,
             plugin::get_websocket_info,
             plugin::set_websocket_port,
