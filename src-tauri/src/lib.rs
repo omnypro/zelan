@@ -20,8 +20,9 @@ use tokio::time::sleep;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
-// Re-export Adapters
+// Re-export modules
 pub mod adapters;
+pub mod auth;
 pub mod error;
 pub mod plugin;
 
@@ -282,6 +283,7 @@ pub struct StreamService {
     ws_server_handle: Option<tauri::async_runtime::JoinHandle<()>>,
     shutdown_sender: Option<mpsc::Sender<()>>,
     ws_config: WebSocketConfig,
+    pub token_manager: Arc<auth::TokenManager>,
 }
 
 // Implement Clone for StreamService so it can be used in async contexts
@@ -295,6 +297,7 @@ impl Clone for StreamService {
             ws_server_handle: None, // We don't clone the server handle
             shutdown_sender: None,  // We don't clone the shutdown sender
             ws_config: self.ws_config.clone(),
+            token_manager: self.token_manager.clone(),
         }
     }
 }
@@ -304,6 +307,8 @@ impl StreamService {
     pub fn new() -> Self {
         info!("Creating new StreamService with default configuration");
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
+        let token_manager = Arc::new(auth::TokenManager::new());
+
         Self {
             event_bus,
             adapters: Arc::new(RwLock::new(HashMap::new())),
@@ -314,6 +319,7 @@ impl StreamService {
             ws_config: WebSocketConfig {
                 port: DEFAULT_WS_PORT,
             },
+            token_manager,
         }
     }
 
@@ -322,6 +328,8 @@ impl StreamService {
     pub fn with_config(ws_config: WebSocketConfig) -> Self {
         info!("Creating new StreamService with custom WebSocket configuration");
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
+        let token_manager = Arc::new(auth::TokenManager::new());
+
         Self {
             event_bus,
             adapters: Arc::new(RwLock::new(HashMap::new())),
@@ -330,6 +338,7 @@ impl StreamService {
             ws_server_handle: None,
             shutdown_sender: None,
             ws_config,
+            token_manager,
         }
     }
 
@@ -344,6 +353,7 @@ impl StreamService {
 
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         let adapter_settings = Arc::new(RwLock::new(config.adapters));
+        let token_manager = Arc::new(auth::TokenManager::new());
 
         Self {
             event_bus,
@@ -353,6 +363,7 @@ impl StreamService {
             ws_server_handle: None,
             shutdown_sender: None,
             ws_config: config.websocket,
+            token_manager,
         }
     }
 

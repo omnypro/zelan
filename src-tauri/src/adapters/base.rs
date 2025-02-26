@@ -171,7 +171,7 @@ impl BaseAdapter {
             }
         }
     }
-    
+
     /// Get the current adapter settings from the service
     /// This is a helper method to access adapter settings through the event bus
     #[instrument(skip(self), level = "debug")]
@@ -182,16 +182,16 @@ impl BaseAdapter {
             "action": "get_settings",
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
-        
+
         // Create a custom event to get settings
         let stream_event = StreamEvent::new("system", "adapter.get_settings", payload);
-        
+
         // Publish event through the event bus
         match self.event_bus.publish(stream_event).await {
             Ok(_) => {
                 debug!(adapter = %self.name, "Successfully requested adapter settings");
-                
-                // Return default settings for now - in real implementation, 
+
+                // Return default settings for now - in real implementation,
                 // we would wait for a response
                 Ok(crate::AdapterSettings {
                     enabled: true,
@@ -206,7 +206,7 @@ impl BaseAdapter {
             }
         }
     }
-    
+
     /// Update adapter settings in the service
     /// This is a helper method to update adapter settings through the event bus
     #[instrument(skip(self, settings), level = "debug")]
@@ -218,10 +218,10 @@ impl BaseAdapter {
             "settings": settings,
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
-        
+
         // Create a custom event to update settings
         let stream_event = StreamEvent::new("system", "adapter.update_settings", payload);
-        
+
         // Publish event through the event bus
         match self.event_bus.publish(stream_event).await {
             Ok(_) => {

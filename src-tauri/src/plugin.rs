@@ -1,5 +1,6 @@
 use crate::{
     adapters::{ObsAdapter, TestAdapter, TwitchAdapter},
+    auth::TokenManager,
     AdapterSettings, ErrorCode, ErrorSeverity, StreamService, ZelanError,
 };
 use anyhow::{anyhow, Result};
@@ -7,14 +8,16 @@ use serde_json::json;
 use std::any::Any;
 use std::sync::Arc;
 use tauri::async_runtime::Mutex;
-use tauri::{AppHandle, Manager, State, Runtime};
-use tauri_plugin_store::{StoreExt, Store};
+use tauri::{AppHandle, Manager, Runtime, State};
+use tauri_plugin_store::{Store, StoreExt};
 use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
-/// State object to store the stream service
+/// State object to store the stream service and token manager
 pub struct ZelanState {
     // Using an Arc<Mutex<>> to allow for mutability behind shared ownership
     pub service: Arc<Mutex<StreamService>>,
+    // Token manager for centralized authentication handling
+    pub token_manager: Arc<TokenManager>,
 }
 
 // Implement Clone for ZelanState to allow cloning the service in command handlers
@@ -22,6 +25,7 @@ impl Clone for ZelanState {
     fn clone(&self) -> Self {
         Self {
             service: self.service.clone(),
+            token_manager: self.token_manager.clone(),
         }
     }
 }
@@ -49,16 +53,16 @@ pub async fn store_secure_tokens(
         error!(error = %e, adapter = %adapter_name, "Failed to access secure store");
         anyhow!("Failed to access secure store: {}", e)
     })?;
-    
+
     // Store the tokens securely
     store.set(&secure_key, tokens);
-    
+
     // Save the store
     if let Err(e) = store.save() {
         error!(error = %e, "Failed to save secure store");
         return Err(anyhow!("Failed to save secure store: {}", e));
     }
-    
+
     info!(adapter = %adapter_name, "Tokens securely stored");
     Ok(())
 }
@@ -79,21 +83,21 @@ pub async fn retrieve_secure_tokens(
         error!(error = %e, adapter = %adapter_name, "Failed to access secure store");
         anyhow!("Failed to access secure store: {}", e)
     })?;
-    
+
     // Check if we have tokens for this adapter
     if !store.has(&secure_key) {
         debug!(adapter = %adapter_name, "No secure tokens found");
         return Ok(None);
     }
-    
+
     // Get the tokens
     let tokens = store.get(&secure_key).map(|v| v.clone());
-    
+
     match &tokens {
         Some(_) => debug!(adapter = %adapter_name, "Found secure tokens"),
         None => debug!(adapter = %adapter_name, "Token key exists but no value found"),
     }
-    
+
     Ok(tokens)
 }
 
@@ -110,23 +114,23 @@ pub async fn remove_secure_tokens(app: &AppHandle, adapter_name: &str) -> Result
         error!(error = %e, adapter = %adapter_name, "Failed to access secure store");
         anyhow!("Failed to access secure store: {}", e)
     })?;
-    
+
     // Check if tokens exist
     if !store.has(&secure_key) {
         debug!(adapter = %adapter_name, "No secure tokens to remove");
         return Ok(());
     }
-    
+
     // Remove the tokens
     let deleted = store.delete(&secure_key);
     debug!(deleted = %deleted, "Deletion result");
-    
+
     // Save the store to persist the deletion
     if let Err(e) = store.save() {
         error!(error = %e, "Failed to save secure store after deletion");
         return Err(anyhow!("Failed to save secure store: {}", e));
     }
-    
+
     info!(adapter = %adapter_name, "Secure tokens removed");
     Ok(())
 }
@@ -137,8 +141,13 @@ impl ZelanState {
         let service = StreamService::new();
         let service_arc = Arc::new(Mutex::new(service));
 
+        // Create token manager
+        let token_manager = TokenManager::new();
+        let token_manager_arc = Arc::new(token_manager);
+
         Ok(Self {
             service: service_arc,
+            token_manager: token_manager_arc,
         })
     }
 
@@ -220,18 +229,18 @@ impl ZelanState {
                 error!(error = %e, "Failed to access secure store");
                 anyhow!("Failed to access secure store: {}", e)
             })?;
-            
+
             Some(secure_store)
         } else {
             None
         };
 
         // TRANSACTION PATTERN - Prepare all changes before committing
-        
+
         // Step 1: Set up values in both stores but don't save yet
         debug!("Setting up config in config store");
         config_store.set("config", config_json);
-        
+
         // Step 2: Prepare token storage if needed
         if let Some(store) = &secure_store {
             for (adapter_name, tokens) in &tokens_to_store {
@@ -240,17 +249,17 @@ impl ZelanState {
                 store.set(&secure_key, tokens.clone());
             }
         }
-        
+
         // Step 3: Commit changes in a coordinated way (save both or none)
         debug!("Committing changes to stores");
-        
+
         // First try to save the config store
         if let Err(e) = config_store.save() {
             error!(error = %e, "Failed to save to config store");
             return Err(anyhow!("Failed to save to config store: {}", e));
         }
         info!("Configuration successfully saved to config store");
-        
+
         // Then save the secure store if needed
         if let Some(store) = &secure_store {
             if let Err(e) = store.save() {
@@ -270,6 +279,13 @@ impl ZelanState {
     #[instrument(skip(self, app), level = "debug")]
     pub async fn init_services(&self, app: AppHandle) -> Result<()> {
         let service = self.service.clone();
+        let token_manager = self.token_manager.clone();
+
+        // Set the app handle on the token manager
+        {
+            let mut tm = token_manager.as_ref().clone();
+            tm.set_app(app.clone());
+        }
 
         // Pass the app handle to the initialization task
         let app_handle = app.clone();
@@ -538,14 +554,23 @@ impl ZelanState {
                 
                 // Create the adapter with the loaded configuration
                 info!("Initializing Twitch adapter");
-                let twitch_adapter = TwitchAdapter::with_config(service_guard.event_bus(), config);
+                let mut twitch_adapter = TwitchAdapter::with_config(service_guard.event_bus(), config);
+                
+                // Set token manager on the adapter
+                twitch_adapter.set_token_manager(Arc::clone(&service_guard.token_manager));
+                info!("Set TokenManager on Twitch adapter");
                 
                 // Register the adapter with its settings
                 service_guard.register_adapter(twitch_adapter, Some(saved_twitch_settings.clone())).await;
                 info!("Registered Twitch adapter with saved settings");
             } else {
                 info!("No saved Twitch settings found, using defaults");
-                let twitch_adapter = TwitchAdapter::new(service_guard.event_bus());
+                let mut twitch_adapter = TwitchAdapter::new(service_guard.event_bus());
+                
+                // Set token manager on the adapter
+                twitch_adapter.set_token_manager(Arc::clone(&service_guard.token_manager));
+                info!("Set TokenManager on Twitch adapter");
+                
                 let twitch_settings = AdapterSettings {
                     enabled: true,
                     config: serde_json::json!({
@@ -594,19 +619,36 @@ impl ZelanState {
                                 
                                 info!(adapter = %adapter, "Processing token save request for adapter");
                                 
-                                // Create the token JSON
-                                let token_json = json!({
-                                    "access_token": access_token,
-                                    "refresh_token": refresh_token
-                                });
+                                // Clone the refresh token to avoid ownership issues
+                                let refresh_token_clone = refresh_token.clone();
                                 
-                                // Save tokens to secure store
-                                match store_secure_tokens(&app, adapter, token_json).await {
+                                // Create TokenData
+                                use crate::auth::token_manager::TokenData;
+                                let token_data = TokenData::new(
+                                    access_token.to_string(),
+                                    refresh_token_clone
+                                );
+                                
+                                // Get token manager
+                                let token_manager = token_manager.clone();
+                                
+                                // Store tokens using token manager
+                                match token_manager.store_tokens(adapter, token_data).await {
                                     Ok(_) => {
-                                        info!("Successfully saved tokens to secure store for {}", adapter);
+                                        info!("Successfully saved tokens to TokenManager for {}", adapter);
                                     }
                                     Err(e) => {
-                                        error!("Failed to save tokens to secure store: {}", e);
+                                        error!("Failed to save tokens to TokenManager: {}", e);
+                                        
+                                        // Fallback to legacy method
+                                        let token_json = json!({
+                                            "access_token": access_token,
+                                            "refresh_token": refresh_token
+                                        });
+                                        
+                                        if let Err(e) = store_secure_tokens(&app, adapter, token_json).await {
+                                            error!("Fallback token storage also failed: {}", e);
+                                        }
                                     }
                                 };
                             }

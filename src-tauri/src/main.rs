@@ -3,9 +3,9 @@
 
 use anyhow::{anyhow, Result};
 use serde_json::json;
-use tauri::{Manager, AppHandle, Runtime, App, Wry};
-use tauri_plugin_store::{StoreExt, Store};
 use std::sync::Arc;
+use tauri::{App, AppHandle, Manager, Runtime, Wry};
+use tauri_plugin_store::{Store, StoreExt};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 use zelan_lib::{plugin, Config, StreamService};
@@ -40,7 +40,7 @@ fn initialize_stores<R: Runtime>(app: &AppHandle<R>) -> Result<(Arc<Store<R>>, A
     // Initialize config store with default config if needed
     if !config_store.has("config") {
         info!("No existing configuration found, creating default");
-        
+
         // Create a default configuration
         let default_config = Config {
             websocket: zelan_lib::WebSocketConfig { port: 9000 },
@@ -67,19 +67,19 @@ fn load_configuration<R: Runtime>(config_store: &Arc<Store<R>>) -> Result<Config
     if !config_store.has("config") {
         return Err(anyhow!("No configuration found in store"));
     }
-    
+
     // Get the config value
-    let config_value = config_store.get("config")
+    let config_value = config_store
+        .get("config")
         .ok_or_else(|| anyhow!("Failed to get config from store"))?;
-    
+
     // Deserialize the config
     debug!(config = ?config_value, "Config value from store");
-    let config = serde_json::from_value::<Config>(config_value.clone())
-        .map_err(|e| {
-            error!(%e, "Failed to deserialize config");
-            anyhow!("Failed to deserialize config: {}", e)
-        })?;
-    
+    let config = serde_json::from_value::<Config>(config_value.clone()).map_err(|e| {
+        error!(%e, "Failed to deserialize config");
+        anyhow!("Failed to deserialize config: {}", e)
+    })?;
+
     info!("Successfully deserialized config");
     Ok(config)
 }
@@ -137,7 +137,8 @@ fn main() {
 
             // Initialize stores
             let app_handle = app.handle();
-            let (config_store, secure_store) = initialize_stores(&app_handle).expect("Failed to initialize stores");
+            let (config_store, secure_store) =
+                initialize_stores(&app_handle).expect("Failed to initialize stores");
 
             // Load configuration and apply to service
             if let Ok(config) = load_configuration(&config_store) {

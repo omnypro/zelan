@@ -1,5 +1,6 @@
 use crate::{
     adapters::base::{AdapterConfig, BaseAdapter},
+    auth::token_manager::{TokenData, TokenManager},
     EventBus, ServiceAdapter, StreamEvent,
 };
 use anyhow::{anyhow, Result};
@@ -12,7 +13,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::Duration;
 use tracing::{debug, error, info, instrument, warn};
 use twitch_api::helix::{channels::ChannelInformation, streams::Stream};
-use twitch_oauth2::{Scope, UserToken};
+use twitch_oauth2::{Scope, TwitchToken, UserToken};
 
 use super::twitch_api::TwitchApiClient;
 use super::twitch_auth::{AuthEvent, TwitchAuthManager};
@@ -177,6 +178,8 @@ pub struct TwitchAdapter {
     api_client: TwitchApiClient,
     /// State tracking for events
     state: Arc<RwLock<TwitchState>>,
+    /// Token manager for centralized auth handling
+    token_manager: Option<Arc<TokenManager>>,
 }
 
 impl TwitchAdapter {
@@ -203,6 +206,89 @@ impl TwitchAdapter {
             auth_manager: Arc::new(RwLock::new(TwitchAuthManager::new(client_id))),
             api_client: TwitchApiClient::new(),
             state: Arc::new(RwLock::new(TwitchState::default())),
+            token_manager: None, // Will be set when connected to StreamService
+        }
+    }
+
+    /// Set the token manager
+    pub fn set_token_manager(&mut self, token_manager: Arc<TokenManager>) {
+        self.token_manager = Some(token_manager);
+    }
+
+    /// Attempt to load tokens from the TokenManager
+    #[instrument(skip(self), level = "debug")]
+    pub async fn load_tokens_from_manager(&self) -> Result<bool> {
+        if let Some(tm) = &self.token_manager {
+            info!("Attempting to load Twitch tokens from TokenManager");
+
+            match tm.get_tokens("twitch").await {
+                Ok(Some(token_data)) => {
+                    info!("Found tokens in TokenManager");
+
+                    // Update adapter config with tokens
+                    let mut config = self.config.write().await;
+                    config.access_token = Some(token_data.access_token.clone());
+                    config.refresh_token = token_data.refresh_token.clone();
+
+                    // Check for expiration
+                    if token_data.is_expired() {
+                        warn!("Retrieved tokens are expired, may need refresh");
+                    } else if let Some(expires_at) = token_data.expires_at {
+                        let now = chrono::Utc::now();
+                        let duration = expires_at.signed_duration_since(now);
+                        info!("Token expires in {} seconds", duration.num_seconds());
+                    }
+
+                    // Try to restore auth state
+                    if let Err(e) = self.restore_token_auth_state().await {
+                        warn!(
+                            "Failed to restore auth state from TokenManager tokens: {}",
+                            e
+                        );
+                        return Ok(false);
+                    }
+
+                    return Ok(true);
+                }
+                Ok(None) => {
+                    debug!("No Twitch tokens found in TokenManager");
+                }
+                Err(e) => {
+                    error!("Error retrieving tokens from TokenManager: {}", e);
+                }
+            }
+        } else {
+            debug!("TokenManager not available, can't load tokens");
+        }
+
+        Ok(false)
+    }
+
+    /// Restore authentication state from config tokens
+    async fn restore_token_auth_state(&self) -> Result<()> {
+        let config = self.config.read().await.clone();
+
+        if let (Some(access_token), refresh_token) = (&config.access_token, &config.refresh_token) {
+            info!("Restoring authentication from tokens in config");
+
+            match self
+                .auth_manager
+                .write()
+                .await
+                .restore_from_saved_tokens(access_token.clone(), refresh_token.clone())
+                .await
+            {
+                Ok(_) => {
+                    info!("Successfully restored authentication state");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Failed to restore authentication state: {}", e);
+                    Err(anyhow!("Failed to restore auth state: {}", e))
+                }
+            }
+        } else {
+            Err(anyhow!("No tokens available in config"))
         }
     }
 
@@ -234,6 +320,7 @@ impl TwitchAdapter {
             auth_manager: Arc::new(RwLock::new(TwitchAuthManager::new(client_id))),
             api_client: TwitchApiClient::new(),
             state: Arc::new(RwLock::new(TwitchState::default())),
+            token_manager: None, // Will be set when connected to service
         };
 
         // Set up auth callback
@@ -251,31 +338,31 @@ impl TwitchAdapter {
                         AuthEvent::TokenRefreshed => "token_refreshed",
                         AuthEvent::TokenExpired { .. } => "token_expired",
                     };
-                    
+
                     let payload = match event {
-                        AuthEvent::DeviceCodeReceived { 
-                            verification_uri, 
-                            user_code, 
-                            expires_in 
+                        AuthEvent::DeviceCodeReceived {
+                            verification_uri,
+                            user_code,
+                            expires_in,
                         } => {
                             json!({
                                 "event": "device_code_received",
                                 "verification_uri": verification_uri,
                                 "user_code": user_code,
                                 "expires_in": expires_in,
-                                "message": format!("Please visit {} and enter code: {}", 
-                                                  verification_uri, 
+                                "message": format!("Please visit {} and enter code: {}",
+                                                  verification_uri,
                                                   user_code),
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })
-                        },
+                        }
                         AuthEvent::AuthenticationSuccess => {
                             json!({
                                 "event": "authentication_success",
                                 "message": "Successfully authenticated with Twitch",
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })
-                        },
+                        }
                         AuthEvent::AuthenticationFailed { error } => {
                             json!({
                                 "event": "authentication_failed",
@@ -283,14 +370,14 @@ impl TwitchAdapter {
                                 "message": "Failed to authenticate with Twitch",
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })
-                        },
+                        }
                         AuthEvent::TokenRefreshed => {
                             json!({
                                 "event": "token_refreshed",
                                 "message": "Successfully refreshed Twitch token",
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })
-                        },
+                        }
                         AuthEvent::TokenExpired { error } => {
                             json!({
                                 "event": "token_expired",
@@ -298,17 +385,13 @@ impl TwitchAdapter {
                                 "error": error,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })
-                        },
+                        }
                     };
-                    
+
                     // Since we can't use await in this callback, we'll spawn a task to publish
                     let event_type_str = format!("auth.{}", event_type);
-                    let event = StreamEvent::new(
-                        "twitch", 
-                        &event_type_str,
-                        payload
-                    );
-                    
+                    let event = StreamEvent::new("twitch", &event_type_str, payload);
+
                     // Spawn a task to publish the event
                     let event_bus = event_bus_clone.clone();
                     tauri::async_runtime::spawn(async move {
@@ -316,7 +399,7 @@ impl TwitchAdapter {
                             error!("Failed to publish event: {}", e);
                         }
                     });
-                    
+
                     Ok(())
                 });
             }
@@ -420,6 +503,7 @@ impl TwitchAdapter {
             auth_manager: Arc::clone(&self.auth_manager), // Keep the same auth manager
             api_client: self.api_client.clone(),
             state: Arc::clone(&self.state),
+            token_manager: self.token_manager.clone(),
         };
 
         // Start the authentication process in a background task to avoid blocking
@@ -484,8 +568,8 @@ impl TwitchAdapter {
                 "verification_uri": device_code.verification_uri,
                 "user_code": device_code.user_code,
                 "expires_in": device_code.expires_in,
-                "message": format!("Please visit {} and enter code: {}", 
-                                  device_code.verification_uri, 
+                "message": format!("Please visit {} and enter code: {}",
+                                  device_code.verification_uri,
                                   device_code.user_code),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
@@ -556,6 +640,29 @@ impl TwitchAdapter {
                         let refresh_token =
                             token.refresh_token.as_ref().map(|t| t.secret().to_string());
 
+                        // Store tokens in TokenManager if available
+                        if let Some(tm) = &self_clone.token_manager {
+                            info!("Using TokenManager to store Twitch tokens");
+
+                            // Create TokenData
+                            let mut token_data =
+                                TokenData::new(access_token.clone(), refresh_token.clone());
+
+                            // Set expiration if available
+                            let expires_in = token.expires_in().as_secs();
+                            if expires_in > 0 {
+                                token_data.set_expiration(expires_in);
+                            }
+
+                            // Store in token manager
+                            match tm.store_tokens("twitch", token_data).await {
+                                Ok(_) => info!("Successfully stored Twitch tokens in TokenManager"),
+                                Err(e) => error!("Failed to store tokens in TokenManager: {}", e),
+                            }
+                        } else {
+                            warn!("TokenManager not available, storing tokens only in config");
+                        }
+
                         // Update the config
                         let mut config = self_clone.config.write().await;
                         config.access_token = Some(access_token.clone());
@@ -567,23 +674,23 @@ impl TwitchAdapter {
                             access_token.len(),
                             refresh_token.is_some()
                         );
-                        
+
                         // Force the tokens to be included in adapter settings
                         info!("Proactively updating adapter settings to include token information");
-                        
+
                         // Get a clone of the event bus for triggering an update
                         let event_bus = self_clone.base.event_bus();
                         let adapter_name = self_clone.get_name().to_string();
-                        
+
                         // Clone the tokens for use in the task
                         let access_token_clone = access_token.clone();
                         let refresh_token_clone = refresh_token.clone();
-                        
+
                         // Spawn a task to wait a moment and then update settings
                         tauri::async_runtime::spawn(async move {
                             // Wait a moment for things to settle
                             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                            
+
                             // Get the current adapter settings directly from the stream service
                             // Since we can't easily use the direct API here, we'll publish an event
                             // that asks the service to save its config with our tokens
@@ -594,14 +701,14 @@ impl TwitchAdapter {
                                 "refresh_token": refresh_token_clone,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             });
-                            
+
                             // Publish a special event that the service can react to
                             let event = crate::StreamEvent::new(
                                 "system",
                                 "save_tokens_request",
-                                save_request
+                                save_request,
                             );
-                            
+
                             if let Err(e) = event_bus.publish(event).await {
                                 error!("Failed to request token save: {}", e);
                             } else {
@@ -617,7 +724,7 @@ impl TwitchAdapter {
                             .read()
                             .await
                             .get_token_for_storage()
-                            .await 
+                            .await
                         {
                             json!({
                                 "access_token": access,
@@ -630,12 +737,12 @@ impl TwitchAdapter {
                                 "refresh_token": refresh_token.clone(),
                             })
                         };
-                        
+
                         // Update our local config with the new tokens
                         let mut config = self_clone.config.write().await;
                         config.access_token = Some(access_token.clone());
                         config.refresh_token = refresh_token.clone();
-                        
+
                         // Create a config object with tokens to save in the settings
                         // This is important because we need to explicitly include access_token and refresh_token
                         // in the config that gets stored
@@ -648,12 +755,14 @@ impl TwitchAdapter {
                             "monitor_channel_info": config.monitor_channel_info,
                             "monitor_stream_status": config.monitor_stream_status,
                         });
-                        
+
                         // Get display name and description for complete settings
                         let display_name = "Twitch".to_string();
-                        let description = "Connects to Twitch to receive stream information and events".to_string();
+                        let description =
+                            "Connects to Twitch to receive stream information and events"
+                                .to_string();
                         drop(config); // Release the lock
-                        
+
                         // Create a complete settings object
                         // This is the same structure expected by update_adapter_settings
                         let adapter_settings = json!({
@@ -662,14 +771,14 @@ impl TwitchAdapter {
                             "display_name": display_name,
                             "description": description
                         });
-                        
+
                         // Instead of trying to directly update the system with an event mechanism that's complex,
                         // let's create a scheduled save task that runs in the background with a simple approach
-                        
+
                         // Make this update visible in logs so we know tokens have been set
                         info!("Twitch authentication successful, tokens are set in adapter config");
-                        info!("To persist these tokens, please update adapter settings via UI"); 
-                        
+                        info!("To persist these tokens, please update adapter settings via UI");
+
                         // Publish event for UI to provide guidance
                         let ui_guidance_payload = json!({
                             "event": "auth_save_instruction",
@@ -677,19 +786,27 @@ impl TwitchAdapter {
                             "requires_save": true,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         });
-                        
-                        if let Err(e) = self_clone.base.publish_event("auth.guidance", ui_guidance_payload).await {
+
+                        if let Err(e) = self_clone
+                            .base
+                            .publish_event("auth.guidance", ui_guidance_payload)
+                            .await
+                        {
                             warn!("Failed to publish auth guidance: {}", e);
                         }
-                        
+
                         // Send a more user-friendly notification about token saving
                         let token_saved_payload = json!({
                             "event": "tokens_saved",
                             "message": "Authentication successful! Twitch access token has been saved.",
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         });
-                        
-                        if let Err(e) = self_clone.base.publish_event("auth.tokens_saved", token_saved_payload).await {
+
+                        if let Err(e) = self_clone
+                            .base
+                            .publish_event("auth.tokens_saved", token_saved_payload)
+                            .await
+                        {
                             warn!("Failed to publish token saved event: {}", e);
                         }
 
@@ -1058,6 +1175,14 @@ impl ServiceAdapter for TwitchAdapter {
 
         info!("Connecting Twitch adapter");
 
+        // Try to load tokens from TokenManager before starting
+        let tokens_loaded = self.load_tokens_from_manager().await.unwrap_or(false);
+        if tokens_loaded {
+            info!("Successfully loaded tokens from TokenManager");
+        } else {
+            debug!("No tokens loaded from TokenManager, will authenticate if needed");
+        }
+
         // Create the shutdown channel
         let (_, shutdown_rx) = self.base.create_shutdown_channel().await;
 
@@ -1226,6 +1351,7 @@ impl Clone for TwitchAdapter {
             auth_manager: Arc::new(RwLock::new(TwitchAuthManager::new(String::new()))),
             api_client: self.api_client.clone(),
             state: Arc::clone(&self.state),
+            token_manager: self.token_manager.clone(),
         }
     }
 }
