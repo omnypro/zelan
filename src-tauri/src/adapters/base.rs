@@ -3,8 +3,8 @@ use crate::{EventBus, StreamEvent};
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::async_runtime;
-use tokio::sync::{mpsc, Mutex};
+use tauri::async_runtime::Mutex;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, warn};
 
 // Constants shared across adapters

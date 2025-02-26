@@ -7,8 +7,8 @@ use obws::{client::ConnectConfig, requests::EventSubscription, Client};
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::async_runtime;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tauri::async_runtime::{Mutex, RwLock};
+use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, instrument, warn, Instrument};
 

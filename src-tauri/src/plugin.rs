@@ -6,10 +6,9 @@ use anyhow::{anyhow, Result};
 use serde_json::json;
 use std::any::Any;
 use std::sync::Arc;
-use tauri::async_runtime;
+use tauri::async_runtime::Mutex;
 use tauri::{AppHandle, State};
 use tauri_plugin_store::StoreExt;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
 /// State object to store the stream service
