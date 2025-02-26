@@ -7,8 +7,8 @@ use serde_json::json;
 use std::any::Any;
 use std::sync::Arc;
 use tauri::async_runtime::Mutex;
-use tauri::{AppHandle, State};
-use tauri_plugin_store::StoreExt;
+use tauri::{AppHandle, Manager, State, Runtime};
+use tauri_plugin_store::{StoreExt, Store};
 use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
 /// State object to store the stream service
@@ -35,25 +35,32 @@ pub async fn store_secure_tokens(
 ) -> Result<()> {
     debug!(adapter = %adapter_name, "Storing secure tokens");
 
+    // Validate the tokens before proceeding
+    if tokens.is_null() || (tokens.is_object() && tokens.as_object().unwrap().is_empty()) {
+        info!(adapter = %adapter_name, "No tokens to store securely");
+        return Ok(());
+    }
+
     // Create a secure store key specific to this adapter
     let secure_key = format!("secure_{}_tokens", adapter_name);
 
     // Get the store
-    if let Ok(store) = app.store("zelan.secure.json") {
-        // Store the tokens securely
-        store.set(secure_key, tokens);
-
-        // Save the store
-        if let Err(e) = store.save() {
-            error!(error = %e, "Failed to save secure store");
-            return Err(anyhow!("Failed to save secure store: {}", e));
-        }
-        info!(adapter = %adapter_name, "Tokens securely stored");
-        Ok(())
-    } else {
-        error!(adapter = %adapter_name, "Failed to access secure store");
-        Err(anyhow!("Failed to access secure store"))
+    let store = app.store("zelan.secure.json").map_err(|e| {
+        error!(error = %e, adapter = %adapter_name, "Failed to access secure store");
+        anyhow!("Failed to access secure store: {}", e)
+    })?;
+    
+    // Store the tokens securely
+    store.set(&secure_key, tokens);
+    
+    // Save the store
+    if let Err(e) = store.save() {
+        error!(error = %e, "Failed to save secure store");
+        return Err(anyhow!("Failed to save secure store: {}", e));
     }
+    
+    info!(adapter = %adapter_name, "Tokens securely stored");
+    Ok(())
 }
 
 /// Retrieve secure tokens from storage
@@ -68,23 +75,26 @@ pub async fn retrieve_secure_tokens(
     let secure_key = format!("secure_{}_tokens", adapter_name);
 
     // Get the store
-    if let Ok(store) = app.store("zelan.secure.json") {
-        // Check if we have tokens for this adapter
-        if store.has(secure_key.clone()) {
-            // Get the tokens
-            if let Some(tokens) = store.get(secure_key) {
-                debug!(adapter = %adapter_name, "Found secure tokens");
-                return Ok(Some(tokens.clone()));
-            }
-        }
-
-        // No tokens found
+    let store = app.store("zelan.secure.json").map_err(|e| {
+        error!(error = %e, adapter = %adapter_name, "Failed to access secure store");
+        anyhow!("Failed to access secure store: {}", e)
+    })?;
+    
+    // Check if we have tokens for this adapter
+    if !store.has(&secure_key) {
         debug!(adapter = %adapter_name, "No secure tokens found");
-        Ok(None)
-    } else {
-        error!(adapter = %adapter_name, "Failed to access secure store");
-        Err(anyhow!("Failed to access secure store"))
+        return Ok(None);
     }
+    
+    // Get the tokens
+    let tokens = store.get(&secure_key).map(|v| v.clone());
+    
+    match &tokens {
+        Some(_) => debug!(adapter = %adapter_name, "Found secure tokens"),
+        None => debug!(adapter = %adapter_name, "Token key exists but no value found"),
+    }
+    
+    Ok(tokens)
 }
 
 /// Remove secure tokens from storage
@@ -96,26 +106,29 @@ pub async fn remove_secure_tokens(app: &AppHandle, adapter_name: &str) -> Result
     let secure_key = format!("secure_{}_tokens", adapter_name);
 
     // Get the store
-    if let Ok(store) = app.store("zelan.secure.json") {
-        // Remove the tokens if they exist
-        if store.has(secure_key.clone()) {
-            let deleted = store.delete(secure_key);
-            debug!(deleted = %deleted, "Deletion result");
-
-            if let Err(e) = store.save() {
-                error!(error = %e, "Failed to save secure store after deletion");
-                return Err(anyhow!("Failed to save secure store: {}", e));
-            }
-            info!(adapter = %adapter_name, "Secure tokens removed");
-        } else {
-            debug!(adapter = %adapter_name, "No secure tokens to remove");
-        }
-
-        Ok(())
-    } else {
-        error!(adapter = %adapter_name, "Failed to access secure store");
-        Err(anyhow!("Failed to access secure store"))
+    let store = app.store("zelan.secure.json").map_err(|e| {
+        error!(error = %e, adapter = %adapter_name, "Failed to access secure store");
+        anyhow!("Failed to access secure store: {}", e)
+    })?;
+    
+    // Check if tokens exist
+    if !store.has(&secure_key) {
+        debug!(adapter = %adapter_name, "No secure tokens to remove");
+        return Ok(());
     }
+    
+    // Remove the tokens
+    let deleted = store.delete(&secure_key);
+    debug!(deleted = %deleted, "Deletion result");
+    
+    // Save the store to persist the deletion
+    if let Err(e) = store.save() {
+        error!(error = %e, "Failed to save secure store after deletion");
+        return Err(anyhow!("Failed to save secure store: {}", e));
+    }
+    
+    info!(adapter = %adapter_name, "Secure tokens removed");
+    Ok(())
 }
 
 impl ZelanState {
@@ -159,6 +172,8 @@ impl ZelanState {
                 .unwrap_or_default();
             let mut twitch_tokens = serde_json::Map::new();
 
+            debug!(config_obj = ?config_obj, "Config object to inspect for tokens");
+
             // Check for tokens in config
             if let Some(token) = config_obj.get("access_token").cloned() {
                 if !token.is_null() && token.as_str().filter(|t| !t.is_empty()).is_some() {
@@ -193,39 +208,62 @@ impl ZelanState {
         let config_json = json!(processed_config);
         debug!(json = %config_json, "JSON representation");
 
-        // Get the configuration store
-        if let Ok(store) = app.store("zelan.config.json") {
-            debug!("Got config store reference, setting config");
+        // Get the configuration store and secure store for transaction-like operation
+        let config_store = app.store("zelan.config.json").map_err(|e| {
+            error!(error = %e, "Failed to access config store");
+            anyhow!("Failed to access config store: {}", e)
+        })?;
 
-            // Save to config store
-            store.set("config".to_string(), config_json);
-            debug!("Config set in store, saving...");
-
-            match store.save() {
-                Ok(_) => {
-                    info!("Configuration successfully saved to config store");
-
-                    // Now save any secure tokens if we have them
-                    for (adapter_name, tokens) in tokens_to_store {
-                        debug!(adapter = %adapter_name, "Storing tokens securely");
-                        if let Err(e) = store_secure_tokens(app, &adapter_name, tokens).await {
-                            error!(error = %e, adapter = %adapter_name, "Failed to store tokens securely");
-                            // Continue with other adapters
-                        }
-                    }
-
-                    Ok(())
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to save to config store");
-                    Err(anyhow!("Failed to save to config store: {}", e))
-                }
-            }
+        // Only get secure store if we have tokens to save
+        let secure_store = if !tokens_to_store.is_empty() {
+            let secure_store = app.store("zelan.secure.json").map_err(|e| {
+                error!(error = %e, "Failed to access secure store");
+                anyhow!("Failed to access secure store: {}", e)
+            })?;
+            
+            Some(secure_store)
         } else {
-            // If we get here, we couldn't access the store
-            error!("Failed to get config store reference");
-            Err(anyhow!("Failed to access config store"))
+            None
+        };
+
+        // TRANSACTION PATTERN - Prepare all changes before committing
+        
+        // Step 1: Set up values in both stores but don't save yet
+        debug!("Setting up config in config store");
+        config_store.set("config", config_json);
+        
+        // Step 2: Prepare token storage if needed
+        if let Some(store) = &secure_store {
+            for (adapter_name, tokens) in &tokens_to_store {
+                debug!(adapter = %adapter_name, "Preparing tokens for secure storage");
+                let secure_key = format!("secure_{}_tokens", adapter_name);
+                store.set(&secure_key, tokens.clone());
+            }
         }
+        
+        // Step 3: Commit changes in a coordinated way (save both or none)
+        debug!("Committing changes to stores");
+        
+        // First try to save the config store
+        if let Err(e) = config_store.save() {
+            error!(error = %e, "Failed to save to config store");
+            return Err(anyhow!("Failed to save to config store: {}", e));
+        }
+        info!("Configuration successfully saved to config store");
+        
+        // Then save the secure store if needed
+        if let Some(store) = &secure_store {
+            if let Err(e) = store.save() {
+                error!(error = %e, "Failed to save to secure store");
+                warn!("Config store saved but secure store failed - data might be inconsistent");
+                return Err(anyhow!("Failed to save to secure store: {}", e));
+            }
+            info!("Sensitive tokens successfully saved to secure store");
+        }
+
+        // All stores saved successfully
+        info!("All configuration data saved successfully");
+        Ok(())
     }
 
     /// Initialize background services
@@ -541,11 +579,44 @@ impl ZelanState {
                 // Process the dummy subscription to keep it alive
                 match _dummy_subscriber.recv().await {
                     Ok(event) => {
-                        debug!(
-                            source = %event.source(),
-                            event_type = %event.event_type(),
-                            "Background listener received event"
-                        );
+                        // Check for special save_tokens_request event
+                        if event.event_type() == "save_tokens_request" && event.source() == "system" {
+                            info!("Received request to save tokens for an adapter");
+                            
+                            // Extract the tokens and adapter name
+                            let payload = event.payload();
+                            if let (Some(adapter), Some(access_token)) = (
+                                payload.get("adapter").and_then(|v| v.as_str()),
+                                payload.get("access_token").and_then(|v| v.as_str())
+                            ) {
+                                let refresh_token = payload.get("refresh_token")
+                                    .and_then(|v| if v.is_null() { None } else { v.as_str().map(|s| s.to_string()) });
+                                
+                                info!(adapter = %adapter, "Processing token save request for adapter");
+                                
+                                // Create the token JSON
+                                let token_json = json!({
+                                    "access_token": access_token,
+                                    "refresh_token": refresh_token
+                                });
+                                
+                                // Save tokens to secure store
+                                match store_secure_tokens(&app, adapter, token_json).await {
+                                    Ok(_) => {
+                                        info!("Successfully saved tokens to secure store for {}", adapter);
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to save tokens to secure store: {}", e);
+                                    }
+                                };
+                            }
+                        } else {
+                            debug!(
+                                source = %event.source(),
+                                event_type = %event.event_type(),
+                                "Background listener received event"
+                            );
+                        }
                     }
                     Err(e) => {
                         // Only log errors that are not lagged messages

@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::async_runtime;
-use tokio::sync::RwLock;
+use tauri::async_runtime::RwLock;
 use tokio::time::sleep;
 use tracing::{debug, error, info, instrument, warn};
 

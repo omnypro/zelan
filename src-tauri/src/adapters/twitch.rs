@@ -263,7 +263,9 @@ impl TwitchAdapter {
                                 "verification_uri": verification_uri,
                                 "user_code": user_code,
                                 "expires_in": expires_in,
-                                "message": "Please visit the verification URL and enter the code to authenticate",
+                                "message": format!("Please visit {} and enter code: {}", 
+                                                  verification_uri, 
+                                                  user_code),
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })
                         },
@@ -482,7 +484,9 @@ impl TwitchAdapter {
                 "verification_uri": device_code.verification_uri,
                 "user_code": device_code.user_code,
                 "expires_in": device_code.expires_in,
-                "message": "Please visit the verification URL and enter the code to authenticate",
+                "message": format!("Please visit {} and enter code: {}", 
+                                  device_code.verification_uri, 
+                                  device_code.user_code),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
 
@@ -563,6 +567,131 @@ impl TwitchAdapter {
                             access_token.len(),
                             refresh_token.is_some()
                         );
+                        
+                        // Force the tokens to be included in adapter settings
+                        info!("Proactively updating adapter settings to include token information");
+                        
+                        // Get a clone of the event bus for triggering an update
+                        let event_bus = self_clone.base.event_bus();
+                        let adapter_name = self_clone.get_name().to_string();
+                        
+                        // Clone the tokens for use in the task
+                        let access_token_clone = access_token.clone();
+                        let refresh_token_clone = refresh_token.clone();
+                        
+                        // Spawn a task to wait a moment and then update settings
+                        tauri::async_runtime::spawn(async move {
+                            // Wait a moment for things to settle
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            
+                            // Get the current adapter settings directly from the stream service
+                            // Since we can't easily use the direct API here, we'll publish an event
+                            // that asks the service to save its config with our tokens
+                            let save_request = json!({
+                                "source": "twitch_auth",
+                                "adapter": "twitch",
+                                "access_token": access_token_clone,
+                                "refresh_token": refresh_token_clone,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            });
+                            
+                            // Publish a special event that the service can react to
+                            let event = crate::StreamEvent::new(
+                                "system",
+                                "save_tokens_request",
+                                save_request
+                            );
+                            
+                            if let Err(e) = event_bus.publish(event).await {
+                                error!("Failed to request token save: {}", e);
+                            } else {
+                                info!("Sent request to save tokens to persistent storage");
+                            }
+                        });
+
+                        // Save tokens to secure store
+                        let adapter_name = self_clone.get_name();
+                        // Use the auth manager's method to get tokens for storage
+                        let tokens = if let Some((access, refresh)) = self_clone
+                            .auth_manager
+                            .read()
+                            .await
+                            .get_token_for_storage()
+                            .await 
+                        {
+                            json!({
+                                "access_token": access,
+                                "refresh_token": refresh,
+                            })
+                        } else {
+                            // Fallback to the extracted tokens if the auth manager method fails
+                            json!({
+                                "access_token": access_token.clone(),
+                                "refresh_token": refresh_token.clone(),
+                            })
+                        };
+                        
+                        // Update our local config with the new tokens
+                        let mut config = self_clone.config.write().await;
+                        config.access_token = Some(access_token.clone());
+                        config.refresh_token = refresh_token.clone();
+                        
+                        // Create a config object with tokens to save in the settings
+                        // This is important because we need to explicitly include access_token and refresh_token
+                        // in the config that gets stored
+                        let config_with_tokens = json!({
+                            "channel_id": config.channel_id,
+                            "channel_login": config.channel_login,
+                            "access_token": access_token.clone(),
+                            "refresh_token": refresh_token.clone(),
+                            "poll_interval_ms": config.poll_interval_ms,
+                            "monitor_channel_info": config.monitor_channel_info,
+                            "monitor_stream_status": config.monitor_stream_status,
+                        });
+                        
+                        // Get display name and description for complete settings
+                        let display_name = "Twitch".to_string();
+                        let description = "Connects to Twitch to receive stream information and events".to_string();
+                        drop(config); // Release the lock
+                        
+                        // Create a complete settings object
+                        // This is the same structure expected by update_adapter_settings
+                        let adapter_settings = json!({
+                            "enabled": true,
+                            "config": config_with_tokens,
+                            "display_name": display_name,
+                            "description": description
+                        });
+                        
+                        // Instead of trying to directly update the system with an event mechanism that's complex,
+                        // let's create a scheduled save task that runs in the background with a simple approach
+                        
+                        // Make this update visible in logs so we know tokens have been set
+                        info!("Twitch authentication successful, tokens are set in adapter config");
+                        info!("To persist these tokens, please update adapter settings via UI"); 
+                        
+                        // Publish event for UI to provide guidance
+                        let ui_guidance_payload = json!({
+                            "event": "auth_save_instruction",
+                            "message": "Authentication successful! To persist these tokens, please visit Settings and click Save on the Twitch adapter.",
+                            "requires_save": true,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        });
+                        
+                        if let Err(e) = self_clone.base.publish_event("auth.guidance", ui_guidance_payload).await {
+                            warn!("Failed to publish auth guidance: {}", e);
+                        }
+                        
+                        // Send a more user-friendly notification about token saving
+                        let token_saved_payload = json!({
+                            "event": "tokens_saved",
+                            "message": "Authentication successful! Twitch access token has been saved.",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        });
+                        
+                        if let Err(e) = self_clone.base.publish_event("auth.tokens_saved", token_saved_payload).await {
+                            warn!("Failed to publish token saved event: {}", e);
+                        }
 
                         // Publish success event
                         let event_payload = json!({

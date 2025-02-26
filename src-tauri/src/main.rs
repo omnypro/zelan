@@ -1,12 +1,88 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use anyhow::{anyhow, Result};
 use serde_json::json;
-use tauri::Manager;
-use tauri_plugin_store::StoreExt;
-use tracing::{debug, error, info};
+use tauri::{Manager, AppHandle, Runtime, App, Wry};
+use tauri_plugin_store::{StoreExt, Store};
+use std::sync::Arc;
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 use zelan_lib::{plugin, Config, StreamService};
+
+/// Initialize all stores used by the application
+fn initialize_stores<R: Runtime>(app: &AppHandle<R>) -> Result<(Arc<Store<R>>, Arc<Store<R>>)> {
+    // Create/get the configuration store for general settings
+    let config_store = app.store("zelan.config.json").map_err(|e| {
+        error!("Failed to create config store: {}", e);
+        anyhow!("Failed to create config store: {}", e)
+    })?;
+
+    // Create/get the secure store for sensitive data like tokens
+    let secure_store = app.store("zelan.secure.json").map_err(|e| {
+        error!("Failed to create secure store: {}", e);
+        anyhow!("Failed to create secure store: {}", e)
+    })?;
+
+    // Initialize the secure store if needed
+    if !secure_store.has("initialized") {
+        info!("Initializing secure store");
+        secure_store.set("initialized", json!(true));
+        if let Err(e) = secure_store.save() {
+            error!(%e, "Failed to initialize secure store");
+            return Err(anyhow!("Failed to initialize secure store: {}", e));
+        }
+        info!("Secure store initialized");
+    } else {
+        debug!("Secure store already initialized");
+    }
+
+    // Initialize config store with default config if needed
+    if !config_store.has("config") {
+        info!("No existing configuration found, creating default");
+        
+        // Create a default configuration
+        let default_config = Config {
+            websocket: zelan_lib::WebSocketConfig { port: 9000 },
+            adapters: std::collections::HashMap::new(),
+        };
+
+        // Save the default config
+        config_store.set("config", json!(default_config));
+        if let Err(e) = config_store.save() {
+            error!(%e, "Failed to save initial config");
+            return Err(anyhow!("Failed to save initial config: {}", e));
+        }
+        info!("Default configuration saved to store");
+    } else {
+        debug!("Configuration store already has config entry");
+    }
+
+    Ok((config_store, secure_store))
+}
+
+/// Load configuration from the config store
+fn load_configuration<R: Runtime>(config_store: &Arc<Store<R>>) -> Result<Config> {
+    // Check if we have a configuration
+    if !config_store.has("config") {
+        return Err(anyhow!("No configuration found in store"));
+    }
+    
+    // Get the config value
+    let config_value = config_store.get("config")
+        .ok_or_else(|| anyhow!("Failed to get config from store"))?;
+    
+    // Deserialize the config
+    debug!(config = ?config_value, "Config value from store");
+    let config = serde_json::from_value::<Config>(config_value.clone())
+        .map_err(|e| {
+            error!(%e, "Failed to deserialize config");
+            anyhow!("Failed to deserialize config: {}", e)
+        })?;
+    
+    info!("Successfully deserialized config");
+    Ok(config)
+}
 
 fn main() {
     // Load environment variables from .env file if it exists
@@ -59,80 +135,24 @@ fn main() {
             // Create the Zelan state
             let zelan_state = plugin::init_state();
 
-            // Create/get the configuration store for general settings
-            let config_store = app.store("zelan.config.json");
+            // Initialize stores
+            let app_handle = app.handle();
+            let (config_store, secure_store) = initialize_stores(&app_handle).expect("Failed to initialize stores");
 
-            // Create/get the secure store for sensitive data like tokens
-            let secure_store = app.store("zelan.secure.json");
+            // Load configuration and apply to service
+            if let Ok(config) = load_configuration(&config_store) {
+                // Create a StreamService from config and store it
+                let new_service = StreamService::from_config(config);
 
-            // Initialize the secure store if needed
-            if let Ok(store) = &secure_store {
-                debug!("Secure store successfully opened");
-                if store.has("initialized".to_string()) {
-                    debug!("Secure store already initialized");
-                } else {
-                    info!("Initializing secure store");
-                    store.set("initialized".to_string(), json!(true));
-                    if let Err(e) = store.save() {
-                        error!(%e, "Failed to initialize secure store");
-                    } else {
-                        info!("Secure store initialized");
-                    }
-                }
-            } else {
-                error!("Failed to access secure store");
-            }
+                // Clone the state before moving it into the async block
+                let zelan_state_clone = zelan_state.clone();
 
-            // Process the main configuration store
-            if let Ok(store) = &config_store {
-                debug!("Config store successfully opened");
-                // Check if we have a configuration
-                if store.has("config".to_string()) {
-                    info!("Found existing configuration in store");
-                    // Get the config value
-                    if let Some(config_value) = store.get("config".to_string()) {
-                        // Deserialize the config
-                        debug!(config = ?config_value, "Config value from store");
-                        match serde_json::from_value::<Config>(config_value.clone()) {
-                            Ok(config) => {
-                                info!("Successfully deserialized config, creating service");
-                                // Create a StreamService from config and store it
-                                let new_service = StreamService::from_config(config);
-
-                                // Clone the state before moving it into the async block
-                                let zelan_state_clone = zelan_state.clone();
-
-                                // Spawn a task to update the service
-                                tauri::async_runtime::spawn(async move {
-                                    let mut service = zelan_state_clone.service.lock().await;
-                                    *service = new_service;
-                                    info!("Loaded configuration from persistent storage");
-                                });
-                            }
-                            Err(e) => {
-                                error!(%e, "Failed to deserialize config");
-                            }
-                        }
-                    }
-                } else {
-                    info!("No existing configuration found, creating default");
-
-                    // Create a default configuration
-                    let default_config = Config {
-                        websocket: zelan_lib::WebSocketConfig { port: 9000 },
-                        adapters: std::collections::HashMap::new(),
-                    };
-
-                    // Save the default config
-                    store.set("config".to_string(), json!(default_config));
-                    if let Err(e) = store.save() {
-                        error!(%e, "Failed to save initial config");
-                    } else {
-                        info!("Default configuration saved to store");
-                    }
-                }
-            } else {
-                error!("Failed to access configuration store");
+                // Spawn a task to update the service
+                tauri::async_runtime::spawn(async move {
+                    let mut service = zelan_state_clone.service.lock().await;
+                    *service = new_service;
+                    info!("Loaded configuration from persistent storage");
+                });
             }
 
             // Store both stores as state for other components to access
@@ -163,7 +183,7 @@ fn main() {
             plugin::update_adapter_settings,
             plugin::send_test_event,
             plugin::get_websocket_info,
-            plugin::set_websocket_port
+            plugin::set_websocket_port,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

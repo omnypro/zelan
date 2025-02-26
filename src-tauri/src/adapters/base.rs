@@ -171,4 +171,67 @@ impl BaseAdapter {
             }
         }
     }
+    
+    /// Get the current adapter settings from the service
+    /// This is a helper method to access adapter settings through the event bus
+    #[instrument(skip(self), level = "debug")]
+    pub async fn get_adapter_settings(&self) -> Result<crate::AdapterSettings> {
+        // Use a system event to request settings
+        let payload = serde_json::json!({
+            "adapter": self.name,
+            "action": "get_settings",
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        
+        // Create a custom event to get settings
+        let stream_event = StreamEvent::new("system", "adapter.get_settings", payload);
+        
+        // Publish event through the event bus
+        match self.event_bus.publish(stream_event).await {
+            Ok(_) => {
+                debug!(adapter = %self.name, "Successfully requested adapter settings");
+                
+                // Return default settings for now - in real implementation, 
+                // we would wait for a response
+                Ok(crate::AdapterSettings {
+                    enabled: true,
+                    config: serde_json::json!({}),
+                    display_name: self.name.clone(),
+                    description: format!("Settings for {} adapter", self.name),
+                })
+            }
+            Err(e) => {
+                error!(adapter = %self.name, error = %e, "Failed to request adapter settings");
+                Err(e.into())
+            }
+        }
+    }
+    
+    /// Update adapter settings in the service
+    /// This is a helper method to update adapter settings through the event bus
+    #[instrument(skip(self, settings), level = "debug")]
+    pub async fn update_adapter_settings(&self, settings: crate::AdapterSettings) -> Result<()> {
+        // Use a system event to update settings
+        let payload = serde_json::json!({
+            "adapter": self.name,
+            "action": "update_settings",
+            "settings": settings,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        
+        // Create a custom event to update settings
+        let stream_event = StreamEvent::new("system", "adapter.update_settings", payload);
+        
+        // Publish event through the event bus
+        match self.event_bus.publish(stream_event).await {
+            Ok(_) => {
+                debug!(adapter = %self.name, "Successfully requested adapter settings update");
+                Ok(())
+            }
+            Err(e) => {
+                error!(adapter = %self.name, error = %e, "Failed to update adapter settings");
+                Err(e.into())
+            }
+        }
+    }
 }
