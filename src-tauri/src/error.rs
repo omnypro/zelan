@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
 use std::time::{Duration, Instant};
 use tauri::async_runtime::RwLock;
 use tokio::time::sleep;
@@ -25,6 +25,74 @@ pub struct ZelanError {
     /// Unique identifier for this error instance
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_id: Option<String>,
+}
+
+impl ZelanError {
+    /// Create a new error builder with the specified error code
+    pub fn new(code: ErrorCode) -> ZelanErrorBuilder {
+        ZelanErrorBuilder {
+            code,
+            message: String::new(),
+            context: None,
+            severity: ErrorSeverity::Error,
+            category: None,
+            error_id: None,
+        }
+    }
+}
+
+/// Builder for creating ZelanError instances
+pub struct ZelanErrorBuilder {
+    code: ErrorCode,
+    message: String,
+    context: Option<String>,
+    severity: ErrorSeverity,
+    category: Option<ErrorCategory>,
+    error_id: Option<String>,
+}
+
+impl ZelanErrorBuilder {
+    /// Set the error message
+    pub fn message(mut self, message: impl Into<String>) -> Self {
+        self.message = message.into();
+        self
+    }
+    
+    /// Set the error context
+    pub fn context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+    
+    /// Set the error severity
+    pub fn severity(mut self, severity: ErrorSeverity) -> Self {
+        self.severity = severity;
+        self
+    }
+    
+    /// Set the error category
+    pub fn category(mut self, category: ErrorCategory) -> Self {
+        self.category = Some(category);
+        self
+    }
+    
+    /// Set the error ID
+    pub fn error_id(mut self, id: impl Into<String>) -> Self {
+        self.error_id = Some(id.into());
+        self
+    }
+    
+    /// Build the final ZelanError
+    pub fn build(self) -> ZelanError {
+        ZelanError {
+            code: self.code,
+            message: self.message,
+            context: self.context,
+            severity: self.severity,
+            category: self.category,
+            error_id: self.error_id,
+        }
+    }
 }
 
 /// Error codes for different types of errors
@@ -243,8 +311,10 @@ pub struct ErrorRegistry {
     last_occurrence: RwLock<HashMap<ErrorCode, Instant>>,
     /// Map of error sources to counts
     source_counts: RwLock<HashMap<String, usize>>,
-    /// Map of error IDs to full error information
-    error_history: RwLock<HashMap<String, ZelanError>>,
+    /// Queue of errors in FIFO order
+    error_history: RwLock<VecDeque<ZelanError>>,
+    /// Map of error IDs to indices in the error_history queue for fast lookups
+    error_id_map: RwLock<HashMap<String, usize>>,
     /// Maximum number of errors to store in history
     max_history: usize,
 }
@@ -256,7 +326,8 @@ impl ErrorRegistry {
             error_counts: RwLock::new(HashMap::new()),
             last_occurrence: RwLock::new(HashMap::new()),
             source_counts: RwLock::new(HashMap::new()),
-            error_history: RwLock::new(HashMap::new()),
+            error_history: RwLock::new(VecDeque::with_capacity(max_history)),
+            error_id_map: RwLock::new(HashMap::new()),
             max_history,
         }
     }
@@ -288,21 +359,33 @@ impl ErrorRegistry {
             *sources.entry(src.to_string()).or_insert(0) += 1;
         }
 
-        // Add to history with FIFO eviction
+        // Add to history with proper FIFO eviction
         {
-            let mut history = self.error_history.write().await;
-
-            // Simple FIFO eviction if we've reached the maximum
-            if history.len() >= self.max_history && !history.is_empty() {
-                // Remove oldest error (approximation - HashMap doesn't guarantee order)
-                if let Some(key) = history.keys().next().cloned() {
-                    history.remove(&key);
-                }
-            }
-
-            // Insert new error
+            // First ensure we have an error ID
             if let Some(id) = &error.error_id {
-                history.insert(id.clone(), error.clone());
+                let mut history = self.error_history.write().await;
+                let mut id_map = self.error_id_map.write().await;
+                
+                // If we've reached capacity, remove the oldest error
+                if history.len() >= self.max_history {
+                    if let Some(old_error) = history.pop_front() {
+                        // Also remove from the ID map
+                        if let Some(old_id) = old_error.error_id {
+                            id_map.remove(&old_id);
+                        }
+                        
+                        // Update indices in the map after removal
+                        for index in id_map.values_mut() {
+                            *index -= 1;
+                        }
+                    }
+                }
+                
+                // Add new error to the end of the queue
+                history.push_back(error.clone());
+                
+                // Store its index in the ID map
+                id_map.insert(id.clone(), history.len() - 1);
             }
         }
 
@@ -335,7 +418,15 @@ impl ErrorRegistry {
 
     /// Get the full error history
     pub async fn get_history(&self) -> Vec<ZelanError> {
-        self.error_history.read().await.values().cloned().collect()
+        self.error_history.read().await.iter().cloned().collect()
+    }
+
+    /// Get a specific error by ID
+    pub async fn get_error_by_id(&self, id: &str) -> Option<ZelanError> {
+        let id_map = self.error_id_map.read().await;
+        let history = self.error_history.read().await;
+        
+        id_map.get(id).and_then(|&index| history.get(index).cloned())
     }
 
     /// Clear all error statistics
@@ -343,7 +434,8 @@ impl ErrorRegistry {
         *self.error_counts.write().await = HashMap::new();
         *self.last_occurrence.write().await = HashMap::new();
         *self.source_counts.write().await = HashMap::new();
-        *self.error_history.write().await = HashMap::new();
+        *self.error_history.write().await = VecDeque::new();
+        *self.error_id_map.write().await = HashMap::new();
     }
 }
 
@@ -423,36 +515,33 @@ impl From<anyhow::Error> for ZelanError {
         let err_str = err.to_string().to_lowercase();
         let category = if !err_str.is_empty() {
             if err_str.contains("timeout") || err_str.contains("timed out") {
-                Some(ErrorCategory::Network)
+                ErrorCategory::Network
             } else if err_str.contains("unauthorized") || err_str.contains("token") {
-                Some(ErrorCategory::Authentication)
+                ErrorCategory::Authentication
             } else if err_str.contains("rate")
                 && (err_str.contains("limit") || err_str.contains("exceeded"))
             {
-                Some(ErrorCategory::RateLimit)
+                ErrorCategory::RateLimit
             } else if err_str.contains("permission") || err_str.contains("forbidden") {
-                Some(ErrorCategory::Permission)
+                ErrorCategory::Permission
             } else if err_str.contains("not found") || err_str.contains("404") {
-                Some(ErrorCategory::NotFound)
+                ErrorCategory::NotFound
             } else if err_str.contains("invalid") || err_str.contains("validation") {
-                Some(ErrorCategory::Validation)
+                ErrorCategory::Validation
             } else if err_str.contains("unavailable") || err_str.contains("503") {
-                Some(ErrorCategory::ServiceUnavailable)
+                ErrorCategory::ServiceUnavailable
             } else {
-                Some(ErrorCategory::Internal)
+                ErrorCategory::Internal
             }
         } else {
-            Some(ErrorCategory::Internal)
+            ErrorCategory::Internal
         };
 
-        ZelanError {
-            code: ErrorCode::Internal,
-            message: err.to_string(),
-            context: None,
-            severity: ErrorSeverity::Error,
-            category,
-            error_id: None,
-        }
+        ZelanError::new(ErrorCode::Internal)
+            .message(err.to_string())
+            .category(category)
+            .severity(ErrorSeverity::Error)
+            .build()
     }
 }
 
@@ -463,155 +552,125 @@ pub type ZelanResult<T> = Result<T, ZelanError>;
 
 /// Create an adapter not found error
 pub fn adapter_not_found(name: &str) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::AdapterNotFound,
-        message: format!("Adapter '{}' not found", name),
-        context: None,
-        severity: ErrorSeverity::Error,
-        category: Some(ErrorCategory::NotFound),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::AdapterNotFound)
+        .message(format!("Adapter '{}' not found", name))
+        .category(ErrorCategory::NotFound)
+        .severity(ErrorSeverity::Error)
+        .build()
 }
 
 /// Create an adapter connection failed error
 pub fn adapter_connection_failed(name: &str, err: impl fmt::Display) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::AdapterConnectionFailed,
-        message: format!("Failed to connect adapter '{}'", name),
-        context: Some(err.to_string()),
-        severity: ErrorSeverity::Error,
-        category: Some(ErrorCategory::Network),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::AdapterConnectionFailed)
+        .message(format!("Failed to connect adapter '{}'", name))
+        .context(err.to_string())
+        .category(ErrorCategory::Network)
+        .severity(ErrorSeverity::Error)
+        .build()
 }
 
 /// Create an event bus publish failed error
 pub fn event_bus_publish_failed(err: impl fmt::Display) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::EventBusPublishFailed,
-        message: "Failed to publish event to event bus".to_string(),
-        context: Some(err.to_string()),
-        severity: ErrorSeverity::Error,
-        category: Some(ErrorCategory::Internal),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::EventBusPublishFailed)
+        .message("Failed to publish event to event bus")
+        .context(err.to_string())
+        .category(ErrorCategory::Internal)
+        .severity(ErrorSeverity::Error)
+        .build()
 }
 
 /// Create an event bus dropped error
 pub fn event_bus_dropped() -> ZelanError {
-    ZelanError {
-        code: ErrorCode::EventBusDropped,
-        message: "Event was dropped due to no receivers".to_string(),
-        context: None,
-        severity: ErrorSeverity::Warning,
-        category: Some(ErrorCategory::Internal),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::EventBusDropped)
+        .message("Event was dropped due to no receivers")
+        .category(ErrorCategory::Internal)
+        .severity(ErrorSeverity::Warning)
+        .build()
 }
 
 /// Create a WebSocket bind failed error
 pub fn websocket_bind_failed(err: impl fmt::Display) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::WebSocketBindFailed,
-        message: "Failed to bind WebSocket server".to_string(),
-        context: Some(err.to_string()),
-        severity: ErrorSeverity::Critical,
-        category: Some(ErrorCategory::Network),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::WebSocketBindFailed)
+        .message("Failed to bind WebSocket server")
+        .context(err.to_string())
+        .category(ErrorCategory::Network)
+        .severity(ErrorSeverity::Critical)
+        .build()
 }
 
 /// Create a WebSocket accept failed error
 pub fn websocket_accept_failed(err: impl fmt::Display) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::WebSocketAcceptFailed,
-        message: "Failed to accept WebSocket connection".to_string(),
-        context: Some(err.to_string()),
-        severity: ErrorSeverity::Error,
-        category: Some(ErrorCategory::Network),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::WebSocketAcceptFailed)
+        .message("Failed to accept WebSocket connection")
+        .context(err.to_string())
+        .category(ErrorCategory::Network)
+        .severity(ErrorSeverity::Error)
+        .build()
 }
 
 /// Create a WebSocket send failed error
 pub fn websocket_send_failed(err: impl fmt::Display) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::WebSocketSendFailed,
-        message: "Failed to send WebSocket message".to_string(),
-        context: Some(err.to_string()),
-        severity: ErrorSeverity::Error,
-        category: Some(ErrorCategory::Network),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::WebSocketSendFailed)
+        .message("Failed to send WebSocket message")
+        .context(err.to_string())
+        .category(ErrorCategory::Network)
+        .severity(ErrorSeverity::Error)
+        .build()
 }
 
 /// Create an API rate limit error
 pub fn api_rate_limited(service: &str, reset_after: Option<Duration>) -> ZelanError {
-    let context = if let Some(duration) = reset_after {
-        Some(format!(
+    let mut builder = ZelanError::new(ErrorCode::ApiRateLimited)
+        .message(format!("{} API rate limit exceeded", service))
+        .category(ErrorCategory::RateLimit)
+        .severity(ErrorSeverity::Warning);
+    
+    if let Some(duration) = reset_after {
+        builder = builder.context(format!(
             "Rate limit resets in {} seconds",
             duration.as_secs()
-        ))
-    } else {
-        None
-    };
-
-    ZelanError {
-        code: ErrorCode::ApiRateLimited,
-        message: format!("{} API rate limit exceeded", service),
-        context,
-        severity: ErrorSeverity::Warning,
-        category: Some(ErrorCategory::RateLimit),
-        error_id: None,
+        ));
     }
+    
+    builder.build()
 }
 
 /// Create an authentication error
 pub fn auth_token_expired() -> ZelanError {
-    ZelanError {
-        code: ErrorCode::AuthTokenExpired,
-        message: "Authentication token has expired".to_string(),
-        context: None,
-        severity: ErrorSeverity::Warning,
-        category: Some(ErrorCategory::Authentication),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::AuthTokenExpired)
+        .message("Authentication token has expired")
+        .category(ErrorCategory::Authentication)
+        .severity(ErrorSeverity::Warning)
+        .build()
 }
 
 /// Create a network timeout error
 pub fn network_timeout(service: &str, operation: &str) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::NetworkTimeout,
-        message: format!("Network timeout while connecting to {}", service),
-        context: Some(format!("Operation: {}", operation)),
-        severity: ErrorSeverity::Warning,
-        category: Some(ErrorCategory::Network),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::NetworkTimeout)
+        .message(format!("Network timeout while connecting to {}", service))
+        .context(format!("Operation: {}", operation))
+        .category(ErrorCategory::Network)
+        .severity(ErrorSeverity::Warning)
+        .build()
 }
 
 /// Create a configuration error
 pub fn config_invalid(key: &str, value: &str, reason: &str) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::ConfigInvalid,
-        message: format!("Invalid configuration value for '{}'", key),
-        context: Some(format!("Value '{}' is invalid: {}", value, reason)),
-        severity: ErrorSeverity::Error,
-        category: Some(ErrorCategory::Configuration),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::ConfigInvalid)
+        .message(format!("Invalid configuration value for '{}'", key))
+        .context(format!("Value '{}' is invalid: {}", value, reason))
+        .category(ErrorCategory::Configuration)
+        .severity(ErrorSeverity::Error)
+        .build()
 }
 
 /// Create a configuration missing error
 pub fn config_missing(key: &str) -> ZelanError {
-    ZelanError {
-        code: ErrorCode::ConfigMissing,
-        message: format!("Required configuration key '{}' is missing", key),
-        context: None,
-        severity: ErrorSeverity::Error,
-        category: Some(ErrorCategory::Configuration),
-        error_id: None,
-    }
+    ZelanError::new(ErrorCode::ConfigMissing)
+        .message(format!("Required configuration key '{}' is missing", key))
+        .category(ErrorCategory::Configuration)
+        .severity(ErrorSeverity::Error)
+        .build()
 }
 
 /// Helper for executing a function with automatic retries according to a retry policy
@@ -706,11 +765,11 @@ pub struct CircuitBreaker {
     /// Time to wait before attempting to close the circuit
     reset_timeout: Duration,
     /// Current failure count
-    failure_count: RwLock<usize>,
+    failure_count: AtomicUsize,
     /// Time when the circuit was opened
     open_time: RwLock<Option<Instant>>,
     /// Whether the circuit is currently open
-    is_open: RwLock<bool>,
+    is_open: AtomicBool,
     /// Error registry for tracking errors
     error_registry: Option<Arc<ErrorRegistry>>,
 }
@@ -722,9 +781,9 @@ impl CircuitBreaker {
             name: name.to_string(),
             failure_threshold,
             reset_timeout,
-            failure_count: RwLock::new(0),
+            failure_count: AtomicUsize::new(0),
             open_time: RwLock::new(None),
-            is_open: RwLock::new(false),
+            is_open: AtomicBool::new(false),
             error_registry: None,
         }
     }
@@ -737,14 +796,14 @@ impl CircuitBreaker {
 
     /// Check if the circuit is open
     pub async fn is_open(&self) -> bool {
-        let is_open = *self.is_open.read().await;
+        let is_open = self.is_open.load(Ordering::Acquire);
 
         // If the circuit is open, check if we've waited long enough to try again
         if is_open {
             if let Some(open_time) = *self.open_time.read().await {
                 if open_time.elapsed() >= self.reset_timeout {
                     // Reset to half-open state
-                    *self.is_open.write().await = false;
+                    self.is_open.store(false, Ordering::Release);
                     debug!(
                         name = self.name,
                         reset_timeout_ms = self.reset_timeout.as_millis(),
@@ -760,15 +819,15 @@ impl CircuitBreaker {
 
     /// Record a success, resetting the failure count
     pub async fn record_success(&self) {
-        *self.failure_count.write().await = 0;
-        *self.is_open.write().await = false;
+        self.failure_count.store(0, Ordering::Release);
+        self.is_open.store(false, Ordering::Release);
         *self.open_time.write().await = None;
     }
 
     /// Record a failure, potentially opening the circuit
     pub async fn record_failure(&self, error: Option<&ZelanError>) {
-        let mut count = self.failure_count.write().await;
-        *count += 1;
+        // Atomically increment the failure count
+        let count = self.failure_count.fetch_add(1, Ordering::AcqRel) + 1;
 
         // Register the error if provided
         if let Some(err) = error {
@@ -778,8 +837,8 @@ impl CircuitBreaker {
         }
 
         // Open the circuit if we've reached the threshold
-        if *count >= self.failure_threshold {
-            *self.is_open.write().await = true;
+        if count >= self.failure_threshold {
+            self.is_open.store(true, Ordering::Release);
             *self.open_time.write().await = Some(Instant::now());
 
             // Log at appropriate level based on error severity
@@ -788,7 +847,7 @@ impl CircuitBreaker {
                 ErrorSeverity::Critical => {
                     error!(
                         name = self.name,
-                        failure_count = *count,
+                        failure_count = count,
                         threshold = self.failure_threshold,
                         reset_timeout_ms = self.reset_timeout.as_millis(),
                         "Circuit breaker opened due to critical failures"
@@ -797,7 +856,7 @@ impl CircuitBreaker {
                 ErrorSeverity::Error => {
                     warn!(
                         name = self.name,
-                        failure_count = *count,
+                        failure_count = count,
                         threshold = self.failure_threshold,
                         reset_timeout_ms = self.reset_timeout.as_millis(),
                         "Circuit breaker opened due to repeated errors"
@@ -806,7 +865,7 @@ impl CircuitBreaker {
                 _ => {
                     info!(
                         name = self.name,
-                        failure_count = *count,
+                        failure_count = count,
                         threshold = self.failure_threshold,
                         reset_timeout_ms = self.reset_timeout.as_millis(),
                         "Circuit breaker opened"
@@ -824,17 +883,13 @@ impl CircuitBreaker {
     {
         // Check if circuit is open
         if self.is_open().await {
-            return Err(ZelanError {
-                code: ErrorCode::Internal,
-                message: format!("Circuit breaker '{}' is open", self.name),
-                context: Some(format!(
-                    "Too many failures (reset in {:?})",
-                    self.reset_timeout - self.open_time.read().await.unwrap().elapsed()
-                )),
-                severity: ErrorSeverity::Warning,
-                category: Some(ErrorCategory::ServiceUnavailable),
-                error_id: None,
-            });
+            let reset_in = self.reset_timeout - self.open_time.read().await.unwrap().elapsed();
+            return Err(ZelanError::new(ErrorCode::Internal)
+                .message(format!("Circuit breaker '{}' is open", self.name))
+                .context(format!("Too many failures (reset in {:?})", reset_in))
+                .severity(ErrorSeverity::Warning)
+                .category(ErrorCategory::ServiceUnavailable)
+                .build());
         }
 
         // Execute the function
