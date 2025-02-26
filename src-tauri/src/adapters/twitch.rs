@@ -8,12 +8,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{env, sync::Arc};
-use tauri::async_runtime;
-use tokio::sync::{mpsc, RwLock};
+use tauri::async_runtime::RwLock;
+use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tracing::{debug, error, info, instrument, warn};
 use twitch_api::helix::{channels::ChannelInformation, streams::Stream};
-use twitch_oauth2::{Scope, TwitchToken, UserToken};
+use twitch_oauth2::TwitchToken;
 
 use super::twitch_api::TwitchApiClient;
 use super::twitch_auth::{AuthEvent, TwitchAuthManager};

@@ -4,9 +4,9 @@
 use anyhow::{anyhow, Result};
 use serde_json::json;
 use std::sync::Arc;
-use tauri::{App, AppHandle, Manager, Runtime, Wry};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::{Store, StoreExt};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 use zelan_lib::{plugin, Config, StreamService};
 

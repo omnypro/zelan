@@ -1,8 +1,7 @@
 use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
-use std::{env, sync::Arc};
+use std::env;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 use twitch_oauth2::{
     id::DeviceCodeResponse, ClientId, DeviceUserTokenBuilder, Scope, TwitchToken, UserToken,
 };
@@ -221,7 +220,7 @@ impl TwitchAuthManager {
         let auth_state = self.auth_state.read().await.clone();
 
         match auth_state {
-            AuthState::PendingDeviceAuth(device_code) => {
+            AuthState::PendingDeviceAuth(_device_code) => {
                 // Create HTTP client
                 let http_client = reqwest::Client::builder()
                     .redirect(reqwest::redirect::Policy::none())
@@ -381,7 +380,7 @@ impl TwitchAuthManager {
             };
 
         // Log if we have a refresh token
-        if let Some(refresh_token_str) = refresh_token {
+        if let Some(_refresh_token_str) = refresh_token {
             info!("Found refresh token - will be available for refreshing access token");
             // In a real implementation, the refresh token would be used automatically
             // by the UserToken when the access token expires

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -245,7 +245,7 @@ impl TokenManager {
                     .unwrap_or_default();
 
                 // Create TokenData
-                let mut token_data = TokenData {
+                let token_data = TokenData {
                     access_token,
                     refresh_token,
                     expires_at,

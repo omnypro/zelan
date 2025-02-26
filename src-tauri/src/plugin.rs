@@ -8,8 +8,8 @@ use serde_json::json;
 use std::any::Any;
 use std::sync::Arc;
 use tauri::async_runtime::Mutex;
-use tauri::{AppHandle, Manager, Runtime, State};
-use tauri_plugin_store::{Store, StoreExt};
+use tauri::{AppHandle, State};
+use tauri_plugin_store::StoreExt;
 use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
 /// State object to store the stream service and token manager
@@ -330,9 +330,6 @@ impl ZelanState {
                         enabled = saved_test_settings.enabled,
                         "Found saved Test adapter settings"
                     );
-                    
-                    // Import the TestConfig type and AdapterConfig trait
-                    use crate::adapters::{base::AdapterConfig, test::TestConfig};
                     
                     // Create the adapter with the saved configuration if possible
                     let test_adapter = match TestAdapter::config_from_json(&saved_test_settings.config) {
@@ -945,7 +942,6 @@ pub async fn update_adapter_settings(
             // For Twitch, monitor for tokens provided directly by the auth flow
             if adapterName == "twitch" && adapter_settings.enabled {
                 // Start a background task to periodically check if tokens appear that need to be secured
-                let app_handle = app.clone();
                 let adapter_name_clone = adapterName.clone();
                 let service_clone2 = service_clone.clone();
 
