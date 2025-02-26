@@ -1,5 +1,6 @@
 use crate::{
     adapters::base::{AdapterConfig, BaseAdapter},
+    adapters::twitch_eventsub::EventSubClient,
     auth::token_manager::{TokenData, TokenManager},
     EventBus, ServiceAdapter, StreamEvent,
 };
@@ -54,6 +55,8 @@ pub struct TwitchConfig {
     pub monitor_channel_info: bool,
     /// Whether to monitor stream status
     pub monitor_stream_status: bool,
+    /// Whether to use EventSub instead of polling
+    pub use_eventsub: bool,
 }
 
 impl Default for TwitchConfig {
@@ -66,6 +69,7 @@ impl Default for TwitchConfig {
             poll_interval_ms: DEFAULT_POLL_INTERVAL_MS,
             monitor_channel_info: true,
             monitor_stream_status: true,
+            use_eventsub: true, // Default to using EventSub
         }
     }
 }
@@ -80,6 +84,7 @@ impl AdapterConfig for TwitchConfig {
             "poll_interval_ms": self.poll_interval_ms,
             "monitor_channel_info": self.monitor_channel_info,
             "monitor_stream_status": self.monitor_stream_status,
+            "use_eventsub": self.use_eventsub,
         })
     }
 
@@ -119,6 +124,11 @@ impl AdapterConfig for TwitchConfig {
 
         if let Some(monitor_stream) = json.get("monitor_stream_status").and_then(|v| v.as_bool()) {
             config.monitor_stream_status = monitor_stream;
+        }
+        
+        // Extract EventSub flag
+        if let Some(use_eventsub) = json.get("use_eventsub").and_then(|v| v.as_bool()) {
+            config.use_eventsub = use_eventsub;
         }
 
         Ok(config)
@@ -180,6 +190,8 @@ pub struct TwitchAdapter {
     state: Arc<RwLock<TwitchState>>,
     /// Token manager for centralized auth handling
     token_manager: Option<Arc<TokenManager>>,
+    /// EventSub client for WebSocket-based events
+    eventsub_client: Arc<RwLock<Option<EventSubClient>>>,
 }
 
 impl TwitchAdapter {
@@ -200,13 +212,16 @@ impl TwitchAdapter {
             }
         };
 
+        let config = TwitchConfig::default();
+
         Self {
             base: BaseAdapter::new("twitch", event_bus.clone()),
-            config: Arc::new(RwLock::new(TwitchConfig::default())),
+            config: Arc::new(RwLock::new(config.clone())),
             auth_manager: Arc::new(RwLock::new(TwitchAuthManager::new(client_id))),
             api_client: TwitchApiClient::new(),
             state: Arc::new(RwLock::new(TwitchState::default())),
             token_manager: None, // Will be set when connected to StreamService
+            eventsub_client: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -292,12 +307,120 @@ impl TwitchAdapter {
         }
     }
 
+    /// Initialize the EventSub client
+    #[instrument(skip(self), level = "debug")]
+    async fn init_eventsub_client(&self) -> Result<()> {
+        info!("Initializing EventSub client");
+
+        // Create new EventSub client
+        let event_bus = self.base.event_bus();
+        match EventSubClient::new(event_bus.clone()) {
+            Ok(client) => {
+                // Store client in adapter
+                *self.eventsub_client.write().await = Some(client);
+                info!("EventSub client initialized");
+                Ok(())
+            }
+            Err(e) => {
+                error!("Failed to create EventSub client: {}", e);
+                // Fall back to polling by setting use_eventsub to false
+                let mut config = self.config.write().await;
+                config.use_eventsub = false;
+                Err(anyhow!("Failed to create EventSub client: {}", e))
+            }
+        }
+    }
+
+    /// Start the EventSub client with the current token
+    #[instrument(skip(self), level = "debug")]
+    async fn start_eventsub(&self) -> Result<()> {
+        info!("Starting EventSub client");
+
+        // Check config for token
+        let config = self.config.read().await;
+        info!("Config has access token: {}", config.access_token.is_some());
+        drop(config);
+
+        // Get access token
+        let token = {
+            let auth_manager = self.auth_manager.read().await;
+            match auth_manager.get_token().await {
+                Some(token) => {
+                    info!("Auth manager has valid token");
+                    drop(auth_manager);
+                    token
+                },
+                None => {
+                    warn!("Auth manager has no token despite config having one");
+                    // Try to restore from config
+                    drop(auth_manager);
+                    if let Err(e) = self.restore_token_auth_state().await {
+                        warn!("Failed to restore auth state: {}", e);
+                    }
+                    
+                    // Try again
+                    let auth_manager = self.auth_manager.read().await;
+                    match auth_manager.get_token().await {
+                        Some(token) => {
+                            info!("Successfully restored token from config");
+                            drop(auth_manager);
+                            token
+                        },
+                        None => {
+                            return Err(anyhow!("No access token available after restoration attempt"));
+                        }
+                    }
+                }
+            }
+        };
+
+        // If no EventSub client exists, initialize it
+        if self.eventsub_client.read().await.is_none() {
+            self.init_eventsub_client().await?;
+        }
+
+        // Start EventSub client
+        if let Some(client) = &*self.eventsub_client.read().await {
+            if let Err(e) = client.start(&token).await {
+                error!("Failed to start EventSub client: {}", e);
+                // Fall back to polling
+                let mut config = self.config.write().await;
+                config.use_eventsub = false;
+                return Err(anyhow!("Failed to start EventSub client: {}", e));
+            }
+            info!("EventSub client started successfully");
+            Ok(())
+        } else {
+            // Fall back to polling
+            let mut config = self.config.write().await;
+            config.use_eventsub = false;
+            Err(anyhow!("EventSub client not initialized"))
+        }
+    }
+
+    /// Stop the EventSub client
+    #[instrument(skip(self), level = "debug")]
+    async fn stop_eventsub(&self) -> Result<()> {
+        info!("Stopping EventSub client");
+
+        if let Some(client) = &*self.eventsub_client.read().await {
+            if let Err(e) = client.stop().await {
+                warn!("Error stopping EventSub client: {}", e);
+                // Continue anyway, the client will be released
+            }
+            info!("EventSub client stopped");
+        }
+
+        Ok(())
+    }
+
     /// Create a new Twitch adapter with custom config
     #[instrument(skip(event_bus), level = "debug")]
     pub fn with_config(event_bus: Arc<EventBus>, config: TwitchConfig) -> Self {
         info!(
             channel_id = ?config.channel_id,
             channel_login = ?config.channel_login,
+            use_eventsub = config.use_eventsub,
             "Creating Twitch adapter with custom config"
         );
 
@@ -321,6 +444,7 @@ impl TwitchAdapter {
             api_client: TwitchApiClient::new(),
             state: Arc::new(RwLock::new(TwitchState::default())),
             token_manager: None, // Will be set when connected to service
+            eventsub_client: Arc::new(RwLock::new(None)),
         };
 
         // Set up auth callback
@@ -504,6 +628,7 @@ impl TwitchAdapter {
             api_client: self.api_client.clone(),
             state: Arc::clone(&self.state),
             token_manager: self.token_manager.clone(),
+            eventsub_client: Arc::clone(&self.eventsub_client),
         };
 
         // Start the authentication process in a background task to avoid blocking
@@ -1181,6 +1306,20 @@ impl ServiceAdapter for TwitchAdapter {
             info!("Successfully loaded tokens from TokenManager");
         } else {
             debug!("No tokens loaded from TokenManager, will authenticate if needed");
+            
+            // Try to restore from config if available
+            let config = self.config.read().await;
+            if config.access_token.is_some() {
+                info!("Found access token in config, attempting to restore auth state");
+                drop(config);
+                
+                match self.restore_token_auth_state().await {
+                    Ok(_) => info!("Successfully restored auth state from config"),
+                    Err(e) => warn!("Failed to restore auth state from config: {}", e)
+                }
+            } else {
+                drop(config);
+            }
         }
 
         // Create the shutdown channel
@@ -1189,18 +1328,60 @@ impl ServiceAdapter for TwitchAdapter {
         // Set connected state
         self.base.set_connected(true);
 
-        // Start polling in a background task
-        let self_clone = self.clone();
-        let handle = tauri::async_runtime::spawn(async move {
-            if let Err(e) = self_clone.poll_twitch_updates(shutdown_rx).await {
-                error!(error = %e, "Error in Twitch update polling");
-            }
-        });
+        // Check if we're using EventSub
+        let config = self.config.read().await;
+        let use_eventsub = config.use_eventsub;
+        drop(config);
+        
+        if use_eventsub {
+            info!("Using EventSub for Twitch events");
+            
+            // Start EventSub in a background task
+            let self_clone = self.clone();
+            let handle = tauri::async_runtime::spawn(async move {
+                // Try to start EventSub
+                match self_clone.start_eventsub().await {
+                    Ok(_) => {
+                        info!("Successfully started EventSub");
+                    }
+                    Err(e) => {
+                        error!("Failed to start EventSub: {}", e);
+                        
+                        // Fall back to polling if EventSub fails
+                        let mut config = self_clone.config.write().await;
+                        config.use_eventsub = false;
+                        drop(config);
+                        
+                        // Start polling as fallback
+                        info!("Falling back to polling for Twitch updates");
+                        if let Err(e) = self_clone.poll_twitch_updates(shutdown_rx).await {
+                            error!(error = %e, "Error in Twitch update polling");
+                        }
+                    }
+                }
+            });
+            
+            // Store the event handler task
+            self.base.set_event_handler(handle).await;
+            
+            info!("Twitch adapter connected with EventSub");
+        } else {
+            info!("Using polling for Twitch events");
+            
+            // Start polling in a background task
+            let self_clone = self.clone();
+            let handle = tauri::async_runtime::spawn(async move {
+                if let Err(e) = self_clone.poll_twitch_updates(shutdown_rx).await {
+                    error!(error = %e, "Error in Twitch update polling");
+                }
+            });
 
-        // Store the event handler task
-        self.base.set_event_handler(handle).await;
-
-        info!("Twitch adapter connected and polling for updates");
+            // Store the event handler task
+            self.base.set_event_handler(handle).await;
+            
+            info!("Twitch adapter connected and polling for updates");
+        }
+        
         Ok(())
     }
 
@@ -1217,7 +1398,20 @@ impl ServiceAdapter for TwitchAdapter {
         // Set disconnected state to stop event generation
         self.base.set_connected(false);
 
-        // Stop the event handler
+        // Check if we're using EventSub
+        let config = self.config.read().await;
+        let use_eventsub = config.use_eventsub;
+        drop(config);
+        
+        if use_eventsub {
+            // Stop EventSub client
+            if let Err(e) = self.stop_eventsub().await {
+                warn!("Error stopping EventSub client: {}", e);
+                // Continue with disconnect regardless
+            }
+        }
+
+        // Stop the event handler (this will stop the polling task if running)
         self.base.stop_event_handler().await?;
 
         info!("Twitch adapter disconnected");
@@ -1250,10 +1444,30 @@ impl ServiceAdapter for TwitchAdapter {
         // Check if channel changed
         let channel_changed = current_config.channel_id != new_config.channel_id
             || current_config.channel_login != new_config.channel_login;
+            
+        // Check if EventSub setting changed
+        let eventsub_changed = current_config.use_eventsub != new_config.use_eventsub;
 
         // Update our configuration
         let mut current_config = self.config.write().await;
         *current_config = new_config.clone();
+        
+        // Handle EventSub setting changes
+        if eventsub_changed {
+            info!("EventSub setting changed to: {}", new_config.use_eventsub);
+            
+            // If we're connected, we need to restart with the new setting
+            if self.is_connected() {
+                info!("Adapter is connected, will restart with new EventSub setting");
+                
+                // Stop existing EventSub if it's running and we're switching to polling
+                if !new_config.use_eventsub {
+                    if let Err(e) = self.stop_eventsub().await {
+                        warn!("Error stopping EventSub: {}", e);
+                    }
+                }
+            }
+        }
 
         // If auth changed, update auth manager
         if auth_changed {
@@ -1352,6 +1566,7 @@ impl Clone for TwitchAdapter {
             api_client: self.api_client.clone(),
             state: Arc::clone(&self.state),
             token_manager: self.token_manager.clone(),
+            eventsub_client: Arc::clone(&self.eventsub_client),
         }
     }
 }

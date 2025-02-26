@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::env;
 use tokio::sync::RwLock;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use twitch_oauth2::{
     id::DeviceCodeResponse, ClientId, DeviceUserTokenBuilder, Scope, TwitchToken, UserToken,
 };
@@ -300,7 +300,7 @@ impl TwitchAuthManager {
     pub async fn refresh_token_if_needed(&self) -> Result<()> {
         let auth_state = self.auth_state.read().await.clone();
 
-        if let AuthState::Authenticated(token) = auth_state {
+        if let AuthState::Authenticated(mut token) = auth_state {
             // Check if token is about to expire (within 5 minutes)
             // The compiler indicates expires_in() returns a Duration directly
             let should_refresh = token.expires_in().as_secs() < 300;
@@ -313,19 +313,13 @@ impl TwitchAuthManager {
                     .redirect(reqwest::redirect::Policy::none())
                     .build()?;
 
-                // Extract the access token's value
-                let access_token = token.access_token.secret().to_string();
-
-                // Create a new AccessToken object
-                let access_token_obj = twitch_oauth2::AccessToken::new(access_token);
-
-                // Use from_token to validate and refresh the token
-                match twitch_oauth2::UserToken::from_token(&http_client, access_token_obj).await {
-                    Ok(refreshed_token) => {
+                // Use the TwitchToken trait's refresh_token method directly
+                match token.refresh_token(&http_client).await {
+                    Ok(()) => {
                         info!("Successfully refreshed token");
 
-                        // Update auth state with new token
-                        *self.auth_state.write().await = AuthState::Authenticated(refreshed_token);
+                        // Update auth state with new token (which was refreshed in-place)
+                        *self.auth_state.write().await = AuthState::Authenticated(token);
 
                         // Send refresh event
                         self.send_event(AuthEvent::TokenRefreshed).await?;
@@ -371,25 +365,37 @@ impl TwitchAuthManager {
         // Create access token object
         let access_token_obj = twitch_oauth2::AccessToken::new(access_token);
 
-        // Validate the token with Twitch API using from_token
-        // This makes a validation request to Twitch and returns a full UserToken
-        let validated_token =
-            match twitch_oauth2::UserToken::from_token(&http_client, access_token_obj).await {
-                Ok(token) => token,
-                Err(e) => return Err(anyhow!("Token validation failed: {}", e)),
-            };
+        // Create an optional refresh token object
+        let refresh_token_obj = refresh_token.map(twitch_oauth2::RefreshToken::new);
 
-        // Log if we have a refresh token
-        if let Some(_refresh_token_str) = refresh_token {
-            info!("Found refresh token - will be available for refreshing access token");
-            // In a real implementation, the refresh token would be used automatically
-            // by the UserToken when the access token expires
+        // First try the normal token validation approach
+        match twitch_oauth2::UserToken::from_token(&http_client, access_token_obj).await {
+            Ok(token) => {
+                // Token is valid, store it and return
+                info!("Successfully validated existing token");
+                *self.auth_state.write().await = AuthState::Authenticated(token.clone());
+                Ok(token)
+            }
+            Err(e) => {
+                // Instead of complex token reconstruction, just report that token is invalid and needs re-auth
+                info!("Token validation failed: {}. Re-authentication required", e);
+                
+                // If we have a refresh token, log that we couldn't use it
+                if refresh_token_obj.is_some() {
+                    warn!("Had a refresh token but couldn't use it automatically. Re-authentication required.");
+                }
+                
+                // Send token expired event
+                if let Err(event_err) = self.send_event(AuthEvent::TokenExpired {
+                    error: format!("Token validation failed: {}", e),
+                }).await {
+                    warn!("Failed to send token expired event: {}", event_err);
+                }
+                
+                // Return with clear message
+                Err(anyhow!("Token validation failed: {}. Need to re-authenticate", e))
+            }
         }
-
-        // Store the validated token
-        *self.auth_state.write().await = AuthState::Authenticated(validated_token.clone());
-
-        Ok(validated_token)
     }
 
     /// Get token details for storage
