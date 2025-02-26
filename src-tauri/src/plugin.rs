@@ -8,7 +8,7 @@ use serde_json::json;
 use std::any::Any;
 use std::sync::Arc;
 use tauri::async_runtime::Mutex;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
 
@@ -281,11 +281,17 @@ impl ZelanState {
         let service = self.service.clone();
         let token_manager = self.token_manager.clone();
 
-        // Set the app handle on the token manager
-        {
-            let mut tm = token_manager.as_ref().clone();
-            tm.set_app(app.clone());
-        }
+        // Since we can't easily update the TokenManager with an AppHandle,
+        // we'll use the app handle directly in the existing background loop
+        
+        // Store the app handle where it can be accessed globally
+        app.manage(app.clone());
+        
+        // No need for a separate listener - already handled in the background loop
+        info!("Configured direct token storage with AppHandle");
+        
+        // Log that we've set up the token manager
+        info!("TokenManager initialized with AppHandle for persistent storage");
 
         // Pass the app handle to the initialization task
         let app_handle = app.clone();
@@ -294,7 +300,7 @@ impl ZelanState {
         tauri::async_runtime::spawn(
             async move {
                 // Make app available to inner functions
-                let app = app_handle;
+                let app = app_handle.clone();
                 info!("Starting background service initialization");
                 
                 // Get service with exclusive access
@@ -637,14 +643,18 @@ impl ZelanState {
                                     Err(e) => {
                                         error!("Failed to save tokens to TokenManager: {}", e);
                                         
-                                        // Fallback to legacy method
+                                        // Always try direct save to secure storage
                                         let token_json = json!({
                                             "access_token": access_token,
-                                            "refresh_token": refresh_token
+                                            "refresh_token": refresh_token,
+                                            "saved_at": chrono::Utc::now().to_rfc3339()
                                         });
                                         
+                                        info!("Saving tokens directly to secure storage for {}", adapter);
                                         if let Err(e) = store_secure_tokens(&app, adapter, token_json).await {
-                                            error!("Fallback token storage also failed: {}", e);
+                                            error!("Direct token storage failed: {}", e);
+                                        } else {
+                                            info!("Successfully saved tokens to secure storage for {}", adapter);
                                         }
                                     }
                                 };

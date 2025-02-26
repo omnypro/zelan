@@ -302,7 +302,6 @@ impl TwitchAuthManager {
 
         if let AuthState::Authenticated(mut token) = auth_state {
             // Check if token is about to expire (within 5 minutes)
-            // The compiler indicates expires_in() returns a Duration directly
             let should_refresh = token.expires_in().as_secs() < 300;
 
             if should_refresh {
@@ -313,12 +312,12 @@ impl TwitchAuthManager {
                     .redirect(reqwest::redirect::Policy::none())
                     .build()?;
 
-                // Use the TwitchToken trait's refresh_token method directly
+                // Use the token's built-in refresh_token method
                 match token.refresh_token(&http_client).await {
                     Ok(()) => {
                         info!("Successfully refreshed token");
 
-                        // Update auth state with new token (which was refreshed in-place)
+                        // Update auth state with the refreshed token
                         *self.auth_state.write().await = AuthState::Authenticated(token);
 
                         // Send refresh event
@@ -365,10 +364,7 @@ impl TwitchAuthManager {
         // Create access token object
         let access_token_obj = twitch_oauth2::AccessToken::new(access_token);
 
-        // Create an optional refresh token object
-        let refresh_token_obj = refresh_token.map(twitch_oauth2::RefreshToken::new);
-
-        // First try the normal token validation approach
+        // Try to validate the token with Twitch API
         match twitch_oauth2::UserToken::from_token(&http_client, access_token_obj).await {
             Ok(token) => {
                 // Token is valid, store it and return
@@ -377,12 +373,12 @@ impl TwitchAuthManager {
                 Ok(token)
             }
             Err(e) => {
-                // Instead of complex token reconstruction, just report that token is invalid and needs re-auth
-                info!("Token validation failed: {}. Re-authentication required", e);
-                
-                // If we have a refresh token, log that we couldn't use it
-                if refresh_token_obj.is_some() {
-                    warn!("Had a refresh token but couldn't use it automatically. Re-authentication required.");
+                // If the token is invalid and we have a refresh token, we need to re-authenticate
+                // We can't use the refresh token directly without a valid user token
+                if let Some(refresh_token_str) = refresh_token {
+                    info!("Token validation failed ({}), but we have a refresh token", e);
+                    warn!("Refresh tokens can only be used with an existing valid token structure");
+                    warn!("User will need to re-authenticate to get a new token");
                 }
                 
                 // Send token expired event
