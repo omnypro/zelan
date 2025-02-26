@@ -594,7 +594,8 @@ impl TwitchAdapter {
     /// Start device auth flow and wait for completion
     async fn authenticate(&self) -> Result<()> {
         // Check if we're already in a pending device code flow
-        let is_pending = match self
+        // Result is captured but only used for side effects in the match arms
+        let _is_pending = match self
             .auth_manager
             .read()
             .await
@@ -620,7 +621,8 @@ impl TwitchAdapter {
         info!("Starting Twitch authentication using device code flow");
 
         // Create a safe clone with a shared auth_manager
-        let event_bus = self.base.event_bus();
+        // event_bus is declared but not used - might be needed for future implementation
+        let _event_bus = self.base.event_bus();
         let self_clone = Self {
             base: self.base.clone(),
             config: Arc::clone(&self.config),
@@ -805,7 +807,7 @@ impl TwitchAdapter {
 
                         // Get a clone of the event bus for triggering an update
                         let event_bus = self_clone.base.event_bus();
-                        let adapter_name = self_clone.get_name().to_string();
+                        // NOTE: Adapter name was previously unused - removed
 
                         // Clone the tokens for use in the task
                         let access_token_clone = access_token.clone();
@@ -842,9 +844,11 @@ impl TwitchAdapter {
                         });
 
                         // Save tokens to secure store
-                        let adapter_name = self_clone.get_name();
+                        // NOTE: Adapter name was previously unused - removed
+                        
                         // Use the auth manager's method to get tokens for storage
-                        let tokens = if let Some((access, refresh)) = self_clone
+                        // TODO: This creates tokens but doesn't actually store them - incomplete feature
+                        let _tokens = if let Some((access, refresh)) = self_clone
                             .auth_manager
                             .read()
                             .await
@@ -890,7 +894,8 @@ impl TwitchAdapter {
 
                         // Create a complete settings object
                         // This is the same structure expected by update_adapter_settings
-                        let adapter_settings = json!({
+                        // TODO: This settings object is created but never used - incomplete feature or leftover
+                        let _adapter_settings = json!({
                             "enabled": true,
                             "config": config_with_tokens,
                             "display_name": display_name,
@@ -1195,8 +1200,8 @@ impl TwitchAdapter {
                             error!(error = %e, "Failed to fetch channel info");
                         }
                     }
-                } else if let Some(login) = &config.channel_login {
-                    // TODO: Implement lookup by login
+                } else if let Some(_login) = &config.channel_login {
+                    // TODO: Implement lookup by login - variable is unused until implementation
                     warn!("Lookup by channel login not implemented yet");
                 }
             }

@@ -14,9 +14,7 @@ use tracing::{debug, error, info, warn};
 use twitch_api::{
     eventsub::{
         Event,
-        event::websocket::{
-            EventsubWebsocketData, SessionData, WelcomePayload
-        }
+        event::websocket::EventsubWebsocketData
     },
     types::UserId,
 };
@@ -192,7 +190,8 @@ impl EventSubClient {
         // Clone Arc references for the background task
         let event_bus = self.event_bus.clone();
         let connection = self.connection.clone();
-        let client_id = self.client_id.clone();
+        // client_id is not used in the task, but kept for future implementation
+        let _client_id = self.client_id.clone();
         let user_id_clone = self.user_id.clone();
 
         // Spawn the WebSocket connection task
@@ -465,7 +464,9 @@ impl EventSubClient {
                                             // Convert to JSON for our simple EventBus
                                             match serde_json::to_value(&payload) {
                                                 Ok(event_json) => {
-                                                    let broadcaster_id = user_id.read().await.clone();
+                                                    // broadcaster_id is retrieved but not used in this function
+                                                    // keeping for future implementation that might need it
+                                                    let _broadcaster_id = user_id.read().await.clone();
                                                     
                                                     // Map the event type to our internal format
                                                     let event_type = match metadata.subscription_type.to_str() {

@@ -1133,9 +1133,8 @@ pub async fn set_websocket_port(
 
 /// Connect an adapter by name
 #[tauri::command]
-#[instrument(skip(app, state), fields(adapter_name = %adapter_name), level = "debug")]
+#[instrument(skip(state), fields(adapter_name = %adapter_name), level = "debug")]
 pub async fn connect_adapter(
-    app: AppHandle,
     state: State<'_, ZelanState>,
     adapter_name: String,
 ) -> Result<String, ZelanError> {
@@ -1159,9 +1158,8 @@ pub async fn connect_adapter(
 
 /// Disconnect an adapter by name
 #[tauri::command]
-#[instrument(skip(app, state), fields(adapter_name = %adapter_name), level = "debug")]
+#[instrument(skip(state), fields(adapter_name = %adapter_name), level = "debug")]
 pub async fn disconnect_adapter(
-    app: AppHandle,
     state: State<'_, ZelanState>,
     adapter_name: String,
 ) -> Result<String, ZelanError> {

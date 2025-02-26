@@ -272,12 +272,12 @@ function App() {
       // If enabling, connect the adapter using our new direct command
       if (updatedSettings.enabled) {
         await safeInvoke('connect_adapter', {
-          adapterName: adapterName, // Using snake_case for the Rust backend
+          adapterName: adapterName,
         });
       } else {
         // If disabling, disconnect the adapter using our new direct command
         await safeInvoke('disconnect_adapter', {
-          adapterName: adapterName, // Using snake_case for the Rust backend
+          adapterName: adapterName,
         });
       }
 
