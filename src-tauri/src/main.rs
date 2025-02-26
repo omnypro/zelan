@@ -59,11 +59,33 @@ fn main() {
             // Create the Zelan state
             let zelan_state = plugin::init_state();
 
-            // Create/get the store using the simpler approach
-            let store = app.store("zelan.config.json");
+            // Create/get the configuration store for general settings
+            let config_store = app.store("zelan.config.json");
 
-            if let Ok(store) = &store {
-                debug!("Store successfully opened");
+            // Create/get the secure store for sensitive data like tokens
+            let secure_store = app.store("zelan.secure.json");
+
+            // Initialize the secure store if needed
+            if let Ok(store) = &secure_store {
+                debug!("Secure store successfully opened");
+                if store.has("initialized".to_string()) {
+                    debug!("Secure store already initialized");
+                } else {
+                    info!("Initializing secure store");
+                    store.set("initialized".to_string(), json!(true));
+                    if let Err(e) = store.save() {
+                        error!(%e, "Failed to initialize secure store");
+                    } else {
+                        info!("Secure store initialized");
+                    }
+                }
+            } else {
+                error!("Failed to access secure store");
+            }
+
+            // Process the main configuration store
+            if let Ok(store) = &config_store {
+                debug!("Config store successfully opened");
                 // Check if we have a configuration
                 if store.has("config".to_string()) {
                     info!("Found existing configuration in store");
@@ -113,14 +135,16 @@ fn main() {
                 error!("Failed to access configuration store");
             }
 
-            // Store as state for other components to access
-            app.manage(store);
+            // Store both stores as state for other components to access
+            app.manage(config_store);
+            app.manage(secure_store);
 
             // Initialize services properly using Tauri's async runtime
             info!("Starting service initialization");
             let zelan_state_clone = zelan_state.clone();
+            let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match zelan_state_clone.init_services().await {
+                match zelan_state_clone.init_services(app_handle).await {
                     Ok(_) => info!("Successfully initialized services"),
                     Err(e) => error!(%e, "Failed to initialize services"),
                 }

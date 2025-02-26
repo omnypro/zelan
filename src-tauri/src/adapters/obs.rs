@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures_util::{pin_mut, StreamExt};
 use obws::{client::ConnectConfig, requests::EventSubscription, Client};
 use serde_json::json;
+use tauri::async_runtime;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -52,7 +53,7 @@ pub struct ObsAdapter {
     connected: AtomicBool,
     client: Mutex<Option<Arc<Client>>>,
     config: RwLock<ObsConfig>,
-    event_handler: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    event_handler: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     shutdown_signal: Mutex<Option<mpsc::Sender<()>>>,
 }
 
@@ -522,7 +523,7 @@ impl ServiceAdapter for ObsAdapter {
                 let event_bus_clone = Arc::clone(&self.event_bus);
                 let config_clone = config.clone();
 
-                let handle = tokio::spawn(
+                let handle = tauri::async_runtime::spawn(
                     async move {
                         if let Err(e) = Self::handle_obs_events(
                             client_clone,

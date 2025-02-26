@@ -5,6 +5,8 @@ use crate::{
 use anyhow::{anyhow, Result};
 use serde_json::json;
 use std::sync::Arc;
+use tauri::async_runtime;
+use std::any::Any;
 use tauri::{AppHandle, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
@@ -22,6 +24,98 @@ impl Clone for ZelanState {
         Self {
             service: self.service.clone(),
         }
+    }
+}
+
+/// Securely store sensitive tokens in the secure storage
+#[instrument(skip(app, adapter_name, tokens), level = "debug")]
+pub async fn store_secure_tokens(
+    app: &AppHandle,
+    adapter_name: &str,
+    tokens: serde_json::Value,
+) -> Result<()> {
+    debug!(adapter = %adapter_name, "Storing secure tokens");
+
+    // Create a secure store key specific to this adapter
+    let secure_key = format!("secure_{}_tokens", adapter_name);
+
+    // Get the store
+    if let Ok(store) = app.store("zelan.secure.json") {
+        // Store the tokens securely
+        store.set(secure_key, tokens);
+
+        // Save the store
+        if let Err(e) = store.save() {
+            error!(error = %e, "Failed to save secure store");
+            return Err(anyhow!("Failed to save secure store: {}", e));
+        }
+        info!(adapter = %adapter_name, "Tokens securely stored");
+        Ok(())
+    } else {
+        error!(adapter = %adapter_name, "Failed to access secure store");
+        Err(anyhow!("Failed to access secure store"))
+    }
+}
+
+/// Retrieve secure tokens from storage
+#[instrument(skip(app, adapter_name), level = "debug")]
+pub async fn retrieve_secure_tokens(
+    app: &AppHandle,
+    adapter_name: &str,
+) -> Result<Option<serde_json::Value>> {
+    debug!(adapter = %adapter_name, "Retrieving secure tokens");
+
+    // Create a secure store key specific to this adapter
+    let secure_key = format!("secure_{}_tokens", adapter_name);
+
+    // Get the store
+    if let Ok(store) = app.store("zelan.secure.json") {
+        // Check if we have tokens for this adapter
+        if store.has(secure_key.clone()) {
+            // Get the tokens
+            if let Some(tokens) = store.get(secure_key) {
+                debug!(adapter = %adapter_name, "Found secure tokens");
+                return Ok(Some(tokens.clone()));
+            }
+        }
+
+        // No tokens found
+        debug!(adapter = %adapter_name, "No secure tokens found");
+        Ok(None)
+    } else {
+        error!(adapter = %adapter_name, "Failed to access secure store");
+        Err(anyhow!("Failed to access secure store"))
+    }
+}
+
+/// Remove secure tokens from storage
+#[instrument(skip(app, adapter_name), level = "debug")]
+pub async fn remove_secure_tokens(app: &AppHandle, adapter_name: &str) -> Result<()> {
+    debug!(adapter = %adapter_name, "Removing secure tokens");
+
+    // Create a secure store key specific to this adapter
+    let secure_key = format!("secure_{}_tokens", adapter_name);
+
+    // Get the store
+    if let Ok(store) = app.store("zelan.secure.json") {
+        // Remove the tokens if they exist
+        if store.has(secure_key.clone()) {
+            let deleted = store.delete(secure_key);
+            debug!(deleted = %deleted, "Deletion result");
+            
+            if let Err(e) = store.save() {
+                error!(error = %e, "Failed to save secure store after deletion");
+                return Err(anyhow!("Failed to save secure store: {}", e));
+            }
+            info!(adapter = %adapter_name, "Secure tokens removed");
+        } else {
+            debug!(adapter = %adapter_name, "No secure tokens to remove");
+        }
+
+        Ok(())
+    } else {
+        error!(adapter = %adapter_name, "Failed to access secure store");
+        Err(anyhow!("Failed to access secure store"))
     }
 }
 
@@ -51,43 +145,103 @@ impl ZelanState {
         let config = self.export_config().await?;
         debug!(config = ?config, "Config to be saved");
 
-        // Convert to JSON for storing
-        let config_json = json!(config);
+        // Process adapters that need special handling
+        let mut processed_config = config.clone();
+        let mut tokens_to_store = std::collections::HashMap::new();
+
+        // Process Twitch adapter to extract tokens
+        if let Some(twitch_settings) = processed_config.adapters.get_mut("twitch") {
+            debug!("Processing Twitch adapter config for secure storage");
+
+            let mut config_obj = twitch_settings
+                .config
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            let mut twitch_tokens = serde_json::Map::new();
+
+            // Check for tokens in config
+            if let Some(token) = config_obj.get("access_token").cloned() {
+                if !token.is_null() && token.as_str().filter(|t| !t.is_empty()).is_some() {
+                    debug!("Found access_token in config, moving to secure storage");
+                    twitch_tokens.insert("access_token".to_string(), token.clone());
+                    // Remove from main config - use null as a placeholder
+                    config_obj.insert("access_token".to_string(), serde_json::Value::Null);
+                }
+            }
+
+            if let Some(token) = config_obj.get("refresh_token").cloned() {
+                if !token.is_null() && token.as_str().filter(|t| !t.is_empty()).is_some() {
+                    debug!("Found refresh_token in config, moving to secure storage");
+                    twitch_tokens.insert("refresh_token".to_string(), token.clone());
+                    // Remove from main config - use null as a placeholder
+                    config_obj.insert("refresh_token".to_string(), serde_json::Value::Null);
+                }
+            }
+
+            // If we have tokens to store, save them to the secure tokens map
+            if !twitch_tokens.is_empty() {
+                tokens_to_store.insert(
+                    "twitch".to_string(),
+                    serde_json::Value::Object(twitch_tokens),
+                );
+                // Update the config to remove the tokens
+                twitch_settings.config = serde_json::Value::Object(config_obj);
+            }
+        }
+
+        // Convert processed config to JSON for storing
+        let config_json = json!(processed_config);
         debug!(json = %config_json, "JSON representation");
 
-        // Get the store
+        // Get the configuration store
         if let Ok(store) = app.store("zelan.config.json") {
-            debug!("Got store reference, setting config");
+            debug!("Got config store reference, setting config");
 
-            // Save to store
+            // Save to config store
             store.set("config".to_string(), config_json);
             debug!("Config set in store, saving...");
 
             match store.save() {
                 Ok(_) => {
-                    info!("Configuration successfully saved to store");
+                    info!("Configuration successfully saved to config store");
+
+                    // Now save any secure tokens if we have them
+                    for (adapter_name, tokens) in tokens_to_store {
+                        debug!(adapter = %adapter_name, "Storing tokens securely");
+                        if let Err(e) = store_secure_tokens(app, &adapter_name, tokens).await {
+                            error!(error = %e, adapter = %adapter_name, "Failed to store tokens securely");
+                            // Continue with other adapters
+                        }
+                    }
+
                     Ok(())
                 }
                 Err(e) => {
-                    error!(error = %e, "Failed to save to store");
-                    Err(anyhow!("Failed to save to store: {}", e))
+                    error!(error = %e, "Failed to save to config store");
+                    Err(anyhow!("Failed to save to config store: {}", e))
                 }
             }
         } else {
             // If we get here, we couldn't access the store
-            error!("Failed to get store reference");
-            Err(anyhow!("Failed to access store"))
+            error!("Failed to get config store reference");
+            Err(anyhow!("Failed to access config store"))
         }
     }
 
     /// Initialize background services
-    #[instrument(skip(self), level = "debug")]
-    pub async fn init_services(&self) -> Result<()> {
+    #[instrument(skip(self, app), level = "debug")]
+    pub async fn init_services(&self, app: AppHandle) -> Result<()> {
         let service = self.service.clone();
 
+        // Pass the app handle to the initialization task
+        let app_handle = app.clone();
+        
         // We initialize services in a separate task to avoid blocking
-        tokio::spawn(
+        tauri::async_runtime::spawn(
             async move {
+                // Make app available to inner functions
+                let app = app_handle;
                 info!("Starting background service initialization");
                 
                 // Get service with exclusive access
@@ -258,7 +412,7 @@ impl ZelanState {
                 );
                 
                 // Extract the saved Twitch configuration from the settings
-                let config = if let Some(config_value) = saved_twitch_settings.config.as_object() {
+                let mut config = if let Some(config_value) = saved_twitch_settings.config.as_object() {
                     // Import the Twitch adapter config from the adapters module
                     use crate::adapters::twitch::TwitchConfig;
                     
@@ -277,12 +431,16 @@ impl ZelanState {
                     
                     // Extract the access_token (if present)
                     if let Some(access_token) = config_value.get("access_token").and_then(|v| v.as_str()) {
-                        twitch_config.access_token = Some(access_token.to_string());
+                        if !access_token.is_empty() {
+                            twitch_config.access_token = Some(access_token.to_string());
+                        }
                     }
                     
                     // Extract the refresh_token (if present)
                     if let Some(refresh_token) = config_value.get("refresh_token").and_then(|v| v.as_str()) {
-                        twitch_config.refresh_token = Some(refresh_token.to_string());
+                        if !refresh_token.is_empty() {
+                            twitch_config.refresh_token = Some(refresh_token.to_string());
+                        }
                     }
                     
                     // Extract poll_interval_ms (use default if not present)
@@ -302,6 +460,44 @@ impl ZelanState {
                     warn!("No valid Twitch configuration found, using defaults");
                     TwitchConfig::default()
                 };
+                
+                // Try to load secure tokens if they exist
+                if config.access_token.is_none() || config.refresh_token.is_none() {
+                    // Use the app handle passed from the init method
+                    {
+                        // We're in a separate task flow, so clone the app handle to move it
+                        let app_handle = app.clone();
+                        // See if we have secure tokens stored
+                        match retrieve_secure_tokens(&app_handle, "twitch").await {
+                            Ok(Some(tokens)) => {
+                                debug!("Found secure tokens for Twitch");
+                                
+                                // Add tokens back for adapter configuration
+                                if let Some(token_obj) = tokens.as_object() {
+                                    // Check for access token
+                                    if let Some(token) = token_obj.get("access_token") {
+                                        if token.is_string() {
+                                            debug!("Loading access_token from secure storage");
+                                            config.access_token = Some(token.as_str().unwrap().to_string());
+                                        }
+                                    }
+                                    
+                                    // Check for refresh token
+                                    if let Some(token) = token_obj.get("refresh_token") {
+                                        if token.is_string() {
+                                            debug!("Loading refresh_token from secure storage");
+                                            config.refresh_token = Some(token.as_str().unwrap().to_string());
+                                        }
+                                    }
+                                }
+                                
+                                info!("Loaded secure Twitch tokens from storage");
+                            },
+                            Ok(None) => debug!("No secure tokens found for Twitch"),
+                            Err(e) => warn!(error = %e, "Failed to retrieve secure tokens"),
+                        }
+                    }
+                }
                 
                 // Create the adapter with the loaded configuration
                 info!("Initializing Twitch adapter");
@@ -446,7 +642,7 @@ pub async fn update_adapter_settings(
     info!(adapter = %adapterName, "Updating adapter settings");
 
     // Deserialize the settings
-    let adapter_settings: AdapterSettings = match serde_json::from_value(settings) {
+    let mut adapter_settings: AdapterSettings = match serde_json::from_value(settings.clone()) {
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "Invalid adapter settings format");
@@ -458,6 +654,100 @@ pub async fn update_adapter_settings(
             });
         }
     };
+
+    // Special handling for Twitch adapter - extract and store tokens securely
+    if adapterName == "twitch" {
+        debug!("Processing Twitch adapter with secure token handling");
+        
+        // Log the raw settings to understand what's coming in
+        debug!(settings = ?adapter_settings, "Raw adapter settings for inspection");
+
+        // Extract tokens from config if they exist
+        let mut config_obj = adapter_settings
+            .config
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+            
+        debug!(config_obj = ?config_obj, "Config object to inspect for tokens");
+        let mut tokens_to_store = serde_json::Map::new();
+
+        // Check if access_token and refresh_token are in the config
+        if let Some(token) = config_obj.get("access_token").cloned() {
+            debug!(access_token = ?token, "Checking access token value");
+            
+            // Log more specific details about the token
+            if token.is_null() {
+                debug!("Access token is null");
+            } else if token.is_string() {
+                let token_str = token.as_str().unwrap_or("INVALID_STRING");
+                debug!(token_str, "Access token string value");
+                if token_str.is_empty() {
+                    debug!("Access token is an empty string");
+                }
+            } else {
+                debug!(token_type = ?token.type_id(), "Access token is not a string or null");
+            }
+            
+            if !token.is_null() && token.as_str().filter(|t| !t.is_empty()).is_some() {
+                debug!("Found access_token in config, moving to secure storage");
+                tokens_to_store.insert("access_token".to_string(), token.clone());
+                // Remove from main config - use null as a placeholder
+                config_obj.insert("access_token".to_string(), serde_json::Value::Null);
+            }
+        } else {
+            debug!("No access_token key found in config");
+        }
+
+        if let Some(token) = config_obj.get("refresh_token").cloned() {
+            debug!(refresh_token = ?token, "Checking refresh token value");
+            
+            // Log more specific details about the token
+            if token.is_null() {
+                debug!("Refresh token is null");
+            } else if token.is_string() {
+                let token_str = token.as_str().unwrap_or("INVALID_STRING");
+                debug!(token_str, "Refresh token string value");
+                if token_str.is_empty() {
+                    debug!("Refresh token is an empty string");
+                }
+            } else {
+                debug!(token_type = ?token.type_id(), "Refresh token is not a string or null");
+            }
+            
+            if !token.is_null() && token.as_str().filter(|t| !t.is_empty()).is_some() {
+                debug!("Found refresh_token in config, moving to secure storage");
+                tokens_to_store.insert("refresh_token".to_string(), token.clone());
+                // Remove from main config - use null as a placeholder
+                config_obj.insert("refresh_token".to_string(), serde_json::Value::Null);
+            }
+        } else {
+            debug!("No refresh_token key found in config");
+        }
+
+        // Store tokens securely if we have any
+        if !tokens_to_store.is_empty() {
+            debug!("Storing Twitch tokens securely");
+            if let Err(e) = store_secure_tokens(
+                &app,
+                &adapterName,
+                serde_json::Value::Object(tokens_to_store.clone()),
+            )
+            .await
+            {
+                error!(error = %e, "Failed to store tokens securely");
+                // Don't return error, continue with non-secure storage as fallback
+                // But log a warning
+                warn!("Falling back to non-secure token storage");
+            } else {
+                info!("Twitch tokens stored securely");
+                // Update the config object without the sensitive tokens
+                adapter_settings.config = serde_json::Value::Object(config_obj);
+            }
+        } else {
+            debug!("No tokens to store securely");
+        }
+    }
 
     // Get the service with the async mutex
     let service = state.service.lock().await;
@@ -480,6 +770,94 @@ pub async fn update_adapter_settings(
         Ok(_) => {
             info!(adapter = %adapterName, "Successfully updated adapter settings");
 
+            // For Twitch, check for secure tokens and provide them to the adapter if needed
+            if adapterName == "twitch" {
+                debug!("Checking for secure Twitch tokens");
+
+                // See if we have secure tokens stored
+                match retrieve_secure_tokens(&app, &adapterName).await {
+                    Ok(Some(tokens)) => {
+                        info!("Found secure tokens for Twitch, applying to adapter");
+                        debug!(tokens = ?tokens, "Secure tokens to apply");
+
+                        // Create a config with the secure tokens included
+                        let mut config = adapter_settings
+                            .config
+                            .as_object()
+                            .cloned()
+                            .unwrap_or_default();
+                            
+                        debug!(before_tokens = ?config, "Config before adding tokens");
+
+                        // Add tokens back for adapter configuration
+                        if let Some(token_obj) = tokens.as_object() {
+                            for (key, value) in token_obj {
+                                if key == "access_token" || key == "refresh_token" {
+                                    info!("Adding {} from secure storage to adapter config", key);
+                                    if value.is_string() {
+                                        let token_val = value.as_str().unwrap_or("");
+                                        debug!(token_length = token_val.len(), "Token length");
+                                    }
+                                    config.insert(key.clone(), value.clone());
+                                }
+                            }
+                        }
+
+                        // Apply the complete config with secure tokens to the adapter
+                        let full_config = serde_json::Value::Object(config.clone());
+                        debug!(after_tokens = ?config, "Config after adding tokens");
+
+                        // Let the adapter handle the tokens (don't error on failure)
+                        if let Err(e) = service_clone
+                            .update_adapter_settings(
+                                &adapterName,
+                                AdapterSettings {
+                                    enabled: adapter_settings.enabled,
+                                    config: full_config,
+                                    display_name: adapter_settings.display_name.clone(),
+                                    description: adapter_settings.description.clone(),
+                                },
+                            )
+                            .await
+                        {
+                            warn!(error = %e, "Failed to apply secure tokens to adapter");
+                        } else {
+                            info!("Successfully applied secure tokens to Twitch adapter");
+                        }
+                    }
+                    Ok(None) => debug!("No secure tokens found for Twitch"),
+                    Err(e) => warn!(error = %e, "Failed to retrieve secure tokens"),
+                }
+            }
+
+            // For Twitch, monitor for tokens provided directly by the auth flow
+            if adapterName == "twitch" && adapter_settings.enabled {
+                // Start a background task to periodically check if tokens appear that need to be secured
+                let app_handle = app.clone();
+                let adapter_name_clone = adapterName.clone();
+                let service_clone2 = service_clone.clone();
+                
+                tauri::async_runtime::spawn(async move {
+                    // Wait a bit for authentication to complete if it's ongoing
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    
+                    // Check adapter settings for tokens
+                    if let Ok(current_settings) = service_clone2.get_adapter_settings(&adapter_name_clone).await {
+                        if let Some(config_obj) = current_settings.config.as_object() {
+                            // Check for access token
+                            let has_token = config_obj.get("access_token")
+                                .filter(|t| !t.is_null() && t.as_str().filter(|s| !s.is_empty()).is_some())
+                                .is_some();
+                                
+                            if has_token {
+                                info!("Found access token in Twitch adapter after delay, should be moved to secure storage");
+                                // Next settings update will handle this automatically
+                            }
+                        }
+                    }
+                });
+            }
+            
             // If adapter is enabled, explicitly try to connect it
             if adapter_settings.enabled {
                 info!(adapter = %adapterName, "Adapter is enabled, attempting connection");

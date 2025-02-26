@@ -5,6 +5,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tauri::async_runtime;
 use serde_json::{json, Value};
 use std::{env, sync::Arc};
 use tokio::sync::{mpsc, RwLock};
@@ -240,7 +241,7 @@ impl TwitchAdapter {
         let adapter_clone = adapter.clone();
 
         // Spawn a task to set up the auth callback asynchronously
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             if let Ok(mut auth_manager) = adapter_clone.auth_manager.try_write() {
                 auth_manager.set_auth_callback(move |event| -> Result<()> {
                     let event_type = match &event {
@@ -308,7 +309,7 @@ impl TwitchAdapter {
                     
                     // Spawn a task to publish the event
                     let event_bus = event_bus_clone.clone();
-                    tokio::spawn(async move {
+                    tauri::async_runtime::spawn(async move {
                         if let Err(e) = event_bus.publish(event).await {
                             error!("Failed to publish event: {}", e);
                         }
@@ -327,7 +328,7 @@ impl TwitchAdapter {
             let adapter_clone = adapter.clone();
             let access_token_clone = access_token.clone();
             let refresh_token_clone = refresh_token.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let result = adapter_clone
                     .auth_manager
                     .write()
@@ -420,7 +421,7 @@ impl TwitchAdapter {
         };
 
         // Start the authentication process in a background task to avoid blocking
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             // Create HTTP client for requests
             let http_client = match reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -553,8 +554,15 @@ impl TwitchAdapter {
 
                         // Update the config
                         let mut config = self_clone.config.write().await;
-                        config.access_token = Some(access_token);
-                        config.refresh_token = refresh_token;
+                        config.access_token = Some(access_token.clone());
+                        config.refresh_token = refresh_token.clone();
+                        
+                        // Log that we've saved tokens
+                        info!(
+                            "Saved authentication tokens to adapter config. access_token_len={}, refresh_token={}",
+                            access_token.len(),
+                            refresh_token.is_some()
+                        );
 
                         // Publish success event
                         let event_payload = json!({
@@ -929,7 +937,7 @@ impl ServiceAdapter for TwitchAdapter {
 
         // Start polling in a background task
         let self_clone = self.clone();
-        let handle = tokio::spawn(async move {
+        let handle = tauri::async_runtime::spawn(async move {
             if let Err(e) = self_clone.poll_twitch_updates(shutdown_rx).await {
                 error!(error = %e, "Error in Twitch update polling");
             }
@@ -1078,7 +1086,7 @@ impl ServiceAdapter for TwitchAdapter {
 impl Clone for TwitchAdapter {
     fn clone(&self) -> Self {
         // Create a new instance with the same event bus
-        let event_bus = self.base.event_bus();
+        let _event_bus = self.base.event_bus();
 
         // Create a fresh auth manager to avoid blocking issues
         // This is needed because we can't safely clone the auth manager's state

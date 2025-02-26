@@ -7,6 +7,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tauri::async_runtime;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -205,7 +206,7 @@ impl ServiceAdapter for TestAdapter {
 
         // Start generating events in a background task
         let self_clone = self.clone();
-        let handle = tokio::spawn(async move {
+        let handle = tauri::async_runtime::spawn(async move {
             if let Err(e) = self_clone.generate_events(shutdown_rx).await {
                 error!(error = %e, "Error in test event generator");
             }

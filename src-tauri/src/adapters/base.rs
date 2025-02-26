@@ -3,6 +3,7 @@ use crate::{EventBus, StreamEvent};
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::async_runtime;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, instrument, warn};
 
@@ -39,7 +40,7 @@ pub struct BaseAdapter {
     /// Shutdown signal channel
     shutdown_signal: Mutex<Option<mpsc::Sender<()>>>,
     /// Event handler task
-    event_handler: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    event_handler: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl Clone for BaseAdapter {
@@ -91,7 +92,7 @@ impl BaseAdapter {
 
     /// Store the event handler task
     #[instrument(skip(self, handle), level = "debug")]
-    pub async fn set_event_handler(&self, handle: tokio::task::JoinHandle<()>) {
+    pub async fn set_event_handler(&self, handle: tauri::async_runtime::JoinHandle<()>) {
         debug!(adapter = %self.name, "Storing event handler task");
         *self.event_handler.lock().await = Some(handle);
     }

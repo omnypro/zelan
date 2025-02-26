@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use tauri::async_runtime;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -146,7 +147,7 @@ impl EventBus {
             Ok(receivers) => {
                 // Only update stats after successful send, using a separate task
                 let stats = Arc::clone(&self.stats);
-                tokio::task::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     let mut stats_guard = stats.write().await;
                     stats_guard.events_published += 1;
                     *stats_guard.source_counts.entry(source).or_insert(0) += 1;
@@ -163,7 +164,7 @@ impl EventBus {
                 {
                     // Update dropped count in a separate task
                     let stats = Arc::clone(&self.stats);
-                    tokio::task::spawn(async move {
+                    tauri::async_runtime::spawn(async move {
                         let mut stats_guard = stats.write().await;
                         stats_guard.events_dropped += 1;
                     });
@@ -177,7 +178,7 @@ impl EventBus {
                 } else {
                     // Update dropped count for other errors
                     let stats = Arc::clone(&self.stats);
-                    tokio::task::spawn(async move {
+                    tauri::async_runtime::spawn(async move {
                         let mut stats_guard = stats.write().await;
                         stats_guard.events_dropped += 1;
                     });
@@ -278,7 +279,7 @@ pub struct StreamService {
     adapters: Arc<RwLock<HashMap<String, Arc<Box<dyn ServiceAdapter>>>>>,
     status: Arc<RwLock<HashMap<String, ServiceStatus>>>,
     adapter_settings: Arc<RwLock<HashMap<String, AdapterSettings>>>,
-    ws_server_handle: Option<tokio::task::JoinHandle<()>>,
+    ws_server_handle: Option<tauri::async_runtime::JoinHandle<()>>,
     shutdown_sender: Option<mpsc::Sender<()>>,
     ws_config: WebSocketConfig,
 }
@@ -487,7 +488,7 @@ impl StreamService {
                 if let Some(adapter) = adapter_clone {
                     println!("Auto-connecting newly enabled adapter: {}", name);
                     let name_clone = name.to_string(); // Clone the name to satisfy lifetime requirements
-                    tokio::spawn(async move {
+                    tauri::async_runtime::spawn(async move {
                         if let Err(e) = adapter.connect().await {
                             eprintln!("Failed to auto-connect adapter '{}': {}", name_clone, e);
                         }
@@ -596,7 +597,7 @@ impl StreamService {
         let max_retries = 5; // Maximum number of retries
         let mut retry_count = 0;
 
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             loop {
                 match adapter_clone.connect().await {
                     Ok(()) => {
@@ -708,7 +709,7 @@ impl StreamService {
         let ws_port = self.ws_config.port;
 
         // Start WebSocket server in a separate task
-        let handle = tokio::spawn(
+        let handle = tauri::async_runtime::spawn(
             async move {
                 let socket_addr = format!("127.0.0.1:{}", ws_port)
                     .parse::<std::net::SocketAddr>()
@@ -747,7 +748,7 @@ impl StreamService {
 
                                     // Handle each connection in a separate task
                                     let event_bus_clone = event_bus.clone();
-                                    tokio::spawn(
+                                    tauri::async_runtime::spawn(
                                         async move {
                                             if let Err(e) = handle_websocket_client(stream, event_bus_clone).await {
                                                 error!(error = %e, client = %addr, "Error in WebSocket connection");
@@ -809,7 +810,7 @@ impl StreamService {
 
         // Start the server in a background task
         let http_port = self.ws_config.port + 1; // Use next port for HTTP
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             println!("Starting HTTP API server on port {}", http_port);
             let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", http_port))
                 .await
@@ -881,7 +882,7 @@ async fn connect_adapter_handler(
         Some(adapter) => {
             let adapter_clone = adapter.clone();
             let name_clone = name.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 if let Err(e) = adapter_clone.connect().await {
                     eprintln!("Failed to connect adapter '{}': {}", name_clone, e);
                 }
@@ -900,7 +901,7 @@ async fn disconnect_adapter_handler(
         Some(adapter) => {
             let adapter_clone = adapter.clone();
             let name_clone = name.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 if let Err(e) = adapter_clone.disconnect().await {
                     eprintln!("Failed to disconnect adapter '{}': {}", name_clone, e);
                 }
