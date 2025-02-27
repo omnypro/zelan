@@ -11,6 +11,13 @@ We implemented an HTTP client abstraction to improve testability:
 - Added tests for TwitchApiClient using mock responses
 - Fixed the recovery system tests by adjusting expected counter values
 
+We also completed the frontend refactoring:
+- Split monolithic App.tsx into modular components
+- Implemented useReducer pattern with typed actions
+- Created custom hooks for data fetching and adapter control
+- Added proper TypeScript interfaces for all data structures
+- Designed desktop-style UI components (status indicators, notifications)
+
 ## Build Commands
 - `bun dev` - Start Vite development server
 - `bun tauri dev` - Start Tauri app in development mode
@@ -45,6 +52,21 @@ This project requires environment variables for certain features to work properl
 - Events are propagated to subscribers (UI components, other services)
 - Async/await patterns used for non-blocking operations
 
+### Frontend Architecture
+- **Component-Based Structure**:
+  - Modular components (Dashboard, Settings, ErrorNotification, etc.)
+  - Desktop-style UI elements for native look and feel
+  - Status indicators with visual feedback
+- **State Management**:
+  - useReducer pattern with typed actions
+  - Centralized AppState with well-defined interfaces
+  - Clear separation of UI state and application data
+- **Custom Hooks**:
+  - useTauriCommand: Safe invocation of backend commands
+  - useAdapterControl: Adapter management operations
+  - useDataFetching: Data retrieval from backend
+  - useAppState: Application state management
+
 ## Code Style Guidelines
 
 ### TypeScript/React
@@ -53,6 +75,11 @@ This project requires environment variables for certain features to work properl
 - Use async/await for asynchronous operations
 - Group related imports together (React, internal, external)
 - Follow 2-space indentation
+- Split large components into smaller, focused ones
+- Use custom hooks to encapsulate specific functionality
+- Prefer useReducer for complex state management
+- Separate UI components from data fetching/business logic
+- Design with desktop-friendly UI/UX patterns in mind
 
 ### Rust
 - Follow standard Rust naming conventions (snake_case for functions/variables)

@@ -1,32 +1,29 @@
-# Zelan Error Reference
+# Zelan Troubleshooting Guide
 
-This document catalogs common errors, troubleshooting steps, and debugging strategies for the Zelan application.
+This document provides guidance for troubleshooting common issues, error patterns, and debugging strategies for the Zelan application.
 
-## Authentication Errors
+## Authentication Issues
 
 ### Twitch Device Code Authentication
 
-The device code authentication flow is particularly sensitive to timing and state management. Here are common issues and solutions:
+The device code authentication flow is particularly sensitive to timing and state management:
 
-#### Device Code Flow Issues
+#### Common Issues
 
-1. **Unrecognized Completion**
+1. **Unrecognized Authentication Completion**
    - **Symptom**: User completes authentication on Twitch, but app doesn't recognize it
    - **Cause**: Race condition between polling and state updates
    - **Solution**: Ensure polling interval is consistent (5 seconds recommended) and all polling operations complete before checking state
-   - **Test Status**: ✅ Basic state transition tests added
 
 2. **Token Refresh Failures**
    - **Symptom**: Authentication works initially but fails after token expiration
    - **Cause**: Refresh token handling issues or improper error handling
    - **Solution**: Verify refresh token is properly stored and used in `refresh_token_if_needed`
-   - **Test Status**: ❌ Tests needed for refresh flow
 
 3. **Inconsistent Authentication State**
    - **Symptom**: App shows conflicting authentication status
    - **Cause**: State variable updates out of sync with actual authentication state
    - **Solution**: Use proper synchronization with RwLock and ensure all state updates happen atomically
-   - **Test Status**: ✅ Basic state transition tests added
 
 #### Debugging Authentication
 
@@ -51,36 +48,41 @@ For effective authentication debugging:
    tracing::warn!("Authentication error: {:?}", err);
    ```
 
-2. Check for these specific errors:
-   - "expired_token" - The device code expired before authentication was completed
-   - "authorization_pending" - Normal during polling, indicates user hasn't completed auth yet
-   - "slow_down" - Polling too frequently, increase interval
-   - "invalid_grant" - Problem with the refresh token
+2. Check for these specific error codes:
+   - `expired_token`: The device code expired before authentication was completed
+   - `authorization_pending`: Normal during polling, indicates user hasn't completed auth yet
+   - `slow_down`: Polling too frequently, increase interval
+   - `invalid_grant`: Problem with the refresh token
 
-#### Authentication Testing Status
+### Token Refresh Issues
 
-1. **Implemented Tests**:
-   - ✅ Device code auth state transitions
-   - ✅ Token restoration error handling
-   - ✅ HTTP client abstraction for testability
+#### Device Code Flow Limitations
 
-2. **Tests Needed**:
-   - Complete device code flow with mock HTTP responses (next step)
-   - Token refresh with mocked responses 
-   - Error handling for various auth errors (expired token, network failures, etc.)
-   - Race condition detection
-   - Timing sensitivity tests with simulated delays
+1. **One-Time Use Refresh Tokens**: Refresh tokens obtained via Device Code Flow are one-time use only. When used to refresh an access token, they become invalid and a new refresh token is provided.
 
-3. **Testing Infrastructure**:
-   - ✅ `HttpClient` trait for abstracting HTTP requests
-   - ✅ `ReqwestHttpClient` implementation for real requests
-   - ✅ `MockHttpClient` for testing with predetermined responses
-   - ✅ Request history tracking for verification in tests
-   - ✅ JSON response mocking capabilities
-   - ✅ TwitchApiClient refactored to accept an injected HTTP client
-   - ✅ TwitchApiClient tests implemented with mock responses
+2. **30-Day Expiry**: There is a 30-day inactive expiry on refresh tokens. If a refresh token is not used for 30 days, it expires and the user must authenticate again.
 
-## API Connection Errors
+3. **Access Token Expiry**: All access tokens have a 4-hour expiry time.
+
+#### Automatic Background Refresh Implementation
+
+We've implemented these enhancements to handle token limitations transparently:
+
+1. **Token Tracking**: When refreshing tokens, we check if a new refresh token is received as expected.
+
+2. **30-Day Expiry Prevention**: We track when refresh tokens were created and perform automatic background refreshes before they reach the 30-day expiry limit.
+
+3. **Proactive Refresh**: We refresh tokens before they expire to reset the 30-day inactivity window.
+
+4. **Token Synchronization**: New tokens from refreshes are automatically persisted to secure storage.
+
+#### Key Error Patterns
+
+- **invalid_grant**: Often indicates the refresh token has been used before or has expired.
+- **authorization_pending**: Normal status during device code flow authorization process.
+- **expired_token**: The device code or refresh token has expired.
+
+## API Connection Issues
 
 ### Rate Limiting
 
@@ -94,7 +96,7 @@ For effective authentication debugging:
    - **Symptom**: Random connection timeouts or resets
    - **Solution**: Use the retry mechanism with exponential backoff
 
-## Application Errors
+## Adapter Issues
 
 ### Adapter Initialization
 
@@ -108,9 +110,7 @@ For effective authentication debugging:
    - **Cause**: External API unavailable or authentication issue
    - **Solution**: Check external service status and credentials
 
-## Debugging Strategies
-
-### Enabling Debug Logging
+## Enabling Debug Logging
 
 To enable debug logging:
 
@@ -128,7 +128,7 @@ Or set environment variable:
 RUST_LOG=zelan=debug
 ```
 
-### Troubleshooting Steps
+## General Troubleshooting Steps
 
 1. **Authentication Issues**:
    - Check if tokens are being stored correctly
