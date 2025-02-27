@@ -100,7 +100,32 @@ Work still needed:
 
 ## Future Enhancements
 
-### 4. Enhanced WebSocket Client Support
+### 4. Expanded Adapter System
+
+We need to expand the adapter system to support more services:
+
+1. **Twitch Chat Adapter (Implemented)**
+   - ✅ Uses EventSub WebSocket for chat messages (modern approach)
+   - ✅ Event types: chat.message, chat.command, chat.bits, chat.subscription
+   - ✅ Leverages existing TwitchAuthManager
+   - ✅ Part of the main TwitchAdapter using EventSub
+
+2. **Apple Music Adapter**
+   - Integration with Apple Music API
+   - Event types: music.playing, music.changed, music.stopped
+   - Support for now playing information with artwork
+
+3. **Rainwave.cc Adapter**
+   - Integration with Rainwave radio API
+   - Event types: music.playing, music.changed
+   - Support for station selection and voting
+
+4. **Potential Future Adapters**
+   - Spotify Adapter for music integration
+   - StreamElements/Streamlabs for donation events
+   - Discord for chat bridge and voice status
+
+### 5. Enhanced WebSocket Client Support
 
 Better client libraries would improve the developer experience:
 
@@ -110,7 +135,34 @@ Better client libraries would improve the developer experience:
 - Implement reconnection logic in clients
 - Add examples of common integration patterns
 
-### 5. Improved Documentation
+### 6. Core Architecture Enhancements
+
+Several architecture improvements would make the system more flexible:
+
+1. **Enhanced Event Structure**
+   - Add correlation IDs for related events
+   - Include metadata for filtering and categorization
+   - Standardize event type naming across adapters
+
+2. **Pattern-Based Subscriptions**
+   - Allow subscribing to events using patterns like "chat.*" or "*.changed"
+   - Support for complex filtering rules
+
+3. **Event History**
+   - Maintain a configurable event history buffer
+   - Allow querying recent events by type or pattern
+
+4. **API Unification**
+   - Standardized adapter interface with capabilities discovery
+   - RESTful endpoints for all adapter operations
+   - Query language for retrieving specific data
+
+5. **WebSocket Server Improvements**
+   - Authentication system for connections
+   - Bidirectional communication for commands
+   - Protocol improvements with compression options
+
+### 7. Improved Documentation
 
 Comprehensive documentation would make the project more accessible:
 
@@ -120,7 +172,7 @@ Comprehensive documentation would make the project more accessible:
 - Create tutorials for common integration scenarios
 - Add troubleshooting guides
 
-### 6. Proper Data Persistence
+### 8. Proper Data Persistence
 
 The current approach to storing configuration and tokens could be improved:
 
@@ -130,7 +182,7 @@ The current approach to storing configuration and tokens could be improved:
 - Create a backup/restore system
 - Use a transaction-based approach for storage operations
 
-### 7. Pluggable Extension System
+### 9. Pluggable Extension System
 
 A plugin system would allow for more flexibility:
 
@@ -140,7 +192,7 @@ A plugin system would allow for more flexibility:
 - Add a plugin marketplace or directory
 - Support hot-reloading of adapters
 
-### 8. Advanced Event Processing
+### 10. Advanced Event Processing
 
 The event system could be enhanced with more powerful features:
 
@@ -150,7 +202,7 @@ The event system could be enhanced with more powerful features:
 - Add event replay capabilities for debugging
 - Support for conditional events and complex routing
 
-### 9. Better Diagnostics and Monitoring
+### 11. Better Diagnostics and Monitoring
 
 Better monitoring would improve troubleshooting and reliability:
 
@@ -160,7 +212,7 @@ Better monitoring would improve troubleshooting and reliability:
 - Add system health checks with alerts
 - Implement periodic connection testing
 
-### 10. Improved UI/UX
+### 12. Improved UI/UX
 
 Enhancing the user interface would make the application more user-friendly:
 
@@ -170,7 +222,7 @@ Enhancing the user interface would make the application more user-friendly:
 - Add theme support (light/dark mode)
 - Improve responsiveness for different screen sizes
 
-### 11. Deployment and Updates
+### 13. Deployment and Updates
 
 Better deployment options would make the application easier to distribute:
 
@@ -179,3 +231,14 @@ Better deployment options would make the application easier to distribute:
 - Consider containerization options
 - Implement a headless mode for server deployments
 - Add configuration export/import
+
+### 14. Example Applications & Client Libraries
+
+Creating example applications will showcase the platform's capabilities:
+
+- Chat overlay with custom theming
+- Music "Now Playing" display for streams
+- Stream status dashboard
+- JavaScript client library for web overlays
+- Python client library for tools and bots
+- C# client library for Unity integrations
