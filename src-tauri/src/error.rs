@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 use tauri::async_runtime::RwLock;
 use thiserror::Error;
@@ -58,31 +61,31 @@ impl ZelanErrorBuilder {
         self.message = message.into();
         self
     }
-    
+
     /// Set the error context
     pub fn context(mut self, context: impl Into<String>) -> Self {
         self.context = Some(context.into());
         self
     }
-    
+
     /// Set the error severity
     pub fn severity(mut self, severity: ErrorSeverity) -> Self {
         self.severity = severity;
         self
     }
-    
+
     /// Set the error category
     pub fn category(mut self, category: ErrorCategory) -> Self {
         self.category = Some(category);
         self
     }
-    
+
     /// Set the error ID
     pub fn error_id(mut self, id: impl Into<String>) -> Self {
         self.error_id = Some(id.into());
         self
     }
-    
+
     /// Build the final ZelanError
     pub fn build(self) -> ZelanError {
         ZelanError {
@@ -147,113 +150,78 @@ pub enum ZelanErrorType {
     // General errors
     #[error("Unknown error: {0}")]
     Unknown(String),
-    
+
     #[error("Internal error: {0}")]
     Internal(String),
 
     // Adapter related errors
     #[error("Adapter '{name}' not found")]
-    AdapterNotFound { 
-        name: String,
-    },
-    
+    AdapterNotFound { name: String },
+
     #[error("Failed to connect adapter '{name}': {reason}")]
-    AdapterConnectionFailed { 
-        name: String,
-        reason: String,
-    },
-    
+    AdapterConnectionFailed { name: String, reason: String },
+
     #[error("Failed to disconnect adapter '{name}': {reason}")]
-    AdapterDisconnectFailed {
-        name: String,
-        reason: String,
-    },
-    
+    AdapterDisconnectFailed { name: String, reason: String },
+
     #[error("Adapter '{name}' is disabled")]
-    AdapterDisabled {
-        name: String,
-    },
+    AdapterDisabled { name: String },
 
     // Event bus related errors
     #[error("Failed to publish event to event bus: {reason}")]
-    EventBusPublishFailed {
-        reason: String,
-    },
-    
+    EventBusPublishFailed { reason: String },
+
     #[error("Event was dropped due to no receivers")]
     EventBusDropped,
 
     // HTTP/WebSocket related errors
     #[error("Failed to bind WebSocket server: {reason}")]
-    WebSocketBindFailed {
-        reason: String,
-    },
-    
+    WebSocketBindFailed { reason: String },
+
     #[error("Failed to accept WebSocket connection: {reason}")]
-    WebSocketAcceptFailed {
-        reason: String,
-    },
-    
+    WebSocketAcceptFailed { reason: String },
+
     #[error("Failed to send WebSocket message: {reason}")]
-    WebSocketSendFailed {
-        reason: String,
-    },
+    WebSocketSendFailed { reason: String },
 
     // API related errors
     #[error("API request failed: {reason}")]
-    ApiRequestFailed {
-        reason: String,
-    },
-    
+    ApiRequestFailed { reason: String },
+
     #[error("{service} API rate limit exceeded")]
     ApiRateLimited {
         service: String,
         reset_after: Option<Duration>,
     },
-    
+
     #[error("API authentication failed: {reason}")]
-    ApiAuthenticationFailed {
-        reason: String,
-    },
-    
+    ApiAuthenticationFailed { reason: String },
+
     #[error("API permission denied: {reason}")]
-    ApiPermissionDenied {
-        reason: String,
-    },
+    ApiPermissionDenied { reason: String },
 
     // Authentication errors
     #[error("Authentication token has expired")]
     AuthTokenExpired,
-    
+
     #[error("Authentication token is invalid: {reason}")]
-    AuthTokenInvalid {
-        reason: String,
-    },
-    
+    AuthTokenInvalid { reason: String },
+
     #[error("Authentication token has been revoked")]
     AuthTokenRevoked,
-    
+
     #[error("Failed to refresh authentication token: {reason}")]
-    AuthRefreshFailed {
-        reason: String,
-    },
+    AuthRefreshFailed { reason: String },
 
     // Network errors
     #[error("Network timeout while connecting to {service} for operation {operation}")]
-    NetworkTimeout {
-        service: String,
-        operation: String,
-    },
-    
+    NetworkTimeout { service: String, operation: String },
+
     #[error("Network connection lost to {service}")]
-    NetworkConnectionLost {
-        service: String,
-    },
-    
+    NetworkConnectionLost { service: String },
+
     #[error("DNS resolution failure for {host}")]
-    NetworkDnsFailure {
-        host: String,
-    },
+    NetworkDnsFailure { host: String },
 
     // Configuration related errors
     #[error("Invalid configuration value for '{key}': {reason}")]
@@ -262,11 +230,9 @@ pub enum ZelanErrorType {
         value: String,
         reason: String,
     },
-    
+
     #[error("Required configuration key '{key}' is missing")]
-    ConfigMissing {
-        key: String,
-    },
+    ConfigMissing { key: String },
 }
 
 /// Severity levels for errors
@@ -494,7 +460,7 @@ impl ErrorRegistry {
             if let Some(id) = &error.error_id {
                 let mut history = self.error_history.write().await;
                 let mut id_map = self.error_id_map.write().await;
-                
+
                 // If we've reached capacity, remove the oldest error
                 if history.len() >= self.max_history {
                     if let Some(old_error) = history.pop_front() {
@@ -502,17 +468,17 @@ impl ErrorRegistry {
                         if let Some(old_id) = old_error.error_id {
                             id_map.remove(&old_id);
                         }
-                        
+
                         // Update indices in the map after removal
                         for index in id_map.values_mut() {
                             *index -= 1;
                         }
                     }
                 }
-                
+
                 // Add new error to the end of the queue
                 history.push_back(error.clone());
-                
+
                 // Store its index in the ID map
                 id_map.insert(id.clone(), history.len() - 1);
             }
@@ -554,8 +520,10 @@ impl ErrorRegistry {
     pub async fn get_error_by_id(&self, id: &str) -> Option<ZelanError> {
         let id_map = self.error_id_map.read().await;
         let history = self.error_history.read().await;
-        
-        id_map.get(id).and_then(|&index| history.get(index).cloned())
+
+        id_map
+            .get(id)
+            .and_then(|&index| history.get(index).cloned())
     }
 
     /// Clear all error statistics
@@ -641,145 +609,180 @@ impl std::error::Error for ZelanError {}
 impl From<ZelanErrorType> for ZelanError {
     fn from(err: ZelanErrorType) -> Self {
         let (code, message, _context, category) = match &err {
-            ZelanErrorType::Unknown(msg) => 
-                (ErrorCode::Unknown, msg.clone(), None, ErrorCategory::Internal),
-                
-            ZelanErrorType::Internal(msg) => 
-                (ErrorCode::Internal, msg.clone(), None, ErrorCategory::Internal),
-                
-            ZelanErrorType::AdapterNotFound { name } => 
-                (ErrorCode::AdapterNotFound, 
-                 format!("Adapter '{}' not found", name), 
-                 None, 
-                 ErrorCategory::NotFound),
-                 
-            ZelanErrorType::AdapterConnectionFailed { name, reason } => 
-                (ErrorCode::AdapterConnectionFailed, 
-                 format!("Failed to connect adapter '{}'", name), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::AdapterDisconnectFailed { name, reason } => 
-                (ErrorCode::AdapterDisconnectFailed, 
-                 format!("Failed to disconnect adapter '{}'", name), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::AdapterDisabled { name } => 
-                (ErrorCode::AdapterDisabled, 
-                 format!("Adapter '{}' is disabled", name), 
-                 None, 
-                 ErrorCategory::Configuration),
-                 
-            ZelanErrorType::EventBusPublishFailed { reason } => 
-                (ErrorCode::EventBusPublishFailed, 
-                 "Failed to publish event to event bus".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Internal),
-                 
-            ZelanErrorType::EventBusDropped => 
-                (ErrorCode::EventBusDropped, 
-                 "Event was dropped due to no receivers".to_string(), 
-                 None, 
-                 ErrorCategory::Internal),
-                 
-            ZelanErrorType::WebSocketBindFailed { reason } => 
-                (ErrorCode::WebSocketBindFailed, 
-                 "Failed to bind WebSocket server".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::WebSocketAcceptFailed { reason } => 
-                (ErrorCode::WebSocketAcceptFailed, 
-                 "Failed to accept WebSocket connection".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::WebSocketSendFailed { reason } => 
-                (ErrorCode::WebSocketSendFailed, 
-                 "Failed to send WebSocket message".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::ApiRequestFailed { reason } => 
-                (ErrorCode::ApiRequestFailed, 
-                 "API request failed".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::ApiRateLimited { service, reset_after } => {
-                let ctx = reset_after.map(|d| format!("Rate limit resets in {} seconds", d.as_secs()));
-                (ErrorCode::ApiRateLimited, 
-                 format!("{} API rate limit exceeded", service), 
-                 ctx, 
-                 ErrorCategory::RateLimit)
-            },
-                 
-            ZelanErrorType::ApiAuthenticationFailed { reason } => 
-                (ErrorCode::ApiAuthenticationFailed, 
-                 "API authentication failed".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Authentication),
-                 
-            ZelanErrorType::ApiPermissionDenied { reason } => 
-                (ErrorCode::ApiPermissionDenied, 
-                 "API permission denied".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Permission),
-                 
-            ZelanErrorType::AuthTokenExpired => 
-                (ErrorCode::AuthTokenExpired, 
-                 "Authentication token has expired".to_string(), 
-                 None, 
-                 ErrorCategory::Authentication),
-                 
-            ZelanErrorType::AuthTokenInvalid { reason } => 
-                (ErrorCode::AuthTokenInvalid, 
-                 "Authentication token is invalid".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Authentication),
-                 
-            ZelanErrorType::AuthTokenRevoked => 
-                (ErrorCode::AuthTokenRevoked, 
-                 "Authentication token has been revoked".to_string(), 
-                 None, 
-                 ErrorCategory::Authentication),
-                 
-            ZelanErrorType::AuthRefreshFailed { reason } => 
-                (ErrorCode::AuthRefreshFailed, 
-                 "Failed to refresh authentication token".to_string(), 
-                 Some(reason.clone()), 
-                 ErrorCategory::Authentication),
-                 
-            ZelanErrorType::NetworkTimeout { service, operation } => 
-                (ErrorCode::NetworkTimeout, 
-                 format!("Network timeout while connecting to {}", service), 
-                 Some(format!("Operation: {}", operation)), 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::NetworkConnectionLost { service } => 
-                (ErrorCode::NetworkConnectionLost, 
-                 format!("Network connection lost to {}", service), 
-                 None, 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::NetworkDnsFailure { host } => 
-                (ErrorCode::NetworkDnsFailure, 
-                 format!("DNS resolution failure for {}", host), 
-                 None, 
-                 ErrorCategory::Network),
-                 
-            ZelanErrorType::ConfigInvalid { key, value, reason } => 
-                (ErrorCode::ConfigInvalid, 
-                 format!("Invalid configuration value for '{}'", key), 
-                 Some(format!("Value '{}' is invalid: {}", value, reason)), 
-                 ErrorCategory::Configuration),
-                 
-            ZelanErrorType::ConfigMissing { key } => 
-                (ErrorCode::ConfigMissing, 
-                 format!("Required configuration key '{}' is missing", key), 
-                 None, 
-                 ErrorCategory::Configuration),
+            ZelanErrorType::Unknown(msg) => (
+                ErrorCode::Unknown,
+                msg.clone(),
+                None,
+                ErrorCategory::Internal,
+            ),
+
+            ZelanErrorType::Internal(msg) => (
+                ErrorCode::Internal,
+                msg.clone(),
+                None,
+                ErrorCategory::Internal,
+            ),
+
+            ZelanErrorType::AdapterNotFound { name } => (
+                ErrorCode::AdapterNotFound,
+                format!("Adapter '{}' not found", name),
+                None,
+                ErrorCategory::NotFound,
+            ),
+
+            ZelanErrorType::AdapterConnectionFailed { name, reason } => (
+                ErrorCode::AdapterConnectionFailed,
+                format!("Failed to connect adapter '{}'", name),
+                Some(reason.clone()),
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::AdapterDisconnectFailed { name, reason } => (
+                ErrorCode::AdapterDisconnectFailed,
+                format!("Failed to disconnect adapter '{}'", name),
+                Some(reason.clone()),
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::AdapterDisabled { name } => (
+                ErrorCode::AdapterDisabled,
+                format!("Adapter '{}' is disabled", name),
+                None,
+                ErrorCategory::Configuration,
+            ),
+
+            ZelanErrorType::EventBusPublishFailed { reason } => (
+                ErrorCode::EventBusPublishFailed,
+                "Failed to publish event to event bus".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Internal,
+            ),
+
+            ZelanErrorType::EventBusDropped => (
+                ErrorCode::EventBusDropped,
+                "Event was dropped due to no receivers".to_string(),
+                None,
+                ErrorCategory::Internal,
+            ),
+
+            ZelanErrorType::WebSocketBindFailed { reason } => (
+                ErrorCode::WebSocketBindFailed,
+                "Failed to bind WebSocket server".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::WebSocketAcceptFailed { reason } => (
+                ErrorCode::WebSocketAcceptFailed,
+                "Failed to accept WebSocket connection".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::WebSocketSendFailed { reason } => (
+                ErrorCode::WebSocketSendFailed,
+                "Failed to send WebSocket message".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::ApiRequestFailed { reason } => (
+                ErrorCode::ApiRequestFailed,
+                "API request failed".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::ApiRateLimited {
+                service,
+                reset_after,
+            } => {
+                let ctx =
+                    reset_after.map(|d| format!("Rate limit resets in {} seconds", d.as_secs()));
+                (
+                    ErrorCode::ApiRateLimited,
+                    format!("{} API rate limit exceeded", service),
+                    ctx,
+                    ErrorCategory::RateLimit,
+                )
+            }
+
+            ZelanErrorType::ApiAuthenticationFailed { reason } => (
+                ErrorCode::ApiAuthenticationFailed,
+                "API authentication failed".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Authentication,
+            ),
+
+            ZelanErrorType::ApiPermissionDenied { reason } => (
+                ErrorCode::ApiPermissionDenied,
+                "API permission denied".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Permission,
+            ),
+
+            ZelanErrorType::AuthTokenExpired => (
+                ErrorCode::AuthTokenExpired,
+                "Authentication token has expired".to_string(),
+                None,
+                ErrorCategory::Authentication,
+            ),
+
+            ZelanErrorType::AuthTokenInvalid { reason } => (
+                ErrorCode::AuthTokenInvalid,
+                "Authentication token is invalid".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Authentication,
+            ),
+
+            ZelanErrorType::AuthTokenRevoked => (
+                ErrorCode::AuthTokenRevoked,
+                "Authentication token has been revoked".to_string(),
+                None,
+                ErrorCategory::Authentication,
+            ),
+
+            ZelanErrorType::AuthRefreshFailed { reason } => (
+                ErrorCode::AuthRefreshFailed,
+                "Failed to refresh authentication token".to_string(),
+                Some(reason.clone()),
+                ErrorCategory::Authentication,
+            ),
+
+            ZelanErrorType::NetworkTimeout { service, operation } => (
+                ErrorCode::NetworkTimeout,
+                format!("Network timeout while connecting to {}", service),
+                Some(format!("Operation: {}", operation)),
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::NetworkConnectionLost { service } => (
+                ErrorCode::NetworkConnectionLost,
+                format!("Network connection lost to {}", service),
+                None,
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::NetworkDnsFailure { host } => (
+                ErrorCode::NetworkDnsFailure,
+                format!("DNS resolution failure for {}", host),
+                None,
+                ErrorCategory::Network,
+            ),
+
+            ZelanErrorType::ConfigInvalid { key, value, reason } => (
+                ErrorCode::ConfigInvalid,
+                format!("Invalid configuration value for '{}'", key),
+                Some(format!("Value '{}' is invalid: {}", value, reason)),
+                ErrorCategory::Configuration,
+            ),
+
+            ZelanErrorType::ConfigMissing { key } => (
+                ErrorCode::ConfigMissing,
+                format!("Required configuration key '{}' is missing", key),
+                None,
+                ErrorCategory::Configuration,
+            ),
         };
 
         ZelanError::new(code)
@@ -835,16 +838,17 @@ pub type ZelanTypeResult<T> = Result<T, ZelanErrorType>;
 /// Module for new thiserror-based error helpers
 pub mod errors {
     use super::*;
-    
+
     /// Create an adapter not found error
     pub fn adapter_not_found(name: impl Into<String>) -> ZelanErrorType {
-        ZelanErrorType::AdapterNotFound {
-            name: name.into(),
-        }
+        ZelanErrorType::AdapterNotFound { name: name.into() }
     }
 
     /// Create an adapter connection failed error
-    pub fn adapter_connection_failed(name: impl Into<String>, reason: impl fmt::Display) -> ZelanErrorType {
+    pub fn adapter_connection_failed(
+        name: impl Into<String>,
+        reason: impl fmt::Display,
+    ) -> ZelanErrorType {
         ZelanErrorType::AdapterConnectionFailed {
             name: name.into(),
             reason: reason.to_string(),
@@ -871,7 +875,10 @@ pub mod errors {
     }
 
     /// Create a network timeout error
-    pub fn network_timeout(service: impl Into<String>, operation: impl Into<String>) -> ZelanErrorType {
+    pub fn network_timeout(
+        service: impl Into<String>,
+        operation: impl Into<String>,
+    ) -> ZelanErrorType {
         ZelanErrorType::NetworkTimeout {
             service: service.into(),
             operation: operation.into(),
@@ -879,7 +886,10 @@ pub mod errors {
     }
 
     /// Create an API rate limit error
-    pub fn api_rate_limited(service: impl Into<String>, reset_after: Option<Duration>) -> ZelanErrorType {
+    pub fn api_rate_limited(
+        service: impl Into<String>,
+        reset_after: Option<Duration>,
+    ) -> ZelanErrorType {
         ZelanErrorType::ApiRateLimited {
             service: service.into(),
             reset_after,
@@ -893,9 +903,7 @@ pub mod errors {
 
     /// Create a configuration missing error
     pub fn config_missing(key: impl Into<String>) -> ZelanErrorType {
-        ZelanErrorType::ConfigMissing {
-            key: key.into(),
-        }
+        ZelanErrorType::ConfigMissing { key: key.into() }
     }
 
     /// Create a configuration invalid error
@@ -988,14 +996,14 @@ pub fn api_rate_limited(service: &str, reset_after: Option<Duration>) -> ZelanEr
         .message(format!("{} API rate limit exceeded", service))
         .category(ErrorCategory::RateLimit)
         .severity(ErrorSeverity::Warning);
-    
+
     if let Some(duration) = reset_after {
         builder = builder.context(format!(
             "Rate limit resets in {} seconds",
             duration.as_secs()
         ));
     }
-    
+
     builder.build()
 }
 
@@ -1277,7 +1285,7 @@ Example of using the new thiserror-based error API
 // Using the original error API:
 fn get_adapter(name: &str) -> ZelanResult<Adapter> {
     if name.is_empty() {
-        return Err(adapter_not_found(name)); 
+        return Err(adapter_not_found(name));
     }
     // ...
     Ok(adapter)
@@ -1286,7 +1294,7 @@ fn get_adapter(name: &str) -> ZelanResult<Adapter> {
 // Using the new thiserror-based API:
 fn get_adapter_new(name: &str) -> ZelanTypeResult<Adapter> {
     if name.is_empty() {
-        return Err(errors::adapter_not_found(name)); 
+        return Err(errors::adapter_not_found(name));
     }
     // ...
     Ok(adapter)
@@ -1302,7 +1310,7 @@ fn get_adapter_compatible(name: &str) -> ZelanResult<Adapter> {
 ```
 */
 
-/// Simple circuit breaker for our custom implementation 
+/// Simple circuit breaker for our custom implementation
 #[derive(Clone, Debug)]
 pub struct SimpleCircuitBreaker {
     /// Name of the circuit breaker
@@ -1311,7 +1319,7 @@ pub struct SimpleCircuitBreaker {
     failure_threshold: u32,
     /// Time to wait before attempting to close the circuit
     reset_timeout: Duration,
-    /// Whether the circuit is currently open 
+    /// Whether the circuit is currently open
     is_open: Arc<AtomicBool>,
     /// Current failure count
     failure_count: Arc<AtomicUsize>,
@@ -1334,17 +1342,17 @@ impl SimpleCircuitBreaker {
             error_registry: None,
         }
     }
-    
+
     /// Set the error registry
     pub fn with_error_registry(mut self, registry: Arc<ErrorRegistry>) -> Self {
         self.error_registry = Some(registry);
         self
     }
-    
+
     /// Check if the circuit is open, reset if timeout has passed
     pub async fn is_open(&self) -> bool {
         let is_open = self.is_open.load(Ordering::Acquire);
-        
+
         // If the circuit is open, check if we've waited long enough to try again
         if is_open {
             let open_time = self.open_time.read().await;
@@ -1362,17 +1370,17 @@ impl SimpleCircuitBreaker {
                 }
             }
         }
-        
+
         is_open
     }
-    
+
     /// Record a success, resetting the failure count
     pub async fn record_success(&self) {
         self.failure_count.store(0, Ordering::Release);
         self.is_open.store(false, Ordering::Release);
         *self.open_time.write().await = None;
     }
-    
+
     /// Record a failure, potentially opening the circuit
     pub async fn record_failure(&self, error: &ZelanError) -> ZelanError {
         // Register the error if an error registry is provided
@@ -1381,15 +1389,15 @@ impl SimpleCircuitBreaker {
         } else {
             error.clone()
         };
-        
+
         // Atomically increment the failure count
         let count = self.failure_count.fetch_add(1, Ordering::AcqRel) + 1;
-        
+
         // Open the circuit if we've reached the threshold
         if count >= self.failure_threshold as usize {
             self.is_open.store(true, Ordering::Release);
             *self.open_time.write().await = Some(Instant::now());
-            
+
             // Log at appropriate level based on error severity
             match registered_error.severity {
                 ErrorSeverity::Critical => {
@@ -1421,10 +1429,10 @@ impl SimpleCircuitBreaker {
                 }
             }
         }
-        
+
         registered_error
     }
-    
+
     /// Execute a function with circuit breaker protection
     pub async fn execute<F, Fut, T>(&self, f: F) -> ZelanResult<T>
     where
@@ -1440,7 +1448,7 @@ impl SimpleCircuitBreaker {
                 .category(ErrorCategory::ServiceUnavailable)
                 .build());
         }
-        
+
         // Execute the function
         match f().await {
             Ok(result) => {
@@ -1454,19 +1462,23 @@ impl SimpleCircuitBreaker {
             }
         }
     }
-    
+
     /// Execute a function with retry and circuit breaker protection
-    pub async fn execute_with_retry<F, Fut, T>(&self, operation_name: &str, retry_policy: &RetryPolicy, f: F) -> ZelanResult<T>
+    pub async fn execute_with_retry<F, Fut, T>(
+        &self,
+        operation_name: &str,
+        retry_policy: &RetryPolicy,
+        f: F,
+    ) -> ZelanResult<T>
     where
         F: Fn() -> Fut + Send + Sync + Clone,
         Fut: std::future::Future<Output = ZelanResult<T>> + Send,
     {
         let f_clone = f.clone();
-        
+
         // Use the circuit breaker to protect the retry logic
-        self.execute(|| async move {
-            with_retry(operation_name, retry_policy, f_clone).await
-        }).await
+        self.execute(|| async move { with_retry(operation_name, retry_policy, f_clone).await })
+            .await
     }
 }
 
@@ -1485,7 +1497,7 @@ impl SimpleRecoveryManager {
     /// Create a new recovery manager with default settings
     pub fn new() -> Self {
         let error_registry = Arc::new(ErrorRegistry::new(1000));
-        
+
         // Set up default retry policies
         let mut default_policies = HashMap::new();
         default_policies.insert(
@@ -1540,15 +1552,15 @@ impl SimpleRecoveryManager {
     /// Get or create a circuit breaker for a specific operation
     pub async fn get_circuit_breaker(&self, name: &str) -> SimpleCircuitBreaker {
         let mut breakers = self.circuit_breakers.write().await;
-        
+
         if let Some(breaker) = breakers.get(name) {
             return breaker.clone();
         }
-        
+
         // Create a new circuit breaker with default settings
         let breaker = SimpleCircuitBreaker::new(name, 5, Duration::from_secs(60))
             .with_error_registry(self.error_registry.clone());
-        
+
         breakers.insert(name.to_string(), breaker.clone());
         breaker
     }
@@ -1562,10 +1574,10 @@ impl SimpleRecoveryManager {
     ) -> SimpleCircuitBreaker {
         let breaker = SimpleCircuitBreaker::new(name, failure_threshold, reset_timeout)
             .with_error_registry(self.error_registry.clone());
-        
+
         let mut breakers = self.circuit_breakers.write().await;
         breakers.insert(name.to_string(), breaker.clone());
-        
+
         breaker
     }
 
@@ -1578,11 +1590,7 @@ impl SimpleRecoveryManager {
     }
 
     /// Execute a function with automatic retry based on error category
-    pub async fn with_auto_retry<F, Fut, T>(
-        &self,
-        operation_name: &str,
-        f: F,
-    ) -> ZelanResult<T>
+    pub async fn with_auto_retry<F, Fut, T>(&self, operation_name: &str, f: F) -> ZelanResult<T>
     where
         F: Fn() -> Fut + Send + Sync,
         Fut: std::future::Future<Output = ZelanResult<T>> + Send,
@@ -1592,13 +1600,16 @@ impl SimpleRecoveryManager {
             Ok(value) => Ok(value),
             Err(err) => {
                 // Register the error
-                let registered_err = self.error_registry.register(err, Some(operation_name)).await;
-                
+                let registered_err = self
+                    .error_registry
+                    .register(err, Some(operation_name))
+                    .await;
+
                 // Determine retry policy based on error category
                 if let Some(category) = registered_err.category {
                     if category.is_retryable() {
                         let policy = self.get_default_policy(category);
-                        
+
                         // If retryable, use the policy to retry
                         debug!(
                             operation = operation_name,
@@ -1606,11 +1617,11 @@ impl SimpleRecoveryManager {
                             max_retries = policy.max_retries,
                             "Using automatic retry for operation"
                         );
-                        
+
                         return with_retry(operation_name, &policy, f).await;
                     }
                 }
-                
+
                 // Not retryable or no category
                 Err(registered_err)
             }
@@ -1632,30 +1643,29 @@ impl SimpleRecoveryManager {
     }
 
     /// Execute a function with both circuit breaker and retry
-    pub async fn with_protection<F, Fut, T>(
-        &self,
-        operation_name: &str,
-        f: F,
-    ) -> ZelanResult<T>
+    pub async fn with_protection<F, Fut, T>(&self, operation_name: &str, f: F) -> ZelanResult<T>
     where
         F: Fn() -> Fut + Send + Sync + Clone,
         Fut: std::future::Future<Output = ZelanResult<T>> + Send,
     {
         let breaker = self.get_circuit_breaker(operation_name).await;
         let f_clone = f.clone();
-        
+
         // First attempt to get the error category for retries
         match f().await {
             Ok(value) => Ok(value),
             Err(err) => {
                 // Register the error
-                let registered_err = self.error_registry.register(err, Some(operation_name)).await;
-                
+                let registered_err = self
+                    .error_registry
+                    .register(err, Some(operation_name))
+                    .await;
+
                 // Determine retry policy based on error category
                 if let Some(category) = registered_err.category {
                     if category.is_retryable() {
                         let policy = self.get_default_policy(category);
-                        
+
                         // If retryable, use the policy to retry with circuit breaker
                         debug!(
                             operation = operation_name,
@@ -1663,11 +1673,13 @@ impl SimpleRecoveryManager {
                             max_retries = policy.max_retries,
                             "Using automatic retry with circuit breaker for operation"
                         );
-                        
-                        return breaker.execute_with_retry(operation_name, &policy, f_clone).await;
+
+                        return breaker
+                            .execute_with_retry(operation_name, &policy, f_clone)
+                            .await;
                     }
                 }
-                
+
                 // Not retryable or no category
                 Err(registered_err)
             }
@@ -1679,10 +1691,10 @@ impl SimpleRecoveryManager {
 pub trait SimpleAdapterRecovery {
     /// Get the recovery manager
     fn recovery_manager(&self) -> Arc<SimpleRecoveryManager>;
-    
+
     /// Get the adapter name for error registration
     fn adapter_name(&self) -> &str;
-    
+
     /// Execute an adapter operation with protection
     #[allow(async_fn_in_trait)]
     async fn protected_operation<F, Fut, T>(&self, operation_name: &str, f: F) -> ZelanResult<T>
@@ -1692,16 +1704,20 @@ pub trait SimpleAdapterRecovery {
     {
         // Create the full operation name with adapter prefix
         let full_operation = format!("{}.{}", self.adapter_name(), operation_name);
-        
+
         // Use the recovery manager to execute with protection
-        self.recovery_manager().with_protection(&full_operation, f).await
+        self.recovery_manager()
+            .with_protection(&full_operation, f)
+            .await
     }
-    
+
     /// Register an adapter-specific error
     #[allow(async_fn_in_trait)]
     async fn register_error(&self, error: ZelanError) -> ZelanError {
         let adapter_name = self.adapter_name();
-        self.recovery_manager().register_error(error, Some(adapter_name)).await
+        self.recovery_manager()
+            .register_error(error, Some(adapter_name))
+            .await
     }
 }
 
@@ -1724,7 +1740,7 @@ impl MyAdapter {
             recovery_manager: Arc::new(SimpleRecoveryManager::new()),
         }
     }
-    
+
     // Example API call with retry and circuit breaker protection
     async fn get_data(&self, id: &str) -> ZelanResult<String> {
         self.protected_operation("get_data", || async {
@@ -1732,7 +1748,7 @@ impl MyAdapter {
             self.api_request(id).await
         }).await
     }
-    
+
     // Low-level API function that might fail
     async fn api_request(&self, id: &str) -> ZelanResult<String> {
         // Simulate occasional failures
@@ -1743,7 +1759,7 @@ impl MyAdapter {
                       .category(ErrorCategory::Network)
                       .build());
         }
-        
+
         Ok(format!("Data for {}", id))
     }
 }
@@ -1752,7 +1768,7 @@ impl SimpleAdapterRecovery for MyAdapter {
     fn recovery_manager(&self) -> Arc<SimpleRecoveryManager> {
         self.recovery_manager.clone()
     }
-    
+
     fn adapter_name(&self) -> &str {
         &self.name
     }
@@ -1761,7 +1777,7 @@ impl SimpleAdapterRecovery for MyAdapter {
 // Usage example
 async fn main() {
     let adapter = MyAdapter::new("example");
-    
+
     // Will automatically retry on network errors and use circuit breaker
     match adapter.get_data("12345").await {
         Ok(data) => println!("Got data: {}", data),

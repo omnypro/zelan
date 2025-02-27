@@ -1,9 +1,13 @@
 use anyhow::{anyhow, Result};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::env;
+use std::sync::Arc;
 use tracing::debug;
 use twitch_api::helix::{channels::ChannelInformation, streams::Stream};
 use twitch_oauth2::{ClientId, UserToken};
+
+use crate::adapters::http_client::{HttpClient, ReqwestHttpClient};
 
 /// Environment variable name for Twitch Client ID
 const TWITCH_CLIENT_ID_ENV: &str = "TWITCH_CLIENT_ID";
@@ -20,24 +24,29 @@ fn get_client_id() -> Result<ClientId> {
 /// Client for Twitch API requests
 pub struct TwitchApiClient {
     /// HTTP client for API requests
-    http_client: reqwest::Client,
+    http_client: Arc<dyn HttpClient + Send + Sync>,
 }
 
 impl Clone for TwitchApiClient {
     fn clone(&self) -> Self {
-        // Create a new client since reqwest::Client doesn't implement Clone
+        // Clone the Arc, not the client itself
         Self {
-            http_client: reqwest::Client::new(),
+            http_client: self.http_client.clone(),
         }
     }
 }
 
 impl TwitchApiClient {
-    /// Create a new API client
+    /// Create a new API client with the default HTTP client
     pub fn new() -> Self {
         Self {
-            http_client: reqwest::Client::new(),
+            http_client: Arc::new(ReqwestHttpClient::new()),
         }
+    }
+
+    /// Create a new API client with a custom HTTP client
+    pub fn with_http_client(http_client: Arc<dyn HttpClient + Send + Sync>) -> Self {
+        Self { http_client }
     }
 
     /// Fetch channel information
@@ -60,31 +69,28 @@ impl TwitchApiClient {
             broadcaster_id
         );
 
-        // Make the request
-        let response = self
-            .http_client
-            .get(&url)
-            .header("Client-ID", client_id.as_str())
-            .header(
-                "Authorization",
-                format!("Bearer {}", token.access_token.secret()),
-            )
-            .send()
-            .await?;
+        // Prepare headers
+        let mut headers = HashMap::new();
+        headers.insert("Client-ID".to_string(), client_id.as_str().to_string());
+        headers.insert(
+            "Authorization".to_string(),
+            format!("Bearer {}", token.access_token.secret()),
+        );
+
+        // Make the request using our abstracted HTTP client
+        let response = self.http_client.get(&url, headers).await?;
 
         // Check status
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await?;
+        if !(response.status() >= 200 && response.status() < 300) {
             return Err(anyhow!(
                 "Failed to fetch channel info: HTTP {} - {}",
-                status,
-                error_text
+                response.status(),
+                response.body()
             ));
         }
 
-        // Parse response
-        let response_json: Value = response.json().await?;
+        // Parse JSON from the response body
+        let response_json: Value = serde_json::from_str(response.body())?;
 
         // Check if we have data
         if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
@@ -124,31 +130,28 @@ impl TwitchApiClient {
         // Define the API endpoint
         let url = format!("https://api.twitch.tv/helix/streams?{}", query_param);
 
-        // Make the request
-        let response = self
-            .http_client
-            .get(&url)
-            .header("Client-ID", client_id.as_str())
-            .header(
-                "Authorization",
-                format!("Bearer {}", token.access_token.secret()),
-            )
-            .send()
-            .await?;
+        // Prepare headers
+        let mut headers = HashMap::new();
+        headers.insert("Client-ID".to_string(), client_id.as_str().to_string());
+        headers.insert(
+            "Authorization".to_string(),
+            format!("Bearer {}", token.access_token.secret()),
+        );
+
+        // Make the request using our abstracted HTTP client
+        let response = self.http_client.get(&url, headers).await?;
 
         // Check status
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await?;
+        if !(response.status() >= 200 && response.status() < 300) {
             return Err(anyhow!(
                 "Failed to fetch stream info: HTTP {} - {}",
-                status,
-                error_text
+                response.status(),
+                response.body()
             ));
         }
 
-        // Parse response
-        let response_json: Value = response.json().await?;
+        // Parse JSON from the response body
+        let response_json: Value = serde_json::from_str(response.body())?;
 
         // Check if we have data
         if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
@@ -164,4 +167,156 @@ impl TwitchApiClient {
     }
 
     // Add more API methods as needed...
+}
+
+#[cfg(test)]
+use twitch_types::{UserId, UserName};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::http_client::mock::MockHttpClient;
+
+    #[tokio::test]
+    async fn test_fetch_channel_info() -> Result<()> {
+        // Sample response data based on Twitch API documentation
+        let channel_data = serde_json::json!({
+            "data": [{
+                "broadcaster_id": "123456",
+                "broadcaster_login": "testchannel",
+                "broadcaster_name": "TestChannel",
+                "broadcaster_language": "en",
+                "game_id": "12345",
+                "game_name": "Test Game",
+                "title": "Test Stream Title",
+                "delay": 0,
+                "tags": ["test1", "test2"],
+                "content_classification_labels": ["test_label1", "test_label2"],
+                "is_branded_content": false
+            }]
+        });
+
+        // Create a mock HTTP client
+        let mut mock_client = MockHttpClient::new();
+
+        // Setup mock response for channel info
+        mock_client.mock_success_json(
+            "https://api.twitch.tv/helix/channels?broadcaster_id=123456",
+            &channel_data,
+        )?;
+
+        // Create API client with our mock
+        let api_client = TwitchApiClient::with_http_client(Arc::new(mock_client));
+
+        // Create a fake client_id for testing
+        let client_id = ClientId::new("test_client_id".to_string());
+
+        // Mock the environment setup
+        std::env::set_var(TWITCH_CLIENT_ID_ENV, "test_client_id");
+
+        // Create fake credentials for testing - in real use cases these would come from the API
+        let login = UserName::new("testuser".to_string());
+        let user_id = UserId::new("123456".to_string());
+
+        // We need to create a token using a builder since UserToken has private fields
+        let token = UserToken::from_existing_unchecked(
+            twitch_oauth2::AccessToken::new("test_token".to_string()),
+            None, // refresh_token
+            client_id,
+            None, // client_secret
+            login,
+            user_id,
+            Some(Vec::new()),                           // scopes
+            Some(std::time::Duration::from_secs(3600)), // expires_in
+        );
+
+        // Call the method we're testing
+        let channel_info = api_client.fetch_channel_info(&token, "123456").await?;
+
+        // Verify we got the expected result
+        assert!(channel_info.is_some());
+        let info = channel_info.unwrap();
+
+        // Convert to strings for comparison since the twitch_api types don't implement PartialEq with &str
+        assert_eq!(info.broadcaster_id.as_str(), "123456");
+        assert_eq!(info.broadcaster_name.as_str(), "TestChannel");
+        assert_eq!(info.title, "Test Stream Title");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_fetch_stream_info() -> Result<()> {
+        // Sample response data based on Twitch API documentation
+        let stream_data = serde_json::json!({
+            "data": [{
+                "id": "123456789",
+                "user_id": "123456",
+                "user_login": "testchannel",
+                "user_name": "TestChannel",
+                "game_id": "12345",
+                "game_name": "Test Game",
+                "type": "live",
+                "title": "Test Stream Title",
+                "viewer_count": 123,
+                "started_at": "2023-01-01T12:00:00Z",
+                "language": "en",
+                "thumbnail_url": "https://static-cdn.jtvnw.net/previews-ttv/live_user_testchannel-{width}x{height}.jpg",
+                "tags": ["test1", "test2"], // Add missing tags field
+                "tag_ids": ["123", "456"],
+                "is_mature": false
+            }]
+        });
+
+        // Create a mock HTTP client
+        let mut mock_client = MockHttpClient::new();
+
+        // Setup mock response for stream info
+        mock_client.mock_success_json(
+            "https://api.twitch.tv/helix/streams?user_id=123456",
+            &stream_data,
+        )?;
+
+        // Create API client with our mock
+        let api_client = TwitchApiClient::with_http_client(Arc::new(mock_client));
+
+        // Create a fake client_id for testing
+        let client_id = ClientId::new("test_client_id".to_string());
+
+        // Mock the environment setup
+        std::env::set_var(TWITCH_CLIENT_ID_ENV, "test_client_id");
+
+        // Create fake credentials for testing - in real use cases these would come from the API
+        let login = UserName::new("testuser".to_string());
+        let user_id = UserId::new("123456".to_string());
+
+        // We need to create a token using a builder since UserToken has private fields
+        let token = UserToken::from_existing_unchecked(
+            twitch_oauth2::AccessToken::new("test_token".to_string()),
+            None, // refresh_token
+            client_id,
+            None, // client_secret
+            login,
+            user_id,
+            Some(Vec::new()),                           // scopes
+            Some(std::time::Duration::from_secs(3600)), // expires_in
+        );
+
+        // Call the method we're testing
+        let stream_info = api_client
+            .fetch_stream_info(&token, Some("123456"), None)
+            .await?;
+
+        // Verify we got the expected result
+        assert!(stream_info.is_some());
+        let info = stream_info.unwrap();
+
+        // Convert to strings for comparison since the twitch_api types don't implement PartialEq with &str
+        assert_eq!(info.user_id.as_str(), "123456");
+        assert_eq!(info.user_name.as_str(), "TestChannel");
+        assert_eq!(info.title, "Test Stream Title");
+        assert_eq!(info.viewer_count, 123);
+
+        Ok(())
+    }
 }
