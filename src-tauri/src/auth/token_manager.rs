@@ -201,8 +201,6 @@ impl TokenManager {
                 }
                 Err(e) => {
                     attempts += 1;
-                    let error_msg = format!("Failed to save secure store (attempt {}/{}): {}", 
-                        attempts, MAX_ATTEMPTS, e);
                     warn!(error = %e, attempt = attempts, "Secure store save failed");
                     last_error = Some(e);
                     

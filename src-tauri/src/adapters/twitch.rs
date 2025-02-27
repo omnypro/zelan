@@ -254,13 +254,36 @@ impl TwitchAdapter {
                     config.access_token = Some(token_data.access_token.clone());
                     config.refresh_token = token_data.refresh_token.clone();
 
-                    // Check for expiration
+                    // Log information about the token's expiration
                     if token_data.is_expired() {
                         warn!("Retrieved tokens are expired, may need refresh");
                     } else if let Some(expires_at) = token_data.expires_at {
                         let now = chrono::Utc::now();
                         let duration = expires_at.signed_duration_since(now);
                         info!("Token expires in {} seconds", duration.num_seconds());
+                    }
+                    
+                    // Check for refresh token age - DCF tokens have a 30-day limit
+                    if let Some(created_str) = token_data.get_metadata_value("refresh_token_created_at") {
+                        if let Some(created_str) = created_str.as_str() {
+                            if let Ok(created) = chrono::DateTime::parse_from_rfc3339(created_str) {
+                                let created_utc = created.with_timezone(&chrono::Utc);
+                                let now = chrono::Utc::now();
+                                let age = now - created_utc;
+                                let days_remaining = 30 - age.num_days();
+                                
+                                if days_remaining <= 0 {
+                                    warn!("Refresh token is potentially expired - it was created {} days ago (30-day limit)", age.num_days());
+                                } else if days_remaining < 5 {
+                                    warn!("Refresh token is approaching expiry - only {} days remaining before 30-day limit", days_remaining);
+                                } else {
+                                    info!("Refresh token has {} days remaining before 30-day limit", days_remaining);
+                                }
+                            }
+                        }
+                    } else {
+                        // If we don't have a creation timestamp, that's concerning
+                        warn!("No refresh token creation timestamp found - unable to check 30-day expiry status");
                     }
 
                     // Try to restore auth state
@@ -1418,15 +1441,54 @@ impl ServiceAdapter for TwitchAdapter {
             info!("Successfully loaded tokens from TokenManager");
         } else {
             debug!("No tokens loaded from TokenManager, will authenticate if needed");
-
-            // Try to restore from config if available
+            
+            // Check if we have tokens in config that need to be migrated to TokenManager
             let config = self.config.read().await;
-            if config.access_token.is_some() {
+            if let (Some(access_token), refresh_token) = (&config.access_token, &config.refresh_token) {
+                info!("Found tokens in config but not in TokenManager, migrating to TokenManager");
+                
+                if let Some(tm) = &self.token_manager {
+                    // Create TokenData
+                    let mut token_data = TokenData::new(access_token.clone(), refresh_token.clone());
+                    
+                    // We don't know expiration time yet, will be updated after validation
+                    // But we can track refresh token created time
+                    token_data.track_refresh_token_created();
+                    
+                    // Store in TokenManager
+                    match tm.store_tokens("twitch", token_data).await {
+                        Ok(_) => info!("Successfully migrated tokens to TokenManager"),
+                        Err(e) => error!("Failed to migrate tokens to TokenManager: {}", e),
+                    }
+                }
+                
                 info!("Found access token in config, attempting to restore auth state");
                 drop(config);
 
                 match self.restore_token_auth_state().await {
-                    Ok(_) => info!("Successfully restored auth state from config"),
+                    Ok(_) => {
+                        info!("Successfully restored auth state from config");
+                        
+                        // Update TokenManager with expiry information if we now have a validated token
+                        if let Some(tm) = &self.token_manager {
+                            let auth_manager = self.auth_manager.read().await;
+                            if let Some(token) = auth_manager.get_token().await {
+                                // Get token expiry
+                                let expires_in = token.expires_in().as_secs();
+                                
+                                // Update TokenManager with expiry information
+                                if let Err(e) = tm.update_tokens("twitch", |mut t| {
+                                    // Set expiration time based on the validated token
+                                    t.set_expiration(expires_in);
+                                    t
+                                }).await {
+                                    warn!("Failed to update token expiry in TokenManager: {}", e);
+                                } else {
+                                    info!("Updated TokenManager with token expiry information ({}s)", expires_in);
+                                }
+                            }
+                        }
+                    },
                     Err(e) => warn!("Failed to restore auth state from config: {}", e),
                 }
             } else {

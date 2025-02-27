@@ -54,7 +54,7 @@ uuid = { version = "1.7.0", features = ["v4", "serde"] }
 
 # Service-Specific Dependencies
 obws = { version = "0.14.0", features = ["builder", "events"] }
-twitch_api = { version = "0.7.0", features = ["eventsub", "helix", "hmac"] }
+twitch_api = { version = "0.7.0", features = ["eventsub", "helix", "hmac", "client", "reqwest"] }
 twitch_oauth2 = { version = "0.15.1", features = ["client", "reqwest"] }
 
 dotenvy = "*"

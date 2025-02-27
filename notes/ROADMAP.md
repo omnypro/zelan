@@ -26,6 +26,12 @@ Work still needed:
   - Create tests for the token refresh flow
   - Test handling of expired tokens
   - Mock HTTP responses for various authentication scenarios
+  
+- **EventSub Activation**
+  - TODO: Once we authenticate, we should immediately activate EventSub
+  - Implement proper WebSocket transport creation
+  - Fix subscription creation to use the correct API methods
+  - Ensure subscriptions are created within the 10-second window after connection
 
 - **Error Recovery Tests**
   - Test authentication error recovery paths
@@ -221,6 +227,10 @@ Enhancing the user interface would make the application more user-friendly:
 - Implement a dashboard with event visualization
 - Add theme support (light/dark mode)
 - Improve responsiveness for different screen sizes
+- TODO: Add a button to deauthenticate/logout from connected services
+  - Need to implement proper token revocation with services
+  - Clear local token storage securely
+  - Update UI state to reflect disconnected status
 
 ### 13. Deployment and Updates
 

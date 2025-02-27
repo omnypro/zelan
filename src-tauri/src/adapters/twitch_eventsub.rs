@@ -272,8 +272,9 @@ impl EventSubClient {
         // Clone Arc references for the background task
         let event_bus = self.event_bus.clone();
         let connection = self.connection.clone();
-        // client_id is not used in the task, but kept for future implementation
-        let _client_id = self.client_id.clone();
+        // We now need client_id and token for creating subscriptions
+        let client_id = self.client_id.clone();
+        let token = token.clone(); // Clone the UserToken for use in the async task
         let user_id_clone = self.user_id.clone();
 
         // Spawn the WebSocket connection task
@@ -315,6 +316,34 @@ impl EventSubClient {
                         // Connection successful, reset reconnect attempts
                         reconnect_attempts = 0;
                         info!("Connected to Twitch EventSub, session_id: {}", session_id);
+                        
+                        // Create subscriptions immediately after connecting
+                        // This must happen within 10 seconds or Twitch will close the connection with code 4003
+                        let broadcaster_id = match user_id_clone.read().await.clone() {
+                            Some(id) => id,
+                            None => {
+                                error!("No broadcaster ID available for creating EventSub subscriptions");
+                                break;
+                            }
+                        };
+                        
+                        info!("Creating EventSub subscriptions for broadcaster ID: {}", broadcaster_id);
+                        
+                        // Create subscriptions for various event types
+                        match Self::create_subscriptions(
+                            &client_id,
+                            &token,
+                            &broadcaster_id, 
+                            &session_id
+                        ).await {
+                            Ok(count) => {
+                                info!("Successfully created {} EventSub subscriptions", count);
+                            }
+                            Err(e) => {
+                                error!("Failed to create EventSub subscriptions: {}", e);
+                                // Continue anyway, we might handle some predefined subscriptions
+                            }
+                        }
 
                         // Process messages until disconnected
                         Self::process_messages(&connection, &event_bus, &user_id_clone).await;
@@ -474,6 +503,121 @@ impl EventSubClient {
         }
 
         Err(anyhow!("Failed to extract user ID from response"))
+    }
+    
+    /// Create EventSub subscriptions using create_eventsub_subscription() from the library
+    async fn create_subscriptions(
+        _client_id: &ClientId,
+        token: &UserToken,
+        broadcaster_id: &str,
+        session_id: &str,
+    ) -> Result<usize> {
+        use twitch_api::{
+            helix::HelixClient,
+            eventsub::{
+                channel::{ChannelUpdateV2, ChannelChatMessageV1},
+                stream::{StreamOfflineV1, StreamOnlineV1},
+            },
+        };
+        
+        // Parse the broadcaster ID string into a UserId
+        let broadcaster = UserId::new(broadcaster_id.to_string());
+        let mut success_count = 0;
+        
+        // Create a reqwest HTTP client for the Helix client
+        let reqw_client = reqwest::Client::new();
+        // Create a Helix client with the HTTP client
+        let helix_client: HelixClient<reqwest::Client> = HelixClient::with_client(reqw_client);
+        
+        // Create the websocket transport for the session
+        let transport = twitch_api::eventsub::Transport::websocket(session_id);
+        
+        // Create and count the stream.online subscription
+        info!("Creating subscription for stream.online");
+        match helix_client.create_eventsub_subscription(
+            StreamOnlineV1::broadcaster_user_id(broadcaster.clone()),
+            transport.clone(),
+            token,
+        ).await {
+            Ok(_) => {
+                info!("Successfully created subscription for stream.online");
+                success_count += 1;
+            },
+            Err(e) => {
+                error!("Failed to create subscription for stream.online: {}", e);
+            }
+        }
+        
+        // Add a small delay between subscriptions to prevent rate limiting
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        // Create and count the stream.offline subscription
+        info!("Creating subscription for stream.offline");
+        match helix_client.create_eventsub_subscription(
+            StreamOfflineV1::broadcaster_user_id(broadcaster.clone()),
+            transport.clone(),
+            token,
+        ).await {
+            Ok(_) => {
+                info!("Successfully created subscription for stream.offline");
+                success_count += 1;
+            },
+            Err(e) => {
+                error!("Failed to create subscription for stream.offline: {}", e);
+            }
+        }
+        
+        // Add a small delay between subscriptions to prevent rate limiting
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        // Create and count the channel.update subscription
+        info!("Creating subscription for channel.update (v2)");
+        match helix_client.create_eventsub_subscription(
+            ChannelUpdateV2::broadcaster_user_id(broadcaster.clone()),
+            transport.clone(),
+            token,
+        ).await {
+            Ok(_) => {
+                info!("Successfully created subscription for channel.update");
+                success_count += 1;
+            },
+            Err(e) => {
+                error!("Failed to create subscription for channel.update: {}", e);
+            }
+        }
+        
+        // Add a small delay between subscriptions to prevent rate limiting
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        // Create and count the channel.chat.message subscription
+        // For chat messages, typically you should specify BOTH broadcaster and user ID, but to get
+        // ALL chat messages in the channel, we can create a broadcaster user ID only condition
+        info!("Creating subscription for channel.chat.message");
+        
+        // Create a new chat message condition with broadcaster ID only
+        let chat_condition = ChannelChatMessageV1::new(
+            broadcaster.clone(),
+            broadcaster.clone(), // Using broadcaster ID for chatter too to match any user
+        );
+        
+        match helix_client.create_eventsub_subscription(
+            chat_condition,
+            transport.clone(),
+            token,
+        ).await {
+            Ok(_) => {
+                info!("Successfully created subscription for channel.chat.message");
+                success_count += 1;
+            },
+            Err(e) => {
+                error!("Failed to create subscription for channel.chat.message: {}", e);
+            }
+        }
+        
+        info!("Created a total of {} EventSub subscriptions", success_count);
+        
+        // Return the count of successfully created subscriptions
+        Ok(success_count)
     }
 
     /// Process EventSub WebSocket messages

@@ -41,6 +41,8 @@ fn get_scopes() -> Vec<Scope> {
         Scope::AnalyticsReadExtensions,
         Scope::AnalyticsReadGames,
         Scope::BitsRead,
+        Scope::ChannelBot,
+        Scope::ChannelModerate,
         Scope::ChannelReadGoals,
         Scope::ChannelReadHypeTrain,
         Scope::ChannelReadPolls,
@@ -48,9 +50,10 @@ fn get_scopes() -> Vec<Scope> {
         Scope::ChannelReadRedemptions,
         Scope::ChannelReadSubscriptions,
         Scope::ChannelReadVips,
+        Scope::ChatRead,
         Scope::ModerationRead,
-        Scope::ModeratorReadBlockedTerms,
         Scope::ModeratorReadAutomodSettings,
+        Scope::ModeratorReadBlockedTerms,
         Scope::ModeratorReadChatSettings,
         Scope::ModeratorReadChatters,
         Scope::ModeratorReadFollowers,
@@ -58,11 +61,10 @@ fn get_scopes() -> Vec<Scope> {
         Scope::ModeratorReadShieldMode,
         Scope::UserReadBlockedUsers,
         Scope::UserReadBroadcast,
+        Scope::UserReadChat,
         Scope::UserReadEmail,
         Scope::UserReadFollows,
         Scope::UserReadSubscriptions,
-        Scope::ChannelModerate,
-        Scope::ChatRead,
     ]
 }
 
@@ -72,28 +74,30 @@ fn parse_scope(scope_str: &str) -> Option<Scope> {
         "analytics:read:extensions" => Some(Scope::AnalyticsReadExtensions),
         "analytics:read:games" => Some(Scope::AnalyticsReadGames),
         "bits:read" => Some(Scope::BitsRead),
-        "channel:read:subscriptions" => Some(Scope::ChannelReadSubscriptions),
-        "channel:read:redemptions" => Some(Scope::ChannelReadRedemptions),
-        "channel:read:hype_train" => Some(Scope::ChannelReadHypeTrain),
+        "channel:bot" => Some(Scope::ChannelBot),
+        "channel:moderate" => Some(Scope::ChannelModerate),
         "channel:read:goals" => Some(Scope::ChannelReadGoals),
+        "channel:read:hype_train" => Some(Scope::ChannelReadHypeTrain),
         "channel:read:polls" => Some(Scope::ChannelReadPolls),
         "channel:read:predictions" => Some(Scope::ChannelReadPredictions),
+        "channel:read:redemptions" => Some(Scope::ChannelReadRedemptions),
+        "channel:read:subscriptions" => Some(Scope::ChannelReadSubscriptions),
         "channel:read:vips" => Some(Scope::ChannelReadVips),
-        "channel:moderate" => Some(Scope::ChannelModerate),
         "chat:read" => Some(Scope::ChatRead),
+        "moderation:read" => Some(Scope::ModerationRead),
+        "moderator:read:automod_settings" => Some(Scope::ModeratorReadAutomodSettings),
+        "moderator:read:blocked_terms" => Some(Scope::ModeratorReadBlockedTerms),
+        "moderator:read:chat_settings" => Some(Scope::ModeratorReadChatSettings),
+        "moderator:read:chatters" => Some(Scope::ModeratorReadChatters),
+        "moderator:read:followers" => Some(Scope::ModeratorReadFollowers),
+        "moderator:read:guest_star" => Some(Scope::ModeratorReadGuestStar),
+        "moderator:read:shield_mode" => Some(Scope::ModeratorReadShieldMode),
+        "user:read:blocked_users" => Some(Scope::UserReadBlockedUsers),
+        "user:read:broadcast" => Some(Scope::UserReadBroadcast),
+        "user:read:chat" => Some(Scope::UserReadChat),
         "user:read:email" => Some(Scope::UserReadEmail),
         "user:read:follows" => Some(Scope::UserReadFollows),
         "user:read:subscriptions" => Some(Scope::UserReadSubscriptions),
-        "user:read:blocked_users" => Some(Scope::UserReadBlockedUsers),
-        "user:read:broadcast" => Some(Scope::UserReadBroadcast),
-        "moderator:read:followers" => Some(Scope::ModeratorReadFollowers),
-        "moderator:read:blocked_terms" => Some(Scope::ModeratorReadBlockedTerms),
-        "moderator:read:automod_settings" => Some(Scope::ModeratorReadAutomodSettings),
-        "moderator:read:chat_settings" => Some(Scope::ModeratorReadChatSettings),
-        "moderator:read:chatters" => Some(Scope::ModeratorReadChatters),
-        "moderator:read:shield_mode" => Some(Scope::ModeratorReadShieldMode),
-        "moderator:read:guest_star" => Some(Scope::ModeratorReadGuestStar),
-        "moderation:read" => Some(Scope::ModerationRead),
         _ => {
             // Log unknown scope for debugging
             info!("Unknown scope: {}", scope_str);
@@ -345,19 +349,26 @@ impl TwitchAuthManager {
 
     /// Validate a token to get user data
     async fn validate_token(&self, token: twitch_oauth2::AccessToken) -> Result<ValidatedToken> {
-        // Use reqwest directly for validation
+        // Use reqwest directly for validation with detailed response handling
         let http_client = reqwest::Client::new();
 
+        info!("Validating token with Twitch API");
+        
         let response = http_client
             .get("https://id.twitch.tv/oauth2/validate")
             .header("Authorization", format!("OAuth {}", token.secret()))
             .send()
             .await?;
 
+        // Log response status
+        info!("Token validation response status: {}", response.status());
+        
         // Check if request succeeded
         let status = response.status();
         if !status.is_success() {
+            // Clone the response for error text
             let error_text = response.text().await?;
+            error!("Token validation failed with status {}: {}", status, error_text);
             return Err(anyhow!(
                 "Failed to validate token: HTTP {} - {}",
                 status,
@@ -366,8 +377,23 @@ impl TwitchAuthManager {
         }
 
         // Parse the response
-        let validated: ValidatedToken = response.json().await?;
-        Ok(validated)
+        let response_text = response.text().await?;
+        info!("Received valid token response, trying to parse");
+        
+        match serde_json::from_str::<ValidatedToken>(&response_text) {
+            Ok(validated) => {
+                info!(
+                    "Token validated successfully for user {} ({}), expires in {}s",
+                    validated.login, validated.user_id, validated.expires_in
+                );
+                Ok(validated)
+            }
+            Err(e) => {
+                error!("Failed to parse validation response: {}", e);
+                error!("Raw response: {}", response_text);
+                Err(anyhow!("Failed to parse validation response: {}", e))
+            }
+        }
     }
 
     /// Get the current token if authenticated
@@ -399,6 +425,13 @@ impl TwitchAuthManager {
             // Check if token is about to expire (within 15 minutes - increased from 5 minutes for safety)
             // This gives us a wider buffer before the 4 hour expiry
             let should_refresh = token.expires_in().as_secs() < 900;
+            
+            info!(
+                "Current token: expires_in={}s, has_refresh_token={}, should_refresh={}",
+                token.expires_in().as_secs(),
+                token.refresh_token.is_some(),
+                should_refresh
+            );
 
             if should_refresh {
                 info!("Access token expired or about to expire, refreshing");
@@ -412,6 +445,13 @@ impl TwitchAuthManager {
                 match token.refresh_token(&http_client).await {
                     Ok(()) => {
                         info!("Successfully refreshed token");
+
+                        // Log token details (without exposing the actual token)
+                        info!(
+                            "New token details: expires_in={}s, has_refresh_token={}",
+                            token.expires_in().as_secs(),
+                            token.refresh_token.is_some()
+                        );
 
                         // Validate we received a new refresh token (DCF refresh tokens are one-time use)
                         if token.refresh_token.is_none() {
@@ -432,16 +472,42 @@ impl TwitchAuthManager {
                         Ok(())
                     }
                     Err(e) => {
+                        // Enhanced error logging
                         error!("Failed to refresh token: {}", e);
+                        
+                        // Try to extract more details from error
+                        let error_string = e.to_string();
+                        if error_string.contains("invalid_grant") {
+                            error!("Refresh token is invalid or expired (invalid_grant)");
+                            
+                            // This is the 30-day expiry case
+                            warn!("Refresh token appears to be expired (30 day limit). Need to re-authenticate using device code flow.");
+                        } else if error_string.contains("invalid_request") {
+                            error!("Invalid refresh request (invalid_request)");
+                        } else if error_string.contains("HTTP status") {
+                            error!("HTTP error during refresh: {}", error_string);
+                            
+                            // Try to extract more HTTP details if available
+                            if let Some(status_start) = error_string.find("HTTP status") {
+                                if let Some(status_end) = error_string[status_start..].find('\n') {
+                                    let status_line = &error_string[status_start..(status_start + status_end)];
+                                    error!("HTTP status details: {}", status_line);
+                                }
+                            }
+                        }
+                        
+                        // Try to extract the raw response if available
+                        if error_string.contains("response text") {
+                            if let Some(text_start) = error_string.find("response text") {
+                                error!("Response text from failed refresh: {}", 
+                                       &error_string[text_start..]);
+                            }
+                        }
 
                         // Check if the error message suggests the refresh token is expired (30 day limit)
-                        let token_expired = e.to_string().contains("invalid_grant")
-                            || e.to_string().contains("invalid refresh token")
-                            || e.to_string().contains("expired");
-
-                        if token_expired {
-                            warn!("Refresh token appears to be expired (30 day limit). Need to re-authenticate using device code flow.");
-                        }
+                        let token_expired = error_string.contains("invalid_grant")
+                            || error_string.contains("invalid refresh token")
+                            || error_string.contains("expired");
 
                         // Reset auth state
                         *self.auth_state.write().await = AuthState::NotAuthenticated;
@@ -478,6 +544,13 @@ impl TwitchAuthManager {
                     Ok(()) => {
                         info!("Successfully performed proactive token refresh");
 
+                        // Log token details (without exposing the actual token)
+                        info!(
+                            "New token details from proactive refresh: expires_in={}s, has_refresh_token={}",
+                            token.expires_in().as_secs(),
+                            token.refresh_token.is_some()
+                        );
+
                         // Validate we received a new refresh token
                         if token.refresh_token.is_none() {
                             warn!(
@@ -498,6 +571,14 @@ impl TwitchAuthManager {
                     Err(e) => {
                         // This is not as critical since the token was still valid
                         warn!("Failed to perform proactive token refresh: {}", e);
+                        
+                        // Try to extract more details from error
+                        let error_string = e.to_string();
+                        if error_string.contains("invalid_grant") {
+                            warn!("Proactive refresh failed: refresh token is invalid or expired (invalid_grant)");
+                        } else if error_string.contains("invalid_request") {
+                            warn!("Proactive refresh failed: invalid refresh request format");
+                        }
 
                         // Continue using the existing token
                         info!("Continuing with existing valid token");
@@ -506,6 +587,7 @@ impl TwitchAuthManager {
                 }
             }
         } else {
+            error!("Cannot refresh token: not authenticated");
             // Not authenticated
             Err(anyhow!("Not authenticated"))
         }
@@ -517,6 +599,12 @@ impl TwitchAuthManager {
         access_token: String,
         refresh_token: Option<String>,
     ) -> Result<UserToken> {
+        info!(
+            "Attempting to restore from tokens: access_token_len={}, has_refresh_token={}",
+            access_token.len(),
+            refresh_token.is_some()
+        );
+
         // Create access token object
         let access_token_obj = AccessToken::new(access_token);
         let refresh_token_obj = refresh_token.map(RefreshToken::new);
@@ -538,6 +626,8 @@ impl TwitchAuthManager {
                     .iter()
                     .filter_map(|s| parse_scope(s))
                     .collect();
+
+                info!("Validated token has {} scopes", scopes.len());
 
                 // Create UserToken with from_existing_unchecked based on the documentation
                 let token = UserToken::from_existing_unchecked(
@@ -577,11 +667,20 @@ impl TwitchAuthManager {
                         Some(std::time::Duration::from_secs(0)), // already expired
                     );
 
-                    // Use the token's built-in refresh functionality
+                    info!("Created temporary token for refresh, attempting to refresh now");
+
+                    // Use the token's built-in refresh functionality with additional error capture
                     match temporary_token.refresh_token(&http_client).await {
                         Ok(()) => {
                             // Token was refreshed successfully
                             info!("Successfully refreshed token");
+
+                            // Log token details (without exposing the actual token)
+                            info!(
+                                "New token details: expires_in={}s, has_refresh_token={}",
+                                temporary_token.expires_in().as_secs(),
+                                temporary_token.refresh_token.is_some()
+                            );
 
                             // Check if we received a new refresh token (DCF refresh tokens are one-time use)
                             if temporary_token.refresh_token.is_none() {
@@ -601,6 +700,8 @@ impl TwitchAuthManager {
                                 .iter()
                                 .filter_map(|s| parse_scope(s))
                                 .collect();
+
+                            info!("Refreshed token has {} scopes", scopes.len());
 
                             // Create a proper token with the refreshed data
                             let token = UserToken::from_existing_unchecked(
@@ -624,8 +725,26 @@ impl TwitchAuthManager {
                             Ok(token)
                         }
                         Err(refresh_err) => {
-                            // Refresh failed
-                            info!("Token refresh failed: {}", refresh_err);
+                            // Enhanced error logging for refresh failures
+                            error!("Token refresh failed: {}", refresh_err);
+                            
+                            // Try to extract the raw response if available
+                            let error_string = refresh_err.to_string();
+                            if error_string.contains("response text") {
+                                if let Some(text_start) = error_string.find("response text") {
+                                    error!("Response text from failed refresh: {}", 
+                                          &error_string[text_start..]);
+                                }
+                            }
+                            
+                            // Try to determine if it's a 30-day expiry issue
+                            if error_string.contains("invalid_grant") {
+                                error!("Refresh token appears to be expired (30-day limit)");
+                            } else if error_string.contains("invalid_request") {
+                                error!("Invalid refresh request format");
+                            } else if error_string.contains("bad_client") {
+                                error!("Client authentication failed, check client ID");
+                            }
 
                             // Send token expired event
                             if let Err(event_err) = self
@@ -648,7 +767,7 @@ impl TwitchAuthManager {
                     }
                 } else {
                     // No refresh token available
-                    info!("Token validation failed: {}. No refresh token available. Re-authentication required", e);
+                    error!("Token validation failed: {}. No refresh token available. Re-authentication required", e);
 
                     // Send token expired event
                     if let Err(event_err) = self
