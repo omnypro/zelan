@@ -307,17 +307,17 @@ mod tests {
         let manager = RecoveryManager::new();
         let counter = Arc::new(AtomicUsize::new(0));
         
-        let result = manager
+        let result: ZelanResult<usize> = manager
             .with_auto_retry("test_operation", || {
                 let counter_clone = counter.clone();
                 async move {
-                    let current = counter_clone.fetch_add(1, Ordering::SeqCst);
+                    let _current = counter_clone.fetch_add(1, Ordering::SeqCst);
                     
                     // Succeed after 2 attempts
-                    if current < 2 {
+                    if _current < 2 {
                         Err(create_network_error())
                     } else {
-                        Ok(current)
+                        Ok(_current)
                     }
                 }
             })
@@ -330,7 +330,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auto_retry_gives_up_after_max_retries() {
-        let manager = RecoveryManager::new();
+        let _unused_manager = RecoveryManager::new();
         let counter = Arc::new(AtomicUsize::new(0));
         
         // Create a retry policy with only 2 retries
@@ -338,14 +338,22 @@ mod tests {
             2, Duration::from_millis(10), 1.0, None
         );
         
-        // Override the default policy for Network errors
-        manager.default_policies.insert(ErrorCategory::Network, policy);
+        // Create a new manager with custom policies
+        let mut custom_policies = HashMap::new();
+        custom_policies.insert(ErrorCategory::Network, policy);
         
-        let result = manager
+        // Create a new manager with these policies
+        let manager = RecoveryManager {
+            error_registry: Arc::new(ErrorRegistry::new(1000)),
+            circuit_breakers: RwLock::new(HashMap::new()),
+            default_policies: custom_policies,
+        };
+        
+        let result: ZelanResult<usize> = manager
             .with_auto_retry("test_operation", || {
                 let counter_clone = counter.clone();
                 async move {
-                    let current = counter_clone.fetch_add(1, Ordering::SeqCst);
+                    let _current = counter_clone.fetch_add(1, Ordering::SeqCst);
                     
                     // Always fail
                     Err(create_network_error())
@@ -359,14 +367,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_retryable_error_doesnt_retry() {
-        let manager = RecoveryManager::new();
         let counter = Arc::new(AtomicUsize::new(0));
         
-        let result = manager
+        // Create a new manager
+        let manager = RecoveryManager::new();
+        
+        let result: ZelanResult<usize> = manager
             .with_auto_retry("test_operation", || {
                 let counter_clone = counter.clone();
                 async move {
-                    let current = counter_clone.fetch_add(1, Ordering::SeqCst);
+                    let _current = counter_clone.fetch_add(1, Ordering::SeqCst);
                     
                     // Return a non-retryable error
                     Err(create_non_retryable_error())
@@ -390,7 +400,7 @@ mod tests {
         
         // Make 3 calls that should fail and open the circuit
         for _ in 0..3 {
-            let result = breaker
+            let result: ZelanResult<usize> = breaker
                 .execute(|| {
                     let counter_clone = counter.clone();
                     async move {
@@ -437,25 +447,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_combined_protection() {
-        let manager = RecoveryManager::new();
+        let _manager = RecoveryManager::new();
         let counter = Arc::new(AtomicUsize::new(0));
         
-        // Override policies to use smaller values for testing
-        manager.default_policies.insert(
-            ErrorCategory::Network,
-            RetryPolicy::exponential_backoff(2, Duration::from_millis(10), 1.0, None),
+        // Create a new manager with custom policies
+        let mut custom_policies = HashMap::new();
+        custom_policies.insert(
+            ErrorCategory::Network, 
+            RetryPolicy::exponential_backoff(2, Duration::from_millis(10), 1.0, None)
         );
+        
+        // Create a new manager with these policies
+        let manager = RecoveryManager {
+            error_registry: Arc::new(ErrorRegistry::new(1000)),
+            circuit_breakers: RwLock::new(HashMap::new()),
+            default_policies: custom_policies,
+        };
         
         // Create a circuit breaker with a higher threshold than our retry count
         let _ = manager
             .create_circuit_breaker("test_combined", 5, Duration::from_secs(1))
             .await;
         
-        let result = manager
+        let result: ZelanResult<usize> = manager
             .with_protection("test_combined", || {
                 let counter_clone = counter.clone();
                 async move {
-                    let current = counter_clone.fetch_add(1, Ordering::SeqCst);
+                    let _current = counter_clone.fetch_add(1, Ordering::SeqCst);
                     
                     // Always fail with a retryable error
                     Err(create_network_error())
@@ -468,11 +486,11 @@ mod tests {
         
         // Make enough calls to open the circuit
         for _ in 0..2 {
-            let _ = manager
+            let _: ZelanResult<usize> = manager
                 .with_protection("test_combined", || {
                     let counter_clone = counter.clone();
                     async move {
-                        let current = counter_clone.fetch_add(1, Ordering::SeqCst);
+                        let _current = counter_clone.fetch_add(1, Ordering::SeqCst);
                         Err(create_network_error())
                     }
                 })

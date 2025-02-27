@@ -419,3 +419,120 @@ impl TwitchAuthManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthEvent, TwitchAuthManager};
+    use anyhow::Result;
+    use std::env;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use twitch_oauth2::id::DeviceCodeResponse;
+
+    // Mock the environment variable
+    fn mock_env_var() {
+        env::set_var("TWITCH_CLIENT_ID", "test_client_id");
+    }
+
+    // Unmock the environment variable
+    fn unmock_env_var() {
+        env::remove_var("TWITCH_CLIENT_ID");
+    }
+
+    // Mock struct to capture auth events
+    struct AuthEventCapture {
+        events: Arc<Mutex<Vec<AuthEvent>>>,
+    }
+
+    impl AuthEventCapture {
+        fn new() -> Self {
+            Self {
+                events: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn callback(&self) -> impl Fn(AuthEvent) -> Result<()> {
+            let events = self.events.clone();
+            move |event| {
+                let mut events = events.lock().unwrap();
+                events.push(event);
+                Ok(())
+            }
+        }
+
+        fn get_events(&self) -> Vec<AuthEvent> {
+            let events = self.events.lock().unwrap();
+            events.clone()
+        }
+    }
+
+    // Helper to create a mock device code response
+    fn create_mock_device_code() -> DeviceCodeResponse {
+        DeviceCodeResponse {
+            device_code: "test_device_code".to_string(),
+            expires_in: 1800,
+            interval: 5,
+            user_code: "TEST123".to_string(),
+            verification_uri: "https://twitch.tv/activate".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_device_auth_state() {
+        // Setup auth manager
+        let mut auth_manager = TwitchAuthManager::new("test_client_id".to_string());
+        
+        // Initially not authenticated
+        assert!(!auth_manager.is_authenticated().await);
+        assert!(!auth_manager.is_pending_device_auth().await);
+        
+        // Set device code and verify state change
+        let device_code = create_mock_device_code();
+        auth_manager.set_device_code(device_code.clone()).unwrap();
+        
+        // Now in pending state
+        assert!(!auth_manager.is_authenticated().await);
+        assert!(auth_manager.is_pending_device_auth().await);
+        
+        // Reset auth state
+        auth_manager.reset_auth_state().unwrap();
+        
+        // Back to not authenticated
+        assert!(!auth_manager.is_authenticated().await);
+        assert!(!auth_manager.is_pending_device_auth().await);
+    }
+
+    #[tokio::test]
+    async fn test_restore_token_error_handling() {
+        // Mock the environment variable
+        mock_env_var();
+        
+        // Setup auth manager
+        let auth_manager = TwitchAuthManager::new("test_client_id".to_string());
+        
+        // Tokens to restore
+        let access_token = "test_access_token".to_string();
+        let refresh_token = Some("test_refresh_token".to_string());
+        
+        // For now, this will fail because we can't mock the HTTP client
+        // but we can test that the correct error is returned
+        let result = auth_manager.restore_from_saved_tokens(access_token, refresh_token).await;
+        
+        // The actual validation requires an HTTP call, which we can't mock yet
+        // For now, just check that the error is returned
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("validation failed"));
+        
+        // Cleanup
+        unmock_env_var();
+    }
+
+    // Future tests:
+    // These tests require a more sophisticated mock strategy for HTTP requests:
+    // - Test token authentication success (using UserToken mock)
+    // - Test the complete device code flow with mocked responses
+    // - Test token refresh with mocked responses
+    // - Test error handling for various auth errors (expired tokens, etc)
+    // - Test recovery from network failures
+    // - Test token validation with mocked responses
+}
