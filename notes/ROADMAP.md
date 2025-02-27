@@ -20,12 +20,12 @@ We've made significant progress on token management improvements:
   - Added proper error handling and validation
   - Improved error reporting during recovery
 
-Work still needed:
+- ✅ **Token Refresh Tests**
+  - Created tests for the token refresh flow
+  - Tested handling of expired tokens
+  - Mocked HTTP responses for various authentication scenarios
 
-- **Token Refresh Tests**
-  - Create tests for the token refresh flow
-  - Test handling of expired tokens
-  - Mock HTTP responses for various authentication scenarios
+Work still needed:
   
 - **EventSub Activation**
   - TODO: Once we authenticate, we should immediately activate EventSub
