@@ -1301,3 +1301,472 @@ fn get_adapter_compatible(name: &str) -> ZelanResult<Adapter> {
 }
 ```
 */
+
+/// Simple circuit breaker for our custom implementation 
+#[derive(Clone, Debug)]
+pub struct SimpleCircuitBreaker {
+    /// Name of the circuit breaker
+    name: String,
+    /// Maximum number of failures before opening the circuit
+    failure_threshold: u32,
+    /// Time to wait before attempting to close the circuit
+    reset_timeout: Duration,
+    /// Whether the circuit is currently open 
+    is_open: Arc<AtomicBool>,
+    /// Current failure count
+    failure_count: Arc<AtomicUsize>,
+    /// Time when the circuit was opened
+    open_time: Arc<RwLock<Option<Instant>>>,
+    /// Error registry for tracking errors
+    error_registry: Option<Arc<ErrorRegistry>>,
+}
+
+impl SimpleCircuitBreaker {
+    /// Create a new circuit breaker
+    pub fn new(name: &str, failure_threshold: u32, reset_timeout: Duration) -> Self {
+        Self {
+            name: name.to_string(),
+            failure_threshold,
+            reset_timeout,
+            is_open: Arc::new(AtomicBool::new(false)),
+            failure_count: Arc::new(AtomicUsize::new(0)),
+            open_time: Arc::new(RwLock::new(None)),
+            error_registry: None,
+        }
+    }
+    
+    /// Set the error registry
+    pub fn with_error_registry(mut self, registry: Arc<ErrorRegistry>) -> Self {
+        self.error_registry = Some(registry);
+        self
+    }
+    
+    /// Check if the circuit is open, reset if timeout has passed
+    pub async fn is_open(&self) -> bool {
+        let is_open = self.is_open.load(Ordering::Acquire);
+        
+        // If the circuit is open, check if we've waited long enough to try again
+        if is_open {
+            let open_time = self.open_time.read().await;
+            if let Some(opened_at) = *open_time {
+                if opened_at.elapsed() >= self.reset_timeout {
+                    // Reset to half-open state
+                    self.is_open.store(false, Ordering::Release);
+                    // We don't reset failure count immediately to implement half-open state
+                    debug!(
+                        name = self.name,
+                        reset_timeout_ms = self.reset_timeout.as_millis(),
+                        "Circuit breaker reset attempt"
+                    );
+                    return false;
+                }
+            }
+        }
+        
+        is_open
+    }
+    
+    /// Record a success, resetting the failure count
+    pub async fn record_success(&self) {
+        self.failure_count.store(0, Ordering::Release);
+        self.is_open.store(false, Ordering::Release);
+        *self.open_time.write().await = None;
+    }
+    
+    /// Record a failure, potentially opening the circuit
+    pub async fn record_failure(&self, error: &ZelanError) -> ZelanError {
+        // Register the error if an error registry is provided
+        let registered_error = if let Some(registry) = &self.error_registry {
+            registry.register(error.clone(), Some(&self.name)).await
+        } else {
+            error.clone()
+        };
+        
+        // Atomically increment the failure count
+        let count = self.failure_count.fetch_add(1, Ordering::AcqRel) + 1;
+        
+        // Open the circuit if we've reached the threshold
+        if count >= self.failure_threshold as usize {
+            self.is_open.store(true, Ordering::Release);
+            *self.open_time.write().await = Some(Instant::now());
+            
+            // Log at appropriate level based on error severity
+            match registered_error.severity {
+                ErrorSeverity::Critical => {
+                    error!(
+                        name = self.name,
+                        failure_count = count,
+                        threshold = self.failure_threshold,
+                        reset_timeout_ms = self.reset_timeout.as_millis(),
+                        "Circuit breaker opened due to critical failures"
+                    );
+                }
+                ErrorSeverity::Error => {
+                    warn!(
+                        name = self.name,
+                        failure_count = count,
+                        threshold = self.failure_threshold,
+                        reset_timeout_ms = self.reset_timeout.as_millis(),
+                        "Circuit breaker opened due to repeated errors"
+                    );
+                }
+                _ => {
+                    info!(
+                        name = self.name,
+                        failure_count = count,
+                        threshold = self.failure_threshold,
+                        reset_timeout_ms = self.reset_timeout.as_millis(),
+                        "Circuit breaker opened"
+                    );
+                }
+            }
+        }
+        
+        registered_error
+    }
+    
+    /// Execute a function with circuit breaker protection
+    pub async fn execute<F, Fut, T>(&self, f: F) -> ZelanResult<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ZelanResult<T>>,
+    {
+        // Check if circuit is open
+        if self.is_open().await {
+            return Err(ZelanError::new(ErrorCode::Internal)
+                .message(format!("Circuit breaker '{}' is open", self.name))
+                .context("Too many failures")
+                .severity(ErrorSeverity::Warning)
+                .category(ErrorCategory::ServiceUnavailable)
+                .build());
+        }
+        
+        // Execute the function
+        match f().await {
+            Ok(result) => {
+                self.record_success().await;
+                Ok(result)
+            }
+            Err(err) => {
+                // Record the failure and return the error
+                let registered_err = self.record_failure(&err).await;
+                Err(registered_err)
+            }
+        }
+    }
+    
+    /// Execute a function with retry and circuit breaker protection
+    pub async fn execute_with_retry<F, Fut, T>(&self, operation_name: &str, retry_policy: &RetryPolicy, f: F) -> ZelanResult<T>
+    where
+        F: Fn() -> Fut + Send + Sync + Clone,
+        Fut: std::future::Future<Output = ZelanResult<T>> + Send,
+    {
+        let f_clone = f.clone();
+        
+        // Use the circuit breaker to protect the retry logic
+        self.execute(|| async move {
+            with_retry(operation_name, retry_policy, f_clone).await
+        }).await
+    }
+}
+
+/// Simplified recovery manager using our own circuit breaker
+#[derive(Clone)]
+pub struct SimpleRecoveryManager {
+    /// Error registry for tracking errors
+    error_registry: Arc<ErrorRegistry>,
+    /// Circuit breakers for different operations
+    circuit_breakers: Arc<RwLock<HashMap<String, SimpleCircuitBreaker>>>,
+    /// Default retry policies for different error categories
+    default_policies: Arc<HashMap<ErrorCategory, RetryPolicy>>,
+}
+
+impl SimpleRecoveryManager {
+    /// Create a new recovery manager with default settings
+    pub fn new() -> Self {
+        let error_registry = Arc::new(ErrorRegistry::new(1000));
+        
+        // Set up default retry policies
+        let mut default_policies = HashMap::new();
+        default_policies.insert(
+            ErrorCategory::Network,
+            RetryPolicy::exponential_backoff(
+                5,
+                Duration::from_millis(500),
+                2.0,
+                Some(Duration::from_secs(30)),
+            ),
+        );
+        default_policies.insert(
+            ErrorCategory::Authentication,
+            RetryPolicy::fixed_delay(2, Duration::from_secs(2)),
+        );
+        default_policies.insert(
+            ErrorCategory::RateLimit,
+            RetryPolicy::exponential_backoff(
+                3,
+                Duration::from_secs(1),
+                2.0,
+                Some(Duration::from_secs(60)),
+            ),
+        );
+        default_policies.insert(
+            ErrorCategory::ServiceUnavailable,
+            RetryPolicy::exponential_backoff(
+                5,
+                Duration::from_secs(5),
+                2.0,
+                Some(Duration::from_secs(120)),
+            ),
+        );
+
+        Self {
+            error_registry,
+            circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
+            default_policies: Arc::new(default_policies),
+        }
+    }
+
+    /// Get the error registry
+    pub fn error_registry(&self) -> Arc<ErrorRegistry> {
+        self.error_registry.clone()
+    }
+
+    /// Register an error with the registry
+    pub async fn register_error(&self, error: ZelanError, source: Option<&str>) -> ZelanError {
+        self.error_registry.register(error, source).await
+    }
+
+    /// Get or create a circuit breaker for a specific operation
+    pub async fn get_circuit_breaker(&self, name: &str) -> SimpleCircuitBreaker {
+        let mut breakers = self.circuit_breakers.write().await;
+        
+        if let Some(breaker) = breakers.get(name) {
+            return breaker.clone();
+        }
+        
+        // Create a new circuit breaker with default settings
+        let breaker = SimpleCircuitBreaker::new(name, 5, Duration::from_secs(60))
+            .with_error_registry(self.error_registry.clone());
+        
+        breakers.insert(name.to_string(), breaker.clone());
+        breaker
+    }
+
+    /// Create a circuit breaker with custom settings
+    pub async fn create_circuit_breaker(
+        &self,
+        name: &str,
+        failure_threshold: u32,
+        reset_timeout: Duration,
+    ) -> SimpleCircuitBreaker {
+        let breaker = SimpleCircuitBreaker::new(name, failure_threshold, reset_timeout)
+            .with_error_registry(self.error_registry.clone());
+        
+        let mut breakers = self.circuit_breakers.write().await;
+        breakers.insert(name.to_string(), breaker.clone());
+        
+        breaker
+    }
+
+    /// Get the default retry policy for an error category
+    pub fn get_default_policy(&self, category: ErrorCategory) -> RetryPolicy {
+        self.default_policies
+            .get(&category)
+            .cloned()
+            .unwrap_or_else(|| category.default_retry_policy())
+    }
+
+    /// Execute a function with automatic retry based on error category
+    pub async fn with_auto_retry<F, Fut, T>(
+        &self,
+        operation_name: &str,
+        f: F,
+    ) -> ZelanResult<T>
+    where
+        F: Fn() -> Fut + Send + Sync,
+        Fut: std::future::Future<Output = ZelanResult<T>> + Send,
+    {
+        // First attempt without retry to get the error category
+        match f().await {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                // Register the error
+                let registered_err = self.error_registry.register(err, Some(operation_name)).await;
+                
+                // Determine retry policy based on error category
+                if let Some(category) = registered_err.category {
+                    if category.is_retryable() {
+                        let policy = self.get_default_policy(category);
+                        
+                        // If retryable, use the policy to retry
+                        debug!(
+                            operation = operation_name,
+                            category = ?category,
+                            max_retries = policy.max_retries,
+                            "Using automatic retry for operation"
+                        );
+                        
+                        return with_retry(operation_name, &policy, f).await;
+                    }
+                }
+                
+                // Not retryable or no category
+                Err(registered_err)
+            }
+        }
+    }
+
+    /// Execute a function with circuit breaker protection
+    pub async fn with_circuit_breaker<F, Fut, T>(
+        &self,
+        operation_name: &str,
+        f: F,
+    ) -> ZelanResult<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ZelanResult<T>>,
+    {
+        let breaker = self.get_circuit_breaker(operation_name).await;
+        breaker.execute(f).await
+    }
+
+    /// Execute a function with both circuit breaker and retry
+    pub async fn with_protection<F, Fut, T>(
+        &self,
+        operation_name: &str,
+        f: F,
+    ) -> ZelanResult<T>
+    where
+        F: Fn() -> Fut + Send + Sync + Clone,
+        Fut: std::future::Future<Output = ZelanResult<T>> + Send,
+    {
+        let breaker = self.get_circuit_breaker(operation_name).await;
+        let f_clone = f.clone();
+        
+        // First attempt to get the error category for retries
+        match f().await {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                // Register the error
+                let registered_err = self.error_registry.register(err, Some(operation_name)).await;
+                
+                // Determine retry policy based on error category
+                if let Some(category) = registered_err.category {
+                    if category.is_retryable() {
+                        let policy = self.get_default_policy(category);
+                        
+                        // If retryable, use the policy to retry with circuit breaker
+                        debug!(
+                            operation = operation_name,
+                            category = ?category,
+                            max_retries = policy.max_retries,
+                            "Using automatic retry with circuit breaker for operation"
+                        );
+                        
+                        return breaker.execute_with_retry(operation_name, &policy, f_clone).await;
+                    }
+                }
+                
+                // Not retryable or no category
+                Err(registered_err)
+            }
+        }
+    }
+}
+
+/// Simplified adapter recovery trait
+pub trait SimpleAdapterRecovery {
+    /// Get the recovery manager
+    fn recovery_manager(&self) -> Arc<SimpleRecoveryManager>;
+    
+    /// Get the adapter name for error registration
+    fn adapter_name(&self) -> &str;
+    
+    /// Execute an adapter operation with protection
+    #[allow(async_fn_in_trait)]
+    async fn protected_operation<F, Fut, T>(&self, operation_name: &str, f: F) -> ZelanResult<T>
+    where
+        F: Fn() -> Fut + Send + Sync + Clone,
+        Fut: std::future::Future<Output = ZelanResult<T>> + Send,
+    {
+        // Create the full operation name with adapter prefix
+        let full_operation = format!("{}.{}", self.adapter_name(), operation_name);
+        
+        // Use the recovery manager to execute with protection
+        self.recovery_manager().with_protection(&full_operation, f).await
+    }
+    
+    /// Register an adapter-specific error
+    #[allow(async_fn_in_trait)]
+    async fn register_error(&self, error: ZelanError) -> ZelanError {
+        let adapter_name = self.adapter_name();
+        self.recovery_manager().register_error(error, Some(adapter_name)).await
+    }
+}
+
+/*
+Example of using the simplified circuit breaker and recovery system:
+
+```rust
+use std::sync::Arc;
+
+// Define an adapter that implements the SimpleAdapterRecovery trait
+struct MyAdapter {
+    name: String,
+    recovery_manager: Arc<SimpleRecoveryManager>,
+}
+
+impl MyAdapter {
+    fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            recovery_manager: Arc::new(SimpleRecoveryManager::new()),
+        }
+    }
+    
+    // Example API call with retry and circuit breaker protection
+    async fn get_data(&self, id: &str) -> ZelanResult<String> {
+        self.protected_operation("get_data", || async {
+            // Simulated API call that might fail
+            self.api_request(id).await
+        }).await
+    }
+    
+    // Low-level API function that might fail
+    async fn api_request(&self, id: &str) -> ZelanResult<String> {
+        // Simulate occasional failures
+        if id == "error" {
+            return Err(ZelanError::new(ErrorCode::NetworkTimeout)
+                      .message("Network timeout")
+                      .context("API request")
+                      .category(ErrorCategory::Network)
+                      .build());
+        }
+        
+        Ok(format!("Data for {}", id))
+    }
+}
+
+impl SimpleAdapterRecovery for MyAdapter {
+    fn recovery_manager(&self) -> Arc<SimpleRecoveryManager> {
+        self.recovery_manager.clone()
+    }
+    
+    fn adapter_name(&self) -> &str {
+        &self.name
+    }
+}
+
+// Usage example
+async fn main() {
+    let adapter = MyAdapter::new("example");
+    
+    // Will automatically retry on network errors and use circuit breaker
+    match adapter.get_data("12345").await {
+        Ok(data) => println!("Got data: {}", data),
+        Err(err) => println!("Error: {}", err),
+    }
+}
+```
+*/
