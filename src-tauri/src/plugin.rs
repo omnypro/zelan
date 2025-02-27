@@ -282,10 +282,8 @@ impl ZelanState {
         let token_manager = self.token_manager.clone();
 
         // Set the app handle on the token manager
-        {
-            let mut tm = token_manager.as_ref().clone();
-            tm.set_app(app.clone());
-        }
+        // Since set_app is now async and takes &self, we can call it directly on the Arc
+        token_manager.set_app(app.clone()).await;
 
         // Pass the app handle to the initialization task
         let app_handle = app.clone();

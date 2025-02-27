@@ -201,6 +201,17 @@ pub mod mock {
             Ok(())
         }
 
+        /// Update an existing mock response with a different message
+        pub fn update_mock_response(
+            &mut self,
+            url: impl Into<String>,
+            status: u16,
+            body: impl Into<String>,
+        ) {
+            let response = SimpleHttpResponse::new(status, body);
+            self.responses.lock().unwrap().insert(url.into(), response);
+        }
+
         /// Mock a successful JSON response (status 200)
         pub fn mock_success_json<T: serde::Serialize>(
             &mut self,

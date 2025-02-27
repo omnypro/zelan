@@ -49,6 +49,43 @@ impl TokenData {
         self.expires_at = Some(expires_at);
     }
 
+    /// Set the token metadata value
+    pub fn set_metadata_value(&mut self, key: &str, value: Value) {
+        self.metadata.insert(key.to_string(), value);
+    }
+
+    /// Get a metadata value
+    pub fn get_metadata_value(&self, key: &str) -> Option<&Value> {
+        self.metadata.get(key)
+    }
+
+    /// Track refresh token creation time to monitor 30-day expiry
+    pub fn track_refresh_token_created(&mut self) {
+        let now = chrono::Utc::now();
+        self.set_metadata_value(
+            "refresh_token_created_at",
+            serde_json::Value::String(now.to_rfc3339()),
+        );
+    }
+
+    /// Check if refresh token is approaching 30-day expiry limit
+    pub fn refresh_token_expires_soon(&self, within_days: u64) -> bool {
+        if let Some(created_str) = self.get_metadata_value("refresh_token_created_at") {
+            if let Some(created_str) = created_str.as_str() {
+                if let Ok(created) = chrono::DateTime::parse_from_rfc3339(created_str) {
+                    let created_utc = created.with_timezone(&chrono::Utc);
+                    let now = chrono::Utc::now();
+                    let age = now - created_utc;
+
+                    // Check if token is within the specified days of reaching 30-day expiry
+                    let days_until_expiry = 30 - age.num_days();
+                    return days_until_expiry < within_days as i64;
+                }
+            }
+        }
+        false
+    }
+
     /// Check if the token will expire soon (within the given seconds)
     pub fn expires_soon(&self, within_seconds: u64) -> bool {
         match self.expires_at {
@@ -65,7 +102,7 @@ impl TokenData {
 /// Token Manager for handling authentication tokens securely
 pub struct TokenManager {
     /// Application handle for accessing secure storage
-    app: Option<AppHandle>,
+    app: Arc<RwLock<Option<AppHandle>>>,
     /// In-memory token cache
     tokens: Arc<RwLock<HashMap<String, TokenData>>>,
 }
@@ -74,7 +111,7 @@ impl TokenManager {
     /// Create a new token manager instance
     pub fn new() -> Self {
         Self {
-            app: None,
+            app: Arc::new(RwLock::new(None)),
             tokens: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -82,14 +119,16 @@ impl TokenManager {
     /// Initialize with an app handle for secure storage access
     pub fn with_app(app: AppHandle) -> Self {
         Self {
-            app: Some(app),
+            app: Arc::new(RwLock::new(Some(app))),
             tokens: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Set the app handle after initialization
-    pub fn set_app(&mut self, app: AppHandle) {
-        self.app = Some(app);
+    /// Now this can be used with an immutable reference
+    pub async fn set_app(&self, app: AppHandle) {
+        let mut app_guard = self.app.write().await;
+        *app_guard = Some(app);
     }
 
     /// Store tokens for a specific adapter
@@ -101,7 +140,8 @@ impl TokenManager {
         }
 
         // Update secure storage if app is available
-        if let Some(app) = &self.app {
+        let app_guard = self.app.read().await;
+        if let Some(app) = &*app_guard {
             self.store_tokens_secure(app, adapter_name, &tokens).await?;
         } else {
             warn!(
@@ -163,7 +203,8 @@ impl TokenManager {
         }
 
         // Try to load from secure storage if app is available
-        if let Some(app) = &self.app {
+        let app_guard = self.app.read().await;
+        if let Some(app) = &*app_guard {
             if let Some(tokens) = self.retrieve_tokens_secure(app, adapter_name).await? {
                 // Update cache with retrieved tokens
                 let mut token_map = self.tokens.write().await;
@@ -270,7 +311,8 @@ impl TokenManager {
         }
 
         // Remove from secure storage if app is available
-        if let Some(app) = &self.app {
+        let app_guard = self.app.read().await;
+        if let Some(app) = &*app_guard {
             self.remove_tokens_secure(app, adapter_name).await?;
         }
 
@@ -346,6 +388,14 @@ impl TokenManager {
             _ => false,
         }
     }
+
+    /// Check if refresh tokens are approaching their 30-day expiry for an adapter
+    pub async fn refresh_tokens_expire_soon(&self, adapter_name: &str, within_days: u64) -> bool {
+        match self.get_tokens(adapter_name).await {
+            Ok(Some(tokens)) => tokens.refresh_token_expires_soon(within_days),
+            _ => false,
+        }
+    }
 }
 
 impl Default for TokenManager {
@@ -359,7 +409,7 @@ impl Default for TokenManager {
 impl Clone for TokenManager {
     fn clone(&self) -> Self {
         Self {
-            app: self.app.clone(),
+            app: Arc::clone(&self.app),
             tokens: Arc::clone(&self.tokens),
         }
     }
