@@ -556,7 +556,7 @@ impl ZelanState {
                 // Set token manager on the adapter - IMPORTANT: This must happen before registering
                 // to ensure the token manager is available when connect() is called
                 info!("Setting TokenManager on Twitch adapter");
-                twitch_adapter.set_token_manager(Arc::clone(&token_manager));
+                twitch_adapter.set_token_manager(Arc::clone(&service_guard.token_manager));
                 
                 // Set recovery manager
                 info!("Setting RecoveryManager on Twitch adapter");
@@ -574,7 +574,7 @@ impl ZelanState {
                 // Set token manager on the adapter - IMPORTANT: This must happen before registering
                 // to ensure the token manager is available when connect() is called
                 info!("Setting TokenManager on Twitch adapter");
-                twitch_adapter.set_token_manager(Arc::clone(&token_manager));
+                twitch_adapter.set_token_manager(Arc::clone(&service_guard.token_manager));
                 
                 // Set recovery manager
                 info!("Setting RecoveryManager on Twitch adapter");
