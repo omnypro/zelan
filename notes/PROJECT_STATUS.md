@@ -61,9 +61,37 @@ This document provides a high-level overview of the current project status, incl
 ### Authentication Testing
 - Basic state transition tests implemented
 - Token restoration error handling tests added
+- Added tests for token validation and expiration
+- Implemented tests for 30-day refresh token expiry
 - Need tests for token refresh flow
 - Need tests for error recovery paths
-- Need tests for edge cases and timing-sensitive code
+
+### Token Management Improvements
+- Added retry mechanisms with exponential backoff
+- Implemented token recovery validation
+- Created a unified token recovery method
+- Enhanced error handling and reporting
+
+### Integration Testing
+- Created integration test framework with TestEnvironment and TestSubscriber
+- Implemented EventBus integration tests 
+- Added adapter lifecycle tests
+- Created test utilities for event verification
+- Implemented WebSocket server test framework
+- Added comprehensive WebSocket server tests:
+  - Basic connectivity and event reception
+  - Multiple client support
+  - Ping/pong functionality
+  - Client reconnection handling
+  - High-throughput event streaming
+  - Server shutdown with connected clients
+- Enhanced WebSocket test framework:
+  - Added robust timeout handling to prevent test hangs
+  - Implemented test-specific port allocation for parallel testing
+  - Created cleanup mechanisms with error handling
+  - Added detailed logging for debugging
+  - Implemented state verification and synchronization
+  - Ensured all tests run reliably in CI environments
 
 ### Backend Simplifications
 - Implementing error builder pattern
@@ -79,13 +107,14 @@ This document provides a high-level overview of the current project status, incl
    - Add edge case tests
 
 2. **Finish Backend Simplifications**
-   - Simplify token recovery logic
    - Consolidate retry logic
    - Improve error context
+   - Implement error classification
 
-3. **Add Integration Testing**
-   - Create tests for error handling
-   - Test adapter lifecycle
-   - Test event bus propagation
+3. **Complete Integration Testing Suite**
+   - Create authentication integration tests
+   - Add error handling tests
+   - Develop example WebSocket clients for documentation
+   - Add performance benchmarks for event throughput
 
 See [ROADMAP.md](./ROADMAP.md) for more details on future development plans.

@@ -6,12 +6,25 @@ This document outlines the development roadmap for the Zelan project in priority
 
 ### 1. Complete Authentication Testing
 
-The most critical next step is to complete the test coverage for our authentication system:
+We've made significant progress on token management improvements:
+
+- ✅ **TokenManager Improvements**
+  - Added tests for token expiration validation
+  - Implemented tests for 30-day refresh token expiry logic
+  - Added better error handling for token metadata parsing
+  - Improved token restoration validation
+
+- ✅ **Token Recovery Logic**
+  - Created a unified `recover_tokens_with_validation` method
+  - Implemented retry mechanisms with exponential backoff
+  - Added proper error handling and validation
+  - Improved error reporting during recovery
+
+Work still needed:
 
 - **Token Refresh Tests**
   - Create tests for the token refresh flow
   - Test handling of expired tokens
-  - Test the 30-day refresh token expiry logic
   - Mock HTTP responses for various authentication scenarios
 
 - **Error Recovery Tests**
@@ -28,11 +41,6 @@ The most critical next step is to complete the test coverage for our authenticat
 
 Several backend improvements are still needed:
 
-- **Token Recovery Logic**
-  - Simplify token recovery into a single method
-  - Improve error handling for auth failures
-  - Streamline the token refresh workflow
-
 - **Consolidate Retry Logic**
   - Evaluate using tokio-retry for retry implementation
   - Create a unified approach to retries
@@ -45,17 +53,45 @@ Several backend improvements are still needed:
 
 ### 3. Integration Testing
 
-Once the authentication testing and backend simplifications are complete:
+We've started implementing an integration testing framework focused on the EventBus and adapter lifecycle. The current implementation includes:
+
+- ✅ **Integration Test Framework**
+  - Created a test harness with TestEnvironment and TestSubscriber
+  - Implemented utilities for testing event propagation
+  - Added test helpers for common operations
+
+- ✅ **EventBus Integration Tests**
+  - Implemented tests for basic event flow
+  - Added tests for multiple subscribers
+  - Created tests for custom events and overflow conditions
+  
+- ✅ **Adapter Lifecycle Tests**
+  - Tested adapter connect/disconnect lifecycle
+  - Implemented tests for dynamic reconfiguration
+  - Added tests for multiple adapter coordination
+
+Work still needed:
+
+- **Authentication Integration Tests**
+  - Create tests for complete authentication workflows
+  - Test token refresh and recovery in integration scenarios
+  - Test error recovery across adapter boundaries
+
+- ✅ **WebSocket Server Tests**
+  - Implemented WebSocket client and server test harness
+  - Added tests for connection and event forwarding
+  - Created tests for client reconnection scenarios
+  - Implemented high-throughput tests for stress conditions
+  - Added tests for server shutdown with connected clients
+  - Improved test reliability with timeouts and error handling
+  - Resolved state synchronization issues between tests
+  - Added ping/pong protocol verification
+  - Implemented concurrent connection testing
 
 - **Add Unit Tests for Error Handling**
   - Test error classification system
   - Test retry policies with different error types
   - Test circuit breaker pattern implementation
-
-- **Create Integration Tests**
-  - Test the complete adapter lifecycle
-  - Test event bus propagation
-  - Test WebSocket server functionality
 
 - **Documentation and Examples**
   - Update code comments and documentation
