@@ -157,90 +157,7 @@ pub struct EventSubClient {
     user_id: Arc<RwLock<Option<String>>>,
 }
 
-// Helper function to parse chat message event into our standardized format
-fn parse_chat_message(event_json: &Value, timestamp: &str) -> Option<Value> {
-    // Extract the relevant fields from the EventSub payload
-    // These field names are based on the Twitch EventSub documentation for channel.chat.message
-    
-    let msg_id = event_json.get("message_id")?.as_str()?;
-    let channel_id = event_json.get("broadcaster_user_id")?.as_str()?;
-    let channel_name = event_json.get("broadcaster_user_login")?.as_str()?;
-    let user_id = event_json.get("chatter_user_id")?.as_str()?;
-    let user_name = event_json.get("chatter_user_login")?.as_str()?;
-    let user_display_name = event_json.get("chatter_user_name")?.as_str()?;
-    let message_text = event_json.get("message")?.get("text")?.as_str()?;
-    
-    // Extract badge info if available
-    let badges = event_json
-        .get("message")
-        .and_then(|m| m.get("badges"))
-        .and_then(|b| b.as_array())
-        .map(|badges_array| {
-            badges_array
-                .iter()
-                .filter_map(|badge| {
-                    badge.get("set_id").and_then(|id| id.as_str()).map(|id| id.to_string())
-                })
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
-    
-    // Extract emote info if available
-    let emotes = event_json
-        .get("message")
-        .and_then(|m| m.get("emotes"))
-        .and_then(|e| e.as_array())
-        .map(|emotes_array| {
-            emotes_array
-                .iter()
-                .filter_map(|emote| {
-                    let id = emote.get("id").and_then(|id| id.as_str())?;
-                    let start = emote.get("begin").and_then(|b| b.as_u64())?;
-                    let end = emote.get("end").and_then(|e| e.as_u64())?;
-                    
-                    Some(json!({
-                        "id": id,
-                        "start": start,
-                        "end": end
-                    }))
-                })
-                .collect::<Vec<Value>>()
-        })
-        .unwrap_or_default();
-    
-    // Check if the message is a command (starts with !)
-    let is_command = message_text.starts_with('!');
-    
-    // Check if message is an action (/me)
-    let is_action = message_text.starts_with("\u{0001}ACTION ") && message_text.ends_with("\u{0001}");
-    
-    // Extract bits if present
-    let bits = event_json
-        .get("message")
-        .and_then(|m| m.get("bits"))
-        .and_then(|b| b.as_u64());
-    
-    // Construct our standardized payload
-    Some(json!({
-        "channel": channel_name,
-        "channel_id": channel_id,
-        "user": {
-            "id": user_id,
-            "name": user_name,
-            "display_name": user_display_name,
-            "badges": badges
-        },
-        "message": {
-            "id": msg_id,
-            "text": message_text,
-            "emotes": emotes,
-            "is_command": is_command,
-            "is_action": is_action,
-            "bits": bits,
-            "timestamp": timestamp
-        }
-    }))
-}
+// We're no longer parsing chat messages and just passing through the raw data
 
 impl EventSubClient {
     /// Create a new EventSub client
@@ -752,15 +669,11 @@ impl EventSubClient {
                                                             })
                                                         }
                                                         "chat.message" => {
-                                                            // Extract chat message details from event
-                                                            let timestamp = chrono::Utc::now().to_rfc3339();
-                                                            match parse_chat_message(&event_json, &timestamp) {
-                                                                Some(chat_payload) => chat_payload,
-                                                                None => {
-                                                                    warn!("Failed to parse chat message");
-                                                                    continue;
-                                                                }
-                                                            }
+                                                            // Pass through raw event data without parsing
+                                                            json!({
+                                                                "message": event_json,
+                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                                            })
                                                         }
                                                         _ => json!({}),
                                                     };
