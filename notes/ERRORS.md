@@ -77,6 +77,8 @@ For effective authentication debugging:
    - ✅ `MockHttpClient` for testing with predetermined responses
    - ✅ Request history tracking for verification in tests
    - ✅ JSON response mocking capabilities
+   - ✅ TwitchApiClient refactored to accept an injected HTTP client
+   - ✅ TwitchApiClient tests implemented with mock responses
 
 ## API Connection Errors
 

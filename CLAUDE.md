@@ -3,6 +3,14 @@
 ## Project Overview
 Zelan is a locally-hosted data aggregation service for streaming platforms that unifies data from various sources (Twitch, OBS, etc.) and exposes it through a standardized API. It's built with Rust for the backend (using Tauri) and TypeScript/React for the frontend.
 
+## Recent Changes
+We implemented an HTTP client abstraction to improve testability:
+- Created `HttpClient` trait with `SimpleHttpResponse` for standardized responses
+- Built `ReqwestHttpClient` for real HTTP requests and `MockHttpClient` for testing
+- Refactored `TwitchApiClient` to use dependency injection with the HTTP client
+- Added tests for TwitchApiClient using mock responses
+- Fixed the recovery system tests by adjusting expected counter values
+
 ## Build Commands
 - `bun dev` - Start Vite development server
 - `bun tauri dev` - Start Tauri app in development mode
