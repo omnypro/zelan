@@ -30,7 +30,34 @@ A comprehensive error recovery system has been implemented that:
 
 ## Current Priorities
 
-### 1. Add Comprehensive Testing Suite
+### 1. Codebase Simplification and Refactoring
+
+The codebase has grown complex and needs simplification to improve maintainability:
+
+#### 1.1 Completed Simplifications
+- ✅ Implemented error builder pattern for cleaner error creation
+- ✅ Used `VecDeque` for proper FIFO error history
+- ✅ Integrated `thiserror` for better typed errors
+- ✅ Improved circuit breaker with atomic types and cleaner API
+- ✅ Created simplified recovery system with better abstractions
+
+#### 1.2 Remaining Backend Improvements
+- Extract Twitch authentication into a separate reusable component
+- Simplify token recovery logic into a single method
+- Consider using `tracing-error` for better error context
+- Consolidate retry logic into a unified approach
+- Consider `tokio-retry` for retry implementation
+
+#### 1.3 TypeScript/Frontend Improvements
+- Split App.tsx into smaller components (Dashboard, Settings, etc.)
+- Extract reusable UI components and patterns
+- Replace multiple useState calls with useReducer for related state
+- Create custom hooks for adapter control and Tauri commands
+- Implement proper TypeScript interfaces instead of `any` types
+- Standardize component patterns for consistency
+- Use a tab-based router pattern for main UI sections
+
+### 2. Add Comprehensive Testing Suite
 
 The codebase needs better test coverage for reliability and maintainability:
 
@@ -41,7 +68,7 @@ Recommendation: Implement a complete testing system:
 - Add automated testing for authentication flows
 - Create a CI pipeline for continuous testing
 
-### 2. Enhance WebSocket Client Support
+### 3. Enhance WebSocket Client Support
 
 Better client libraries would improve the developer experience:
 
