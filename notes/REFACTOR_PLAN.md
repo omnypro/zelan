@@ -43,9 +43,9 @@
    - [X] Create SimpleCircuitBreaker with better API
 
 3. **Twitch Adapter Refactoring (2 days)**
-   - [ ] Extract authentication to separate TwitchAuthenticator
-   - [ ] Simplify token recovery logic
-   - [ ] Streamline event handling
+   - [X] Extract authentication to separate TwitchAuthenticator
+   - [X] Simplify token recovery logic
+   - [X] Streamline event handling
 
 #### 2. TypeScript Frontend Improvements (Estimated: 5 days)
 
@@ -171,6 +171,8 @@
       // Authentication methods...
   }
   ```
+  
+  **Note**: Be cautious when refactoring authentication components. The Twitch authentication flow, particularly the device code flow, has subtle dependencies that can break if modified. The OAuth interaction requires careful sequencing between starting a device code flow and polling for its completion.
 
 - **Simplify token recovery logic**:
   ```rust
@@ -180,6 +182,46 @@
       }
   }
   ```
+
+##### 2.3.1 Authentication Refactoring Guidelines
+- **Always maintain state coherency**: Ensure device codes and auth states are properly synchronized 
+- **Test thoroughly**: Authentication flows are particularly sensitive to breakage
+- **Add recovery mechanisms**: Include code to recover from partially completed auth flows
+- **Document expected behavior**: Include clear comments explaining the expected sequence of operations
+- **Minimize changes**: Make incremental, well-tested modifications rather than wholesale rewrites
+
+##### 2.3.2 Authentication Refactoring Action Plan
+After our experience with authentication regression, we need a more structured approach:
+
+1. **Create Authentication Regression Tests (High Priority)** ✅ Partially Complete
+   - ✅ Basic tests implemented for auth state transitions and error handling
+   - ✅ Added tests using the standard Rust `#[cfg(test)]` pattern
+   - ✅ Created HTTP client abstraction and mockable implementation
+   - ❌ Complete token refresh and validation tests
+   - ❌ Full error recovery path testing
+
+2. **Expand Test Coverage** ✅ In Progress
+   - ✅ Created a `HttpClient` trait with consistent interface
+   - ✅ Implemented `ReqwestHttpClient` for real HTTP requests
+   - ✅ Implemented `MockHttpClient` for testing
+   - ✅ Added request history tracking for verification in tests
+   - ✅ Implemented simple JSON response mocking
+   - ❌ Add delay simulation features to test timing-sensitive code
+   - ❌ Create tests for edge cases in authentication flow
+   - ❌ Test race conditions and asynchronous behaviors
+
+3. **Implement Incremental Authentication Improvements**
+   - Address the Clone implementation that creates empty state
+   - Fix unused parameters in authentication methods
+   - Improve token refresh logic
+   - Add more granular error types
+   - Enhance logging throughout the authentication flow
+
+4. **Structured Error Documentation** ✅ Complete
+   - ✅ Created ERRORS.md with sections for authentication
+   - ✅ Documented common authentication error patterns and solutions
+   - ✅ Added debugging guides for the device code flow
+   - ✅ Documented timing requirements and race conditions
 
 ##### 2.4 Recovery System Improvements
 - **Consolidate retry logic**:

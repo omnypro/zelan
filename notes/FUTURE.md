@@ -42,7 +42,8 @@ The codebase has grown complex and needs simplification to improve maintainabili
 - ✅ Created simplified recovery system with better abstractions
 
 #### 1.2 Remaining Backend Improvements
-- Extract Twitch authentication into a separate reusable component
+- Extract Twitch authentication into a separate reusable component (✅ partially implemented, but requires careful testing)
+- ⚠️ **Authentication Warning**: The Twitch device code flow is sensitive to implementation details. If refactoring, make minimal changes and test extensively.
 - Simplify token recovery logic into a single method
 - Consider using `tracing-error` for better error context
 - Consolidate retry logic into a unified approach
@@ -61,11 +62,40 @@ The codebase has grown complex and needs simplification to improve maintainabili
 
 The codebase needs better test coverage for reliability and maintainability:
 
-Recommendation: Implement a complete testing system:
+#### 2.1 Authentication Testing (Highest Priority)
+
+Due to recent authentication regressions, this is now our highest testing priority:
+
+- **Create Authentication Regression Tests** ✅
+  - Basic tests implemented for auth state transitions and error handling
+  - Currently tests:
+    - Device code flow state transitions (NotAuthenticated → PendingDeviceAuth → NotAuthenticated)
+    - Token restoration error handling
+  - Added tests within the standard `#[cfg(test)]` module in the source file
+
+- **Additional Authentication Tests Needed**
+  - Test the complete flow including authenticated state
+  - Cover more error cases (timeouts, expired codes, network failures)
+  - Test token refresh logic
+  - ⚠️ **Critical**: Complete test coverage before further auth refactoring
+
+- **Build a Robust Mock System** ✅ In Progress
+  - ✅ Developed a `HttpClient` trait for abstracting HTTP interactions
+  - ✅ Implemented `ReqwestHttpClient` for real HTTP requests
+  - ✅ Created `MockHttpClient` for testing with predefined responses
+  - ✅ Added request history tracking for verification in tests
+  - ✅ Implemented JSON response mocking capabilities
+  - Implement delay simulation for timing-sensitive code
+  - Build a comprehensive suite of mock Twitch API responses
+  - Design the mock system to be reusable across all adapters
+
+#### 2.2 Complete Testing System
+
+After authentication testing is established, expand to all components:
 - Create unit tests for all adapter components
 - Add integration tests for end-to-end flows
-- Implement mocks for external APIs (Twitch, OBS)
-- Add automated testing for authentication flows
+- Implement mocks for other external APIs (OBS)
+- Ensure tests verify both the happy path and error recovery paths
 - Create a CI pipeline for continuous testing
 
 ### 3. Enhance WebSocket Client Support
