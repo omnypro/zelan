@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "zelan",
-        "width": 800,
-        "height": 600
+        "title": "Zelan",
+        "width": 864,
+        "height": 486
       }
     ],
     "security": {
