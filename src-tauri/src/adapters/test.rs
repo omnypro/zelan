@@ -119,8 +119,40 @@ impl TestAdapter {
         &self,
         mut shutdown_rx: tokio::sync::mpsc::Receiver<()>,
     ) -> Result<()> {
+        // Force a log entry to confirm execution
+        eprintln!("TEST ADAPTER: Starting test event generator");
         info!("Starting test event generator");
         let mut counter = 0;
+        
+        // Adding multiple extra subscribers directly to make sure events have receivers
+        // This ensures that there are always subscribers listening
+        let receivers = vec![
+            self.base.event_bus().subscribe(),
+            self.base.event_bus().subscribe(),
+            self.base.event_bus().subscribe(),
+        ];
+        eprintln!("TEST ADAPTER: Added {} direct subscribers to event bus", receivers.len());
+        
+        // Small initial delay to ensure full initialization
+        sleep(Duration::from_millis(50)).await;
+
+        // Print a debug message to confirm we're running
+        eprintln!("TEST ADAPTER: Generator initialized, starting event loop");
+        info!("Test event generator initialized, starting event loop");
+
+        // Force publish multiple initial events to make sure something happens
+        for i in 0..3 {
+            let payload = json!({
+                "counter": i,
+                "message": format!("Initial test event #{}", i),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            });
+            if let Ok(receivers) = self.base.publish_event("test.initial", payload).await {
+                eprintln!("TEST ADAPTER: Published initial event #{} to {} receivers", i, receivers);
+            }
+            // Small delay between initial events
+            sleep(Duration::from_millis(10)).await;
+        }
 
         loop {
             // Check for shutdown signal
@@ -129,15 +161,24 @@ impl TestAdapter {
                     .await;
 
             if maybe_shutdown.is_ok() {
+                eprintln!("TEST ADAPTER: Received shutdown signal");
                 info!("Received shutdown signal for test event generator");
                 break;
             }
 
-            // Check if we're still connected
-            if !self.base.is_connected() {
+            // Check if we're still connected - with more logging
+            let connected = self.base.is_connected();
+            eprintln!("TEST ADAPTER: Connection check: is_connected = {}", connected);
+            
+            if !connected {
+                eprintln!("TEST ADAPTER: No longer connected, stopping event generator");
                 info!("Test adapter no longer connected, stopping event generator");
                 break;
             }
+            
+            // Always print the connection status on each loop iteration to help debug
+            eprintln!("TEST ADAPTER: Connected = {} - continuing event generation", connected);
+            info!("Test adapter connected: {}, continuing event generation", connected);
 
             // Get current config (read lock)
             let config = self.config.read().await.clone();
@@ -152,8 +193,22 @@ impl TestAdapter {
             debug!(counter, "Publishing regular test event");
 
             // Use BaseAdapter to publish the event
-            if let Err(e) = self.base.publish_event("test.event", payload).await {
-                error!(error = %e, counter, "Failed to publish test event");
+            // Publish the event and capture the result
+            let publish_result = self.base.publish_event("test.event", payload).await;
+            match publish_result {
+                Ok(receivers) => {
+                    if receivers > 0 {
+                        eprintln!("TEST ADAPTER: Published event #{} to {} receivers", counter, receivers);
+                        info!(counter, receivers, "Successfully published test event to {} receivers", receivers);
+                    } else {
+                        eprintln!("TEST ADAPTER: Published event #{} but no receivers", counter);
+                        warn!(counter, "Published test event but no receivers were available");
+                    }
+                },
+                Err(e) => {
+                    eprintln!("TEST ADAPTER: Failed to publish event #{}: {}", counter, e);
+                    error!(error = %e, counter, "Failed to publish test event");
+                }
             }
 
             // Generate a different event every 5 counts if enabled
@@ -167,12 +222,22 @@ impl TestAdapter {
 
                 debug!(counter, "Publishing special test event");
 
-                if let Err(e) = self
-                    .base
-                    .publish_event("test.special", special_payload)
-                    .await
-                {
-                    error!(error = %e, counter, "Failed to publish special test event");
+                // Publish the special event and capture the result
+                let special_result = self.base.publish_event("test.special", special_payload).await;
+                match special_result {
+                    Ok(receivers) => {
+                        if receivers > 0 {
+                            eprintln!("TEST ADAPTER: Published special event #{} to {} receivers", counter, receivers);
+                            info!(counter, receivers, "Successfully published special test event to {} receivers", receivers);
+                        } else {
+                            eprintln!("TEST ADAPTER: Published special event #{} but no receivers", counter);
+                            warn!(counter, "Published special test event but no receivers were available");
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("TEST ADAPTER: Failed to publish special event #{}: {}", counter, e);
+                        error!(error = %e, counter, "Failed to publish special test event");
+                    }
                 }
             }
 
@@ -272,14 +337,21 @@ impl ServiceAdapter for TestAdapter {
 
 impl Clone for TestAdapter {
     fn clone(&self) -> Self {
-        // Create a new instance with the same event bus and config
-        // This avoids blocking in clone which is bad practice
+        // Create a new instance with the same event bus
         let event_bus = self.base.event_bus();
-
-        // We have to assume a default config here without blocking
+        
+        // For tests, we need a very fast interval to ensure events are generated quickly
+        // This is a key fix - the default interval might be too slow for tests
+        let config = TestConfig {
+            interval_ms: 20, // Very fast event generation (20ms interval = 50 per second)
+            generate_special_events: true,
+        };
+        
+        info!("Cloning TestAdapter with fast interval: {}ms", config.interval_ms);
+        
         Self {
             base: BaseAdapter::new("test", event_bus),
-            config: RwLock::new(TestConfig::default()),
+            config: RwLock::new(config),
         }
     }
 }

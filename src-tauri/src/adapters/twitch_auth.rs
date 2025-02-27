@@ -608,7 +608,7 @@ impl TwitchAuthManager {
         let access_token_obj = AccessToken::new(access_token);
         let refresh_token_obj = refresh_token.map(RefreshToken::new);
 
-        // Create HTTP client as recommended by the twitch_oauth2 crate
+        // Create a single HTTP client we'll reuse for all operations
         let http_client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
@@ -795,7 +795,8 @@ mod tests {
     use std::env;
     use std::sync::Arc;
     use std::sync::Mutex;
-    use twitch_oauth2::{id::DeviceCodeResponse, AccessToken, ClientId, RefreshToken, UserToken};
+    use twitch_oauth2::{id::DeviceCodeResponse, AccessToken, ClientId, RefreshToken, Scope, UserToken};
+    
     use twitch_api::types::{Nickname, UserId};
 
     // Mock the environment variable - ensuring it's properly set for all tests
@@ -899,20 +900,18 @@ mod tests {
         let login = Nickname::new("test_user".to_string());
         let user_id = UserId::new("12345".to_string());
         
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a "refreshed" token to simulate a successful refresh
-        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                AccessToken::new("refreshed_token".to_string()),
-                Some(RefreshToken::new("refreshed_refresh_token".to_string())),
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let token = UserToken::from_existing_unchecked(
+            AccessToken::new("refreshed_token".to_string()),
+            Some(RefreshToken::new("refreshed_refresh_token".to_string())),
+            client_id,
+            None, // client_secret
+            login.clone(),
+            user_id.clone(),
+            Some(vec![Scope::ChannelReadSubscriptions]), // scopes
+            Some(std::time::Duration::from_secs(14400)) // 4 hours
+        );
         
         // Set the token directly to simulate a successful refresh operation
         auth_manager.set_token(token).unwrap();
@@ -1050,20 +1049,18 @@ mod tests {
         let login = Nickname::new("test_user".to_string());
         let user_id = UserId::new("123456".to_string());
 
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a token using the safe method
-        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                access_token,
-                Some(refresh_token),
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let token = UserToken::from_existing_unchecked(
+            access_token,
+            Some(refresh_token),
+            client_id,
+            None, // client_secret
+            login,
+            user_id,
+            Some(vec![Scope::ChannelReadSubscriptions, Scope::UserReadEmail]),
+            Some(std::time::Duration::from_secs(5)),  // 5 seconds, about to expire
+        );
 
         // Set the token directly
         auth_manager_with_events.set_token(token).unwrap();
@@ -1115,20 +1112,18 @@ mod tests {
         let login = Nickname::new("test_user".to_string());
         let user_id = UserId::new("123456".to_string());
 
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a token with 2 hours remaining (not about to expire)
-        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                access_token,
-                Some(refresh_token),
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let token = UserToken::from_existing_unchecked(
+            access_token,
+            Some(refresh_token),
+            client_id,
+            None, // client_secret
+            login,
+            user_id,
+            Some(vec![Scope::ChannelReadSubscriptions, Scope::UserReadEmail]),
+            Some(std::time::Duration::from_secs(7200)), // 2 hours, not expired
+        );
 
         // Set the token directly
         auth_manager_with_events.set_token(token).unwrap();
@@ -1171,20 +1166,18 @@ mod tests {
         let login = Nickname::new("test_user".to_string());
         let user_id = UserId::new("123456".to_string());
 
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a token with a short expiration to trigger refresh
-        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                access_token,
-                Some(refresh_token),
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let token = UserToken::from_existing_unchecked(
+            access_token,
+            Some(refresh_token),
+            client_id,
+            None, // client_secret
+            login,
+            user_id,
+            Some(vec![Scope::ChannelReadSubscriptions, Scope::UserReadEmail]),
+            Some(std::time::Duration::from_secs(60)), // 1 minute, about to expire
+        );
 
         // Set the token directly
         auth_manager_with_events.set_token(token).unwrap();
@@ -1233,20 +1226,18 @@ mod tests {
         let login = Nickname::new("test_login".to_string());
         let user_id = UserId::new("12345".to_string());
 
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a UserToken using the safe method
-        let user_token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                access_token,
-                refresh_token,
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let user_token = UserToken::from_existing_unchecked(
+            access_token,
+            refresh_token,
+            client_id,
+            None, // client_secret
+            login,
+            user_id,
+            Some(vec![Scope::ChannelReadSubscriptions]), // scopes
+            Some(std::time::Duration::from_secs(14400)), // 4 hours
+        );
 
         // Create auth manager
         let mut auth_manager = TwitchAuthManager::new("test_client_id".to_string());
@@ -1305,20 +1296,18 @@ mod tests {
         let login = Nickname::new("simulated_user".to_string());
         let user_id = UserId::new("12345".to_string());
 
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a token using the safe method
-        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                access_token,
-                refresh_token,
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let token = UserToken::from_existing_unchecked(
+            access_token,
+            refresh_token,
+            client_id,
+            None, // client_secret
+            login.clone(),
+            user_id.clone(),
+            Some(vec![Scope::ChannelReadSubscriptions]), // scopes
+            Some(std::time::Duration::from_secs(14400)), // 4 hours
+        );
 
         // Set the token to simulate successful completion
         auth_manager_with_events.set_token(token.clone()).unwrap();
@@ -1364,20 +1353,18 @@ mod tests {
         let login = Nickname::new("test_user".to_string());
         let user_id = UserId::new("12345".to_string());
 
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a token that expires soon to trigger refresh
-        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                access_token,
-                refresh_token,
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let token = UserToken::from_existing_unchecked(
+            access_token,
+            refresh_token,
+            client_id.clone(), // Clone here to avoid the move
+            None,              // client_secret
+            login.clone(),     // Clone here to avoid the move
+            user_id.clone(),   // Clone here to avoid the move
+            Some(vec![Scope::ChannelReadSubscriptions]), // scopes
+            Some(std::time::Duration::from_secs(10)), // expires in 10 seconds
+        );
 
         // Set the token
         auth_manager.set_token(token).unwrap();
@@ -1397,20 +1384,18 @@ mod tests {
         let refreshed_refresh_token =
             Some(RefreshToken::new("refreshed_refresh_token".to_string()));
 
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a refreshed token with longer expiry using the safe method
-        let refreshed_token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                refreshed_access_token,
-                refreshed_refresh_token,
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let refreshed_token = UserToken::from_existing_unchecked(
+            refreshed_access_token,
+            refreshed_refresh_token,
+            client_id.clone(),
+            None, // client_secret
+            login.clone(),
+            user_id.clone(),
+            Some(vec![Scope::ChannelReadSubscriptions]), // scopes
+            Some(std::time::Duration::from_secs(14400)), // 4 hours
+        );
 
         // Set the refreshed token to simulate a successful refresh
         auth_manager.set_token(refreshed_token).unwrap();
@@ -1474,20 +1459,18 @@ mod tests {
         let login = Nickname::new("simulated_user".to_string());
         let user_id = UserId::new("12345".to_string());
 
-        // Create an HTTP client
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build().unwrap();
-            
-        // Create a token using the safe method
-        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            UserToken::from_existing(
-                &http_client,
-                AccessToken::new(access_token.clone()),
-                refresh_token.clone().map(RefreshToken::new),
-                None, // client_secret
-            ).await.unwrap()
-        });
+        // For tests, we can use from_existing_unchecked
+        // IMPORTANT: This is test-only code, don't use this in production!
+        let token = UserToken::from_existing_unchecked(
+            AccessToken::new(access_token.clone()),
+            refresh_token.clone().map(RefreshToken::new),
+            client_id,
+            None, // client_secret
+            login.clone(),
+            user_id.clone(),
+            Some(vec![Scope::ChannelReadSubscriptions]), // scopes wrapped in Some()
+            Some(std::time::Duration::from_secs(14400)), // 4 hours
+        );
 
         // Set the token to simulate successful restoration
         auth_manager_with_events.set_token(token).unwrap();

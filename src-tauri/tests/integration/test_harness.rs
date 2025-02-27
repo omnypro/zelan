@@ -49,9 +49,16 @@ impl TestSubscriber {
         let mut receiver = self._receiver.resubscribe();
 
         tokio::spawn(async move {
+            println!("Subscriber {} started collecting events", self_clone.name);
             loop {
                 match receiver.recv().await {
                     Ok(event) => {
+                        // Print event received
+                        println!("Subscriber {} received event: {} ({}) #{}", 
+                            self_clone.name, event.source(), event.event_type(),
+                            self_clone.events.lock().await.len() + 1);
+                        
+                        // Store the event
                         let mut events = self_clone.events.lock().await;
                         events.push(event);
                     }
@@ -82,9 +89,9 @@ impl TestEnvironment {
         // Create event bus with a reasonable capacity
         let event_bus = Arc::new(EventBus::new(100));
         
-        // Create test adapter with custom config
+        // Create test adapter with custom config - even faster event generation
         let config = TestConfig {
-            interval_ms: 100, // Faster events for testing
+            interval_ms: 20, // Very fast events for testing
             generate_special_events: true,
         };
         
@@ -106,7 +113,36 @@ impl TestEnvironment {
         subscriber.start_collecting().await;
         
         self.subscribers.insert(name.to_string(), Arc::clone(&subscriber));
+        println!("Added subscriber: {}", name);
         subscriber
+    }
+    
+    /// Add an extra subscriber just to ensure events have a receiver
+    pub async fn add_extra_subscriber(&self, name: String) -> tokio::task::JoinHandle<()> {
+        let receiver = self.event_bus.subscribe();
+        println!("Added extra event collector: {}", name);
+        
+        // Start a simple collector task
+        tokio::spawn(async move {
+            let mut receiver = receiver;
+            let mut count = 0;
+            let collector_name = name; // Move the name into the closure
+            
+            loop {
+                match receiver.recv().await {
+                    Ok(_event) => {
+                        count += 1;
+                        if count % 5 == 0 {
+                            println!("Extra subscriber {} received {} events", collector_name, count);
+                        }
+                    }
+                    Err(e) => {
+                        println!("Extra subscriber {} error: {}", collector_name, e);
+                        break;
+                    }
+                }
+            }
+        })
     }
     
     /// Start the test adapter
@@ -130,11 +166,41 @@ impl TestEnvironment {
         
         while start.elapsed() < timeout {
             let events = subscriber.get_events().await;
-            if events.len() >= count {
+            let current_count = events.len();
+            
+            // Print progress every second or so
+            if start.elapsed().as_millis() % 1000 < 100 {
+                println!("Waiting for events: {}/{} collected so far for {}", 
+                    current_count, count, subscriber_name);
+            }
+            
+            if current_count >= count {
+                println!("Successfully collected {} events for {}", current_count, subscriber_name);
                 return Ok(true);
             }
-            sleep(Duration::from_millis(10)).await;
+            
+            // Check the stats to see if events are being published
+            if start.elapsed().as_millis() % 2000 < 100 {
+                let stats = self.event_bus.get_stats().await;
+                let stats_json = serde_json::to_value(&stats).unwrap();
+                let published = stats_json["events_published"].as_u64().unwrap_or(0);
+                println!("EventBus stats: {} events published so far", published);
+            }
+            
+            sleep(Duration::from_millis(100)).await;
         }
+        
+        // Final check with detailed info
+        let events = subscriber.get_events().await;
+        let final_count = events.len();
+        println!("Timeout waiting for events: {}/{} collected for {} after {}ms", 
+            final_count, count, subscriber_name, timeout_ms);
+            
+        // Get final stats
+        let stats = self.event_bus.get_stats().await;
+        let stats_json = serde_json::to_value(&stats).unwrap();
+        let published = stats_json["events_published"].as_u64().unwrap_or(0);
+        println!("Final EventBus stats: {} events published total", published);
         
         Ok(false)
     }
