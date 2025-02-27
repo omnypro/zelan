@@ -91,6 +91,14 @@ This project requires environment variables for certain features to work properl
 - Follow 4-space indentation
 - Use structs and traits for adapter interfaces
 
+### Twitch Integration
+- NEVER use `UserToken::from_existing_unchecked()`. Always use `UserToken::from_existing()` instead which performs proper validation.
+- Always ensure token expiration times are properly tracked and stored in TokenManager.
+- When working with tokens, make sure they're fully validated before use.
+- Prefer direct token validation through the Twitch API over constructing tokens manually.
+- Always check the expiration of refresh tokens (30-day limit for device code flow tokens).
+- When refreshing tokens, ensure the new expiration time is properly stored.
+
 ### Authentication
 - Prefer OAuth device code flow for desktop applications
 - Request minimal scopes necessary for functionality
