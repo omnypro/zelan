@@ -18,7 +18,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 // use tokio::time::sleep;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
-use tracing::{debug, error, info, instrument, span, warn, Instrument, Level};
+use tracing::{debug, error, info, instrument, span, warn, Instrument, Level, trace};
 
 // Re-export modules
 pub mod adapters;
@@ -197,10 +197,10 @@ impl EventBus {
     }
 
     /// Get current event bus statistics
-    #[instrument(skip(self), level = "debug")]
+    #[instrument(skip(self), level = "trace")]
     pub async fn get_stats(&self) -> EventBusStats {
         let stats = self.stats.read().await.clone();
-        debug!(
+        trace!(
             events_published = stats.events_published,
             events_dropped = stats.events_dropped,
             "Retrieved event bus statistics"
@@ -400,9 +400,9 @@ impl StreamService {
     }
 
     /// Get the current WebSocket configuration
-    #[instrument(skip(self), level = "debug")]
+    #[instrument(skip(self), level = "trace")]
     pub fn ws_config(&self) -> &WebSocketConfig {
-        debug!(
+        trace!(
             port = self.ws_config.port,
             "Retrieved WebSocket configuration"
         );

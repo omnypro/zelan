@@ -97,7 +97,7 @@ fn main() {
             // Default to info level if RUST_LOG is not set
             if cfg!(debug_assertions) {
                 // More verbose in debug mode
-                "zelan_lib=debug,zelan_lib::adapters::obs=debug,warn".into()
+                "zelan_lib=info,zelan_lib::event_bus=trace,zelan_lib::adapters::obs=debug,warn".into()
             } else {
                 // Less verbose in release mode
                 "zelan_lib=info,zelan_lib::adapters::obs=info,warn".into()
@@ -118,6 +118,7 @@ fn main() {
     debug!("Logging initialized. Set RUST_LOG environment variable to control log levels");
     debug!("Example: RUST_LOG=zelan_lib=trace,zelan_lib::adapters::obs=debug");
     debug!("Available modules: zelan_lib, zelan_lib::adapters::obs, zelan_lib::plugin");
+    debug!("To reduce noisy logs, use RUST_LOG=zelan_lib=info,zelan_lib::event_bus=trace");
 
     // Build and run the Tauri application with our plugin
     tauri::Builder::default()

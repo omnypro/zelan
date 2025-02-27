@@ -281,9 +281,11 @@ impl ZelanState {
         let service = self.service.clone();
         let token_manager = self.token_manager.clone();
 
-        // Set the app handle on the token manager
-        // Since set_app is now async and takes &self, we can call it directly on the Arc
+        // IMPORTANT: Set the app handle on the token manager FIRST
+        // This must be done before any adapters try to use the token manager
+        info!("Setting app handle on TokenManager");
         token_manager.set_app(app.clone()).await;
+        info!("TokenManager app handle successfully set");
 
         // Pass the app handle to the initialization task
         let app_handle = app.clone();
@@ -551,9 +553,16 @@ impl ZelanState {
                 info!("Initializing Twitch adapter");
                 let mut twitch_adapter = TwitchAdapter::with_config(service_guard.event_bus(), config);
                 
-                // Set token manager on the adapter
-                twitch_adapter.set_token_manager(Arc::clone(&service_guard.token_manager));
-                info!("Set TokenManager on Twitch adapter");
+                // Set token manager on the adapter - IMPORTANT: This must happen before registering
+                // to ensure the token manager is available when connect() is called
+                info!("Setting TokenManager on Twitch adapter");
+                twitch_adapter.set_token_manager(Arc::clone(&token_manager));
+                
+                // Set recovery manager
+                info!("Setting RecoveryManager on Twitch adapter");
+                twitch_adapter.set_recovery_manager(service_guard.recovery_manager.clone());
+                
+                info!("TokenManager successfully set on Twitch adapter");
                 
                 // Register the adapter with its settings
                 service_guard.register_adapter(twitch_adapter, Some(saved_twitch_settings.clone())).await;
@@ -562,9 +571,16 @@ impl ZelanState {
                 info!("No saved Twitch settings found, using defaults");
                 let mut twitch_adapter = TwitchAdapter::new(service_guard.event_bus());
                 
-                // Set token manager on the adapter
-                twitch_adapter.set_token_manager(Arc::clone(&service_guard.token_manager));
-                info!("Set TokenManager on Twitch adapter");
+                // Set token manager on the adapter - IMPORTANT: This must happen before registering
+                // to ensure the token manager is available when connect() is called
+                info!("Setting TokenManager on Twitch adapter");
+                twitch_adapter.set_token_manager(Arc::clone(&token_manager));
+                
+                // Set recovery manager
+                info!("Setting RecoveryManager on Twitch adapter");
+                twitch_adapter.set_recovery_manager(service_guard.recovery_manager.clone());
+                
+                info!("TokenManager successfully set on Twitch adapter");
                 
                 let twitch_settings = AdapterSettings {
                     enabled: true,

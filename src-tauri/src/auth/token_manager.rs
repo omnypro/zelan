@@ -131,8 +131,10 @@ impl TokenManager {
     /// Set the app handle after initialization
     /// Now this can be used with an immutable reference
     pub async fn set_app(&self, app: AppHandle) {
+        info!("Setting app handle on TokenManager");
         let mut app_guard = self.app.write().await;
         *app_guard = Some(app);
+        info!("App handle successfully set on TokenManager");
     }
 
     /// Store tokens for a specific adapter
