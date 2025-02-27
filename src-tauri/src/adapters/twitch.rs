@@ -257,9 +257,9 @@ impl TwitchAdapter {
                     // Log information about the token's expiration
                     if token_data.is_expired() {
                         warn!("Retrieved tokens are expired, may need refresh");
-                    } else if let Some(expires_at) = token_data.expires_at {
+                    } else if let Some(expires_in) = token_data.expires_in {
                         let now = chrono::Utc::now();
-                        let duration = expires_at.signed_duration_since(now);
+                        let duration = expires_in.signed_duration_since(now);
                         info!("Token expires in {} seconds", duration.num_seconds());
                     }
                     

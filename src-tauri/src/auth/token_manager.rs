@@ -20,7 +20,7 @@ pub struct TokenData {
     /// Optional refresh token
     pub refresh_token: Option<String>,
     /// When the token expires (if known)
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub expires_in: Option<chrono::DateTime<chrono::Utc>>,
     /// Additional metadata about the token
     pub metadata: HashMap<String, Value>,
 }
@@ -31,14 +31,14 @@ impl TokenData {
         Self {
             access_token,
             refresh_token,
-            expires_at: None,
+            expires_in: None,
             metadata: HashMap::new(),
         }
     }
 
     /// Check if the token is expired
     pub fn is_expired(&self) -> bool {
-        match self.expires_at {
+        match self.expires_in {
             Some(expires) => expires <= chrono::Utc::now(),
             None => false, // If we don't know when it expires, assume it's still valid
         }
@@ -46,8 +46,8 @@ impl TokenData {
 
     /// Set the token expiration time
     pub fn set_expiration(&mut self, expires_in_secs: u64) {
-        let expires_at = chrono::Utc::now() + chrono::Duration::seconds(expires_in_secs as i64);
-        self.expires_at = Some(expires_at);
+        let expires_in = chrono::Utc::now() + chrono::Duration::seconds(expires_in_secs as i64);
+        self.expires_in = Some(expires_in);
     }
 
     /// Set the token metadata value
@@ -92,7 +92,7 @@ impl TokenData {
 
     /// Check if the token will expire soon (within the given seconds)
     pub fn expires_soon(&self, within_seconds: u64) -> bool {
-        match self.expires_at {
+        match self.expires_in {
             Some(expires) => {
                 let now = chrono::Utc::now();
                 let expires_in = expires - now;
@@ -181,7 +181,7 @@ impl TokenManager {
         let token_json = json!({
             "access_token": tokens.access_token,
             "refresh_token": tokens.refresh_token,
-            "expires_at": tokens.expires_at,
+            "expires_in": tokens.expires_in,
             "metadata": tokens.metadata
         });
 
@@ -298,7 +298,7 @@ impl TokenManager {
                     }
                 });
 
-                let expires_at = value.get("expires_at").and_then(|v| {
+                let expires_in = value.get("expires_in").and_then(|v| {
                     if v.is_null() {
                         None
                     } else {
@@ -330,7 +330,7 @@ impl TokenManager {
                 let token_data = TokenData {
                     access_token,
                     refresh_token,
-                    expires_at,
+                    expires_in,
                     metadata,
                 };
 
@@ -584,7 +584,7 @@ mod tests {
         
         // Test with expired token
         let expired_time = Utc::now() - chrono::Duration::seconds(100);
-        token.expires_at = Some(expired_time);
+        token.expires_in = Some(expired_time);
         assert!(token.is_expired());
         assert!(token.expires_soon(10)); // Already expired
     }
@@ -662,7 +662,7 @@ mod tests {
         
         // Make the token "expire"
         token_manager.update_tokens(adapter_name, |mut t| {
-            t.expires_at = Some(Utc::now() - chrono::Duration::seconds(10));
+            t.expires_in = Some(Utc::now() - chrono::Duration::seconds(10));
             t
         }).await.unwrap();
         
