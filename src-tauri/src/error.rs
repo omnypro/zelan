@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
 use std::time::{Duration, Instant};
 use tauri::async_runtime::RwLock;
+use thiserror::Error;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
@@ -138,6 +139,134 @@ pub enum ErrorCode {
     // Configuration related errors
     ConfigInvalid,
     ConfigMissing,
+}
+
+/// Zelan Error types using thiserror
+#[derive(Error, Debug, Clone)]
+pub enum ZelanErrorType {
+    // General errors
+    #[error("Unknown error: {0}")]
+    Unknown(String),
+    
+    #[error("Internal error: {0}")]
+    Internal(String),
+
+    // Adapter related errors
+    #[error("Adapter '{name}' not found")]
+    AdapterNotFound { 
+        name: String,
+    },
+    
+    #[error("Failed to connect adapter '{name}': {reason}")]
+    AdapterConnectionFailed { 
+        name: String,
+        reason: String,
+    },
+    
+    #[error("Failed to disconnect adapter '{name}': {reason}")]
+    AdapterDisconnectFailed {
+        name: String,
+        reason: String,
+    },
+    
+    #[error("Adapter '{name}' is disabled")]
+    AdapterDisabled {
+        name: String,
+    },
+
+    // Event bus related errors
+    #[error("Failed to publish event to event bus: {reason}")]
+    EventBusPublishFailed {
+        reason: String,
+    },
+    
+    #[error("Event was dropped due to no receivers")]
+    EventBusDropped,
+
+    // HTTP/WebSocket related errors
+    #[error("Failed to bind WebSocket server: {reason}")]
+    WebSocketBindFailed {
+        reason: String,
+    },
+    
+    #[error("Failed to accept WebSocket connection: {reason}")]
+    WebSocketAcceptFailed {
+        reason: String,
+    },
+    
+    #[error("Failed to send WebSocket message: {reason}")]
+    WebSocketSendFailed {
+        reason: String,
+    },
+
+    // API related errors
+    #[error("API request failed: {reason}")]
+    ApiRequestFailed {
+        reason: String,
+    },
+    
+    #[error("{service} API rate limit exceeded")]
+    ApiRateLimited {
+        service: String,
+        reset_after: Option<Duration>,
+    },
+    
+    #[error("API authentication failed: {reason}")]
+    ApiAuthenticationFailed {
+        reason: String,
+    },
+    
+    #[error("API permission denied: {reason}")]
+    ApiPermissionDenied {
+        reason: String,
+    },
+
+    // Authentication errors
+    #[error("Authentication token has expired")]
+    AuthTokenExpired,
+    
+    #[error("Authentication token is invalid: {reason}")]
+    AuthTokenInvalid {
+        reason: String,
+    },
+    
+    #[error("Authentication token has been revoked")]
+    AuthTokenRevoked,
+    
+    #[error("Failed to refresh authentication token: {reason}")]
+    AuthRefreshFailed {
+        reason: String,
+    },
+
+    // Network errors
+    #[error("Network timeout while connecting to {service} for operation {operation}")]
+    NetworkTimeout {
+        service: String,
+        operation: String,
+    },
+    
+    #[error("Network connection lost to {service}")]
+    NetworkConnectionLost {
+        service: String,
+    },
+    
+    #[error("DNS resolution failure for {host}")]
+    NetworkDnsFailure {
+        host: String,
+    },
+
+    // Configuration related errors
+    #[error("Invalid configuration value for '{key}': {reason}")]
+    ConfigInvalid {
+        key: String,
+        value: String,
+        reason: String,
+    },
+    
+    #[error("Required configuration key '{key}' is missing")]
+    ConfigMissing {
+        key: String,
+    },
 }
 
 /// Severity levels for errors
@@ -509,6 +638,158 @@ impl fmt::Display for ErrorCategory {
 
 impl std::error::Error for ZelanError {}
 
+impl From<ZelanErrorType> for ZelanError {
+    fn from(err: ZelanErrorType) -> Self {
+        let (code, message, _context, category) = match &err {
+            ZelanErrorType::Unknown(msg) => 
+                (ErrorCode::Unknown, msg.clone(), None, ErrorCategory::Internal),
+                
+            ZelanErrorType::Internal(msg) => 
+                (ErrorCode::Internal, msg.clone(), None, ErrorCategory::Internal),
+                
+            ZelanErrorType::AdapterNotFound { name } => 
+                (ErrorCode::AdapterNotFound, 
+                 format!("Adapter '{}' not found", name), 
+                 None, 
+                 ErrorCategory::NotFound),
+                 
+            ZelanErrorType::AdapterConnectionFailed { name, reason } => 
+                (ErrorCode::AdapterConnectionFailed, 
+                 format!("Failed to connect adapter '{}'", name), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::AdapterDisconnectFailed { name, reason } => 
+                (ErrorCode::AdapterDisconnectFailed, 
+                 format!("Failed to disconnect adapter '{}'", name), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::AdapterDisabled { name } => 
+                (ErrorCode::AdapterDisabled, 
+                 format!("Adapter '{}' is disabled", name), 
+                 None, 
+                 ErrorCategory::Configuration),
+                 
+            ZelanErrorType::EventBusPublishFailed { reason } => 
+                (ErrorCode::EventBusPublishFailed, 
+                 "Failed to publish event to event bus".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Internal),
+                 
+            ZelanErrorType::EventBusDropped => 
+                (ErrorCode::EventBusDropped, 
+                 "Event was dropped due to no receivers".to_string(), 
+                 None, 
+                 ErrorCategory::Internal),
+                 
+            ZelanErrorType::WebSocketBindFailed { reason } => 
+                (ErrorCode::WebSocketBindFailed, 
+                 "Failed to bind WebSocket server".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::WebSocketAcceptFailed { reason } => 
+                (ErrorCode::WebSocketAcceptFailed, 
+                 "Failed to accept WebSocket connection".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::WebSocketSendFailed { reason } => 
+                (ErrorCode::WebSocketSendFailed, 
+                 "Failed to send WebSocket message".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::ApiRequestFailed { reason } => 
+                (ErrorCode::ApiRequestFailed, 
+                 "API request failed".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::ApiRateLimited { service, reset_after } => {
+                let ctx = reset_after.map(|d| format!("Rate limit resets in {} seconds", d.as_secs()));
+                (ErrorCode::ApiRateLimited, 
+                 format!("{} API rate limit exceeded", service), 
+                 ctx, 
+                 ErrorCategory::RateLimit)
+            },
+                 
+            ZelanErrorType::ApiAuthenticationFailed { reason } => 
+                (ErrorCode::ApiAuthenticationFailed, 
+                 "API authentication failed".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Authentication),
+                 
+            ZelanErrorType::ApiPermissionDenied { reason } => 
+                (ErrorCode::ApiPermissionDenied, 
+                 "API permission denied".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Permission),
+                 
+            ZelanErrorType::AuthTokenExpired => 
+                (ErrorCode::AuthTokenExpired, 
+                 "Authentication token has expired".to_string(), 
+                 None, 
+                 ErrorCategory::Authentication),
+                 
+            ZelanErrorType::AuthTokenInvalid { reason } => 
+                (ErrorCode::AuthTokenInvalid, 
+                 "Authentication token is invalid".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Authentication),
+                 
+            ZelanErrorType::AuthTokenRevoked => 
+                (ErrorCode::AuthTokenRevoked, 
+                 "Authentication token has been revoked".to_string(), 
+                 None, 
+                 ErrorCategory::Authentication),
+                 
+            ZelanErrorType::AuthRefreshFailed { reason } => 
+                (ErrorCode::AuthRefreshFailed, 
+                 "Failed to refresh authentication token".to_string(), 
+                 Some(reason.clone()), 
+                 ErrorCategory::Authentication),
+                 
+            ZelanErrorType::NetworkTimeout { service, operation } => 
+                (ErrorCode::NetworkTimeout, 
+                 format!("Network timeout while connecting to {}", service), 
+                 Some(format!("Operation: {}", operation)), 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::NetworkConnectionLost { service } => 
+                (ErrorCode::NetworkConnectionLost, 
+                 format!("Network connection lost to {}", service), 
+                 None, 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::NetworkDnsFailure { host } => 
+                (ErrorCode::NetworkDnsFailure, 
+                 format!("DNS resolution failure for {}", host), 
+                 None, 
+                 ErrorCategory::Network),
+                 
+            ZelanErrorType::ConfigInvalid { key, value, reason } => 
+                (ErrorCode::ConfigInvalid, 
+                 format!("Invalid configuration value for '{}'", key), 
+                 Some(format!("Value '{}' is invalid: {}", value, reason)), 
+                 ErrorCategory::Configuration),
+                 
+            ZelanErrorType::ConfigMissing { key } => 
+                (ErrorCode::ConfigMissing, 
+                 format!("Required configuration key '{}' is missing", key), 
+                 None, 
+                 ErrorCategory::Configuration),
+        };
+
+        ZelanError::new(code)
+            .message(message)
+            .category(category)
+            .severity(ErrorSeverity::Error) // Default severity
+            .build()
+    }
+}
+
 impl From<anyhow::Error> for ZelanError {
     fn from(err: anyhow::Error) -> Self {
         // Try to extract error category from the error message
@@ -547,6 +828,89 @@ impl From<anyhow::Error> for ZelanError {
 
 // Custom Result type for Zelan operations
 pub type ZelanResult<T> = Result<T, ZelanError>;
+
+// New result type for thiserror-based operations
+pub type ZelanTypeResult<T> = Result<T, ZelanErrorType>;
+
+/// Module for new thiserror-based error helpers
+pub mod errors {
+    use super::*;
+    
+    /// Create an adapter not found error
+    pub fn adapter_not_found(name: impl Into<String>) -> ZelanErrorType {
+        ZelanErrorType::AdapterNotFound {
+            name: name.into(),
+        }
+    }
+
+    /// Create an adapter connection failed error
+    pub fn adapter_connection_failed(name: impl Into<String>, reason: impl fmt::Display) -> ZelanErrorType {
+        ZelanErrorType::AdapterConnectionFailed {
+            name: name.into(),
+            reason: reason.to_string(),
+        }
+    }
+
+    /// Create an event bus publish failed error
+    pub fn event_bus_publish_failed(reason: impl fmt::Display) -> ZelanErrorType {
+        ZelanErrorType::EventBusPublishFailed {
+            reason: reason.to_string(),
+        }
+    }
+
+    /// Create an event bus dropped error
+    pub fn event_bus_dropped() -> ZelanErrorType {
+        ZelanErrorType::EventBusDropped
+    }
+
+    /// Create a WebSocket bind failed error
+    pub fn websocket_bind_failed(reason: impl fmt::Display) -> ZelanErrorType {
+        ZelanErrorType::WebSocketBindFailed {
+            reason: reason.to_string(),
+        }
+    }
+
+    /// Create a network timeout error
+    pub fn network_timeout(service: impl Into<String>, operation: impl Into<String>) -> ZelanErrorType {
+        ZelanErrorType::NetworkTimeout {
+            service: service.into(),
+            operation: operation.into(),
+        }
+    }
+
+    /// Create an API rate limit error
+    pub fn api_rate_limited(service: impl Into<String>, reset_after: Option<Duration>) -> ZelanErrorType {
+        ZelanErrorType::ApiRateLimited {
+            service: service.into(),
+            reset_after,
+        }
+    }
+
+    /// Create an authentication token expired error
+    pub fn auth_token_expired() -> ZelanErrorType {
+        ZelanErrorType::AuthTokenExpired
+    }
+
+    /// Create a configuration missing error
+    pub fn config_missing(key: impl Into<String>) -> ZelanErrorType {
+        ZelanErrorType::ConfigMissing {
+            key: key.into(),
+        }
+    }
+
+    /// Create a configuration invalid error
+    pub fn config_invalid(
+        key: impl Into<String>,
+        value: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> ZelanErrorType {
+        ZelanErrorType::ConfigInvalid {
+            key: key.into(),
+            value: value.into(),
+            reason: reason.into(),
+        }
+    }
+}
 
 // Utility functions to create errors
 
@@ -905,3 +1269,35 @@ impl CircuitBreaker {
         }
     }
 }
+
+/*
+Example of using the new thiserror-based error API
+
+```rust
+// Using the original error API:
+fn get_adapter(name: &str) -> ZelanResult<Adapter> {
+    if name.is_empty() {
+        return Err(adapter_not_found(name)); 
+    }
+    // ...
+    Ok(adapter)
+}
+
+// Using the new thiserror-based API:
+fn get_adapter_new(name: &str) -> ZelanTypeResult<Adapter> {
+    if name.is_empty() {
+        return Err(errors::adapter_not_found(name)); 
+    }
+    // ...
+    Ok(adapter)
+}
+
+// Converting between error types:
+fn get_adapter_compatible(name: &str) -> ZelanResult<Adapter> {
+    match get_adapter_new(name) {
+        Ok(adapter) => Ok(adapter),
+        Err(err) => Err(err.into()),  // ZelanErrorType -> ZelanError
+    }
+}
+```
+*/
