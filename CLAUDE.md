@@ -69,3 +69,6 @@ This project requires environment variables for certain features to work properl
 - Do not recreate functionality unless absolutely necessary
 - Write tests for critical components
 - Use cargo fmt and appropriate linters before committing
+
+### Documentation
+- Documentation for all Rust crates can be found in the /targets/doc directory
