@@ -280,9 +280,6 @@ impl TwitchApiClient {
 }
 
 #[cfg(test)]
-use twitch_types::{UserId, UserName};
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::adapters::http_client::mock::MockHttpClient;
@@ -336,22 +333,21 @@ mod tests {
 
         // Create a fake client_id for testing using our helper
         let client_id = get_test_client_id();
-
-        // Create fake credentials for testing - in real use cases these would come from the API
-        let login = UserName::new("testuser".to_string());
-        let user_id = UserId::new("123456".to_string());
-
-        // We need to create a token using a builder since UserToken has private fields
-        let token = UserToken::from_existing_unchecked(
-            twitch_oauth2::AccessToken::new("test_token".to_string()),
-            None, // refresh_token
-            client_id.clone(),
-            None, // client_secret
-            login,
-            user_id,
-            Some(Vec::new()),                           // scopes
-            Some(std::time::Duration::from_secs(3600)), // expires_in
-        );
+        
+        // Create an HTTP client
+        let http_client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build().unwrap();
+            
+        // Create a token using the safe method
+        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
+            UserToken::from_existing(
+                &http_client,
+                twitch_oauth2::AccessToken::new("test_token".to_string()),
+                None, // refresh_token 
+                None, // client_secret
+            ).await.unwrap()
+        });
 
         // Call the method we're testing with the direct client_id parameter
         let channel_info = api_client.fetch_channel_info_with_client_id(&token, "123456", client_id).await?;
@@ -409,21 +405,20 @@ mod tests {
         // Create a fake client_id for testing using our helper
         let client_id = get_test_client_id();
 
-        // Create fake credentials for testing - in real use cases these would come from the API
-        let login = UserName::new("testuser".to_string());
-        let user_id = UserId::new("123456".to_string());
-
-        // We need to create a token using a builder since UserToken has private fields
-        let token = UserToken::from_existing_unchecked(
-            twitch_oauth2::AccessToken::new("test_token".to_string()),
-            None, // refresh_token
-            client_id.clone(),
-            None, // client_secret
-            login,
-            user_id,
-            Some(Vec::new()),                           // scopes
-            Some(std::time::Duration::from_secs(3600)), // expires_in
-        );
+        // Create an HTTP client
+        let http_client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build().unwrap();
+            
+        // Create a token using the safe method
+        let token = tokio::runtime::Runtime::new().unwrap().block_on(async {
+            UserToken::from_existing(
+                &http_client,
+                twitch_oauth2::AccessToken::new("test_token".to_string()),
+                None, // refresh_token 
+                None, // client_secret
+            ).await.unwrap()
+        });
 
         // Call the method we're testing with the direct client_id parameter
         let stream_info = api_client

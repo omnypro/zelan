@@ -63,7 +63,6 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 thiserror = "2.0.11"
 bytes = { version = "1.10.0", default-features = false }
 http = "1.2.0"
-twitch_types = "0.4.8"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"

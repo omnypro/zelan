@@ -325,8 +325,37 @@ impl TwitchAdapter {
                 .restore_from_saved_tokens(access_token.clone(), refresh_token.clone())
                 .await
             {
-                Ok(_) => {
+                Ok(token) => {
                     info!("Successfully restored authentication state");
+                    
+                    // Now ensure token details are stored properly in TokenManager
+                    if let Some(tm) = &self.token_manager {
+                        // Extract tokens
+                        let access_token = token.access_token.secret().to_string();
+                        let refresh_token = token.refresh_token.as_ref().map(|t| t.secret().to_string());
+                        
+                        // Create TokenData with full expiration information
+                        let mut token_data = TokenData::new(access_token, refresh_token);
+                        
+                        // Set expiration from token
+                        let expires_in = token.expires_in().as_secs();
+                        if expires_in > 0 {
+                            info!("Setting token expiration to {} seconds from now", expires_in);
+                            token_data.set_expiration(expires_in);
+                        } else {
+                            warn!("Token has invalid expires_in value: {}", expires_in);
+                        }
+                        
+                        // Track when the refresh token was created/refreshed
+                        token_data.track_refresh_token_created();
+                        
+                        // Store in TokenManager
+                        match tm.store_tokens("twitch", token_data).await {
+                            Ok(_) => info!("Successfully updated token data in TokenManager with expiration info"),
+                            Err(e) => warn!("Failed to update token data in TokenManager: {}", e),
+                        }
+                    }
+                    
                     Ok(())
                 }
                 Err(e) => {
@@ -813,6 +842,7 @@ impl TwitchAdapter {
 
                             // Set expiration if available
                             let expires_in = token.expires_in().as_secs();
+                            info!("Setting token expiration time in TokenData: {} seconds", expires_in);
                             if expires_in > 0 {
                                 token_data.set_expiration(expires_in);
                             }

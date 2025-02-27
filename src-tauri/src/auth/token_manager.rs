@@ -569,7 +569,6 @@ impl Clone for TokenManager {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use std::time::Duration;
 
     #[test]
     fn test_token_expiration() {
