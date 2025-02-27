@@ -945,3 +945,100 @@ li {
     color: #eee;
   }
 }
+
+/* Status indicator new styles */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #e0e0e0;
+}
+
+.status-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background-color: #e0e0e0;
+}
+
+/* Status indicator sizes */
+.status-indicator.size-small .status-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.status-indicator.size-medium .status-dot {
+  width: 10px;
+  height: 10px;
+}
+
+.status-indicator.size-large .status-dot {
+  width: 12px;
+  height: 12px;
+}
+
+/* Status indicator colors */
+.status-connected .status-dot {
+  background-color: #4caf50;
+}
+
+.status-connecting .status-dot {
+  background-color: #ff9800;
+  animation: pulse 1.5s infinite;
+}
+
+.status-disconnected .status-dot {
+  background-color: #9e9e9e;
+}
+
+.status-error .status-dot {
+  background-color: #f44336;
+}
+
+.status-disabled .status-dot {
+  background-color: #bdbdbd;
+}
+
+.status-connected .status-label {
+  background-color: #c8e6c9;
+  color: #2e7d32;
+}
+
+.status-connecting .status-label {
+  background-color: #fff9c4;
+  color: #f57f17;
+}
+
+.status-disconnected .status-label {
+  background-color: #e0e0e0;
+  color: #616161;
+}
+
+.status-error .status-label {
+  background-color: #ffcdd2;
+  color: #c62828;
+}
+
+.status-disabled .status-label {
+  background-color: #eeeeee;
+  color: #9e9e9e;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 1;
+  }
+}

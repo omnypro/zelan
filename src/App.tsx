@@ -1,348 +1,198 @@
-import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useEffect } from 'react';
 import { listen, type Event as TauriEvent } from '@tauri-apps/api/event';
 import './App.css';
 
-// Define the ZelanError type to match what comes from the backend
-interface ZelanError {
-  code: string;
-  message: string;
-  context?: string;
-  severity: 'info' | 'warning' | 'error' | 'critical';
-}
+// Import components
+import {
+  Dashboard,
+  Settings,
+  ErrorNotification
+} from './components';
 
-// Custom error component to display errors to the user
-const ErrorNotification = ({
-  error,
-  onDismiss,
-}: {
-  error: ZelanError | string;
-  onDismiss: () => void;
-}) => {
-  // Handle both string errors and ZelanError objects
-  const errorObj =
-    typeof error === 'string'
-      ? {
-          code: 'UNKNOWN',
-          message: error,
-          severity: 'error' as const,
-        }
-      : error;
+// Import hooks
+import {
+  useAppState,
+  useDataFetching,
+  useAdapterControl
+} from './hooks';
 
-  // Map severity to CSS class
-  const severityClass =
-    {
-      info: 'info',
-      warning: 'warning',
-      error: 'error',
-      critical: 'critical',
-    }[errorObj.severity] || 'error';
-
-  return (
-    <div className={`error-notification ${severityClass}`}>
-      <div className="error-header">
-        <span className="error-code">{errorObj.code}</span>
-        <button className="dismiss-button" onClick={onDismiss}>
-          ×
-        </button>
-      </div>
-      <p className="error-message">{errorObj.message}</p>
-      {errorObj.context && <p className="error-context">{errorObj.context}</p>}
-    </div>
-  );
-};
-
-// Define WebSocketInfo interface to match backend response
-interface WebSocketInfo {
-  port: number;
-  uri: string;
-  httpUri: string;
-  wscat: string;
-  websocat: string;
-}
-
-// Define interfaces for adapter-related data
-interface AdapterSettings {
-  enabled: boolean;
-  config: any;
-  display_name: string;
-  description: string;
-}
-
-// Maps adapter names to their settings
-interface AdapterSettingsMap {
-  [key: string]: AdapterSettings;
-}
-
-// Define possible service status values
-type ServiceStatus = 'Connected' | 'Connecting' | 'Disconnected' | 'Error' | 'Disabled';
-
-// Maps adapter names to their status
-interface AdapterStatusMap {
-  [key: string]: ServiceStatus;
-}
-
-// Tab type for navigation
-type TabType = 'dashboard' | 'settings';
+// Import types
+import { ZelanError } from './types';
 
 function App() {
-  // Data states
-  const [eventBusStats, setEventBusStats] = useState<any>(null);
-  const [adapterStatuses, setAdapterStatuses] =
-    useState<AdapterStatusMap | null>(null);
-  const [adapterSettings, setAdapterSettings] =
-    useState<AdapterSettingsMap | null>(null);
-  const [testEventResult, setTestEventResult] = useState<string>('');
-  const [wsInfo, setWsInfo] = useState<WebSocketInfo | null>(null);
+  // Use app state
+  const { state, dispatch } = useAppState();
+  
+  // Extract state variables
+  const {
+    eventBusStats,
+    adapterStatuses,
+    adapterSettings,
+    testEventResult,
+    wsInfo,
+    activeTab,
+    loading,
+    errors,
+    lastUpdated,
+    editingAdapterConfig
+  } = state;
 
-  // UI states
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard');
-  const [refreshKey, setRefreshKey] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [errors, setErrors] = useState<(ZelanError | string)[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [newPort, setNewPort] = useState<string>('');
-  const [editingAdapterConfig, setEditingAdapterConfig] = useState<
-    string | null
-  >(null);
+  // Set up data fetching with error handling
+  const { 
+    fetchAllData, 
+    sendTestEvent, 
+    updateWebSocketPort 
+  } = useDataFetching({
+    onError: (error) => dispatch({ type: 'ADD_ERROR', payload: error }),
+    onSuccess: () => dispatch({ type: 'SET_LAST_UPDATED', payload: new Date() })
+  });
 
-  // Helper function to add errors
-  const addError = (error: ZelanError | string) => {
-    setErrors((prev) => [error, ...prev].slice(0, 5)); // Keep only the 5 most recent errors
-  };
+  // Set up adapter control with error handling
+  const {
+    toggleAdapterEnabled,
+    updateAdapterConfig
+  } = useAdapterControl({
+    onError: (error) => dispatch({ type: 'ADD_ERROR', payload: error }),
+    onSuccess: (message) => {
+      dispatch({ 
+        type: 'ADD_ERROR', 
+        payload: { 
+          code: 'INFO', 
+          message, 
+          severity: 'info' 
+        } 
+      });
+      
+      // Refresh data after adapter changes
+      refreshData();
+    }
+  });
 
   // Helper function to dismiss errors
   const dismissError = (index: number) => {
-    setErrors((prev) => prev.filter((_, i) => i !== index));
+    dispatch({ type: 'DISMISS_ERROR', payload: index });
   };
 
-  // Helper function to handle invoke errors
-  const safeInvoke = async <T,>(
-    command: string,
-    ...args: any[]
-  ): Promise<T> => {
+  // Manual refresh
+  const refreshData = async () => {
+    dispatch({ type: 'SET_LOADING', payload: true });
+    
     try {
-      return await invoke<T>(command, ...args);
-    } catch (error) {
-      // Handle both string errors and structured errors
-      if (typeof error === 'object' && error !== null) {
-        addError(error as ZelanError);
-      } else {
-        addError(String(error));
+      const data = await fetchAllData();
+      
+      if (data) {
+        dispatch({ type: 'SET_EVENT_BUS_STATS', payload: data.stats });
+        dispatch({ type: 'SET_ADAPTER_STATUSES', payload: data.statuses });
+        dispatch({ type: 'SET_ADAPTER_SETTINGS', payload: data.settings });
+        dispatch({ type: 'SET_WS_INFO', payload: data.info });
+        dispatch({ type: 'SET_LAST_UPDATED', payload: new Date() });
       }
-      throw error;
+    } catch (error) {
+      // Errors are handled by the hook
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
-  // Fetch stats and statuses on mount and when refreshKey changes
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
+  // Handle sending a test event
+  const handleSendTestEvent = async () => {
+    dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: 'CLEAR_TEST_EVENT_RESULT' });
+    
+    try {
+      const result = await sendTestEvent();
+      dispatch({ type: 'SET_TEST_EVENT_RESULT', payload: result });
+      await refreshData();
+    } catch (error) {
+      dispatch({ type: 'SET_TEST_EVENT_RESULT', payload: 'Failed to send test event' });
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
 
-        // Get event bus stats
-        const stats = await safeInvoke('get_event_bus_status');
-        setEventBusStats(stats);
+  // Handle updating WebSocket port
+  const handleUpdatePort = async (port: number) => {
+    dispatch({ type: 'SET_LOADING', payload: true });
+    
+    try {
+      const result = await updateWebSocketPort(port);
+      
+      dispatch({ 
+        type: 'ADD_ERROR', 
+        payload: { 
+          code: 'INFO', 
+          message: result, 
+          severity: 'info' 
+        } 
+      });
+      
+      await refreshData();
+    } catch (error) {
+      // Errors are handled by the hook
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
 
-        // Get adapter statuses
-        const statuses = await safeInvoke<AdapterStatusMap>(
-          'get_adapter_statuses'
-        );
-        setAdapterStatuses(statuses);
-
-        // Get adapter settings
-        const settings = await safeInvoke<AdapterSettingsMap>(
-          'get_adapter_settings'
-        );
-        setAdapterSettings(settings);
-
-        // Get WebSocket info
-        const info = await safeInvoke<WebSocketInfo>('get_websocket_info');
-        setWsInfo(info);
-
-        // Initialize new port state if empty
-        if (newPort === '' && info?.port) {
-          setNewPort(info.port.toString());
-        }
-
-        // Update last refreshed timestamp
-        setLastUpdated(new Date());
-
-        setLoading(false);
-      } catch (error) {
-        // Error already handled by safeInvoke
-        setLoading(false);
+  // Handle toggling an adapter
+  const handleToggleAdapter = async (adapterName: string) => {
+    if (!adapterSettings) return;
+    
+    dispatch({ type: 'SET_LOADING', payload: true });
+    
+    try {
+      const currentSettings = adapterSettings[adapterName];
+      if (!currentSettings) {
+        throw new Error(`Settings for adapter '${adapterName}' not found`);
       }
-    };
+      
+      await toggleAdapterEnabled(adapterName, currentSettings);
+    } catch (error) {
+      // Errors are handled by the hook
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
 
-    fetchData();
+  // Handle saving adapter config
+  const handleSaveAdapterConfig = async (adapterName: string, configUpdates: Record<string, any>) => {
+    if (!adapterSettings) return;
+    
+    dispatch({ type: 'SET_LOADING', payload: true });
+    
+    try {
+      const currentSettings = adapterSettings[adapterName];
+      if (!currentSettings) {
+        throw new Error(`Settings for adapter '${adapterName}' not found`);
+      }
+      
+      await updateAdapterConfig(adapterName, currentSettings, configUpdates);
+      dispatch({ type: 'SET_EDITING_ADAPTER_CONFIG', payload: null });
+    } catch (error) {
+      // Errors are handled by the hook
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
 
-    // Only set up auto-refresh for dashboard tab (to avoid interfering with settings editing)
+  // Fetch data on mount
+  useEffect(() => {
+    refreshData();
+    
+    // Set up auto-refresh for dashboard tab
     let intervalId: ReturnType<typeof setTimeout> | undefined;
-
+    
     if (activeTab === 'dashboard') {
       intervalId = setInterval(() => {
-        fetchData();
+        refreshData();
       }, 5000);
     }
-
+    
     // Clean up interval on unmount or tab change
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [refreshKey, activeTab, newPort]);
-
-  // Update WebSocket port
-  const updatePort = async () => {
-    try {
-      setLoading(true);
-      const port = parseInt(newPort, 10);
-
-      if (isNaN(port) || port < 1024 || port > 65535) {
-        addError('Port must be a number between 1024 and 65535');
-        setLoading(false);
-        return;
-      }
-
-      const result = await safeInvoke<string>('set_websocket_port', { port });
-
-      // Show the result as a notification
-      addError({
-        code: 'INFO',
-        message: result,
-        severity: 'info',
-      });
-
-      // Refresh data to update the displayed port
-      refreshData();
-    } catch (error) {
-      // Error already handled by safeInvoke
-      setLoading(false);
-    }
-  };
-
-  // Send a test event
-  const sendTestEvent = async () => {
-    try {
-      setLoading(true);
-      setTestEventResult('');
-
-      const result = await safeInvoke<string>('send_test_event');
-      setTestEventResult(result);
-
-      // Refresh stats after sending an event
-      setRefreshKey((prev) => prev + 1);
-    } catch (error) {
-      // Error already handled by safeInvoke
-      setTestEventResult(`Failed to send test event`);
-      setLoading(false);
-    }
-  };
-
-  // Manual refresh
-  const refreshData = () => {
-    setRefreshKey((prev) => prev + 1);
-  };
-
-  // Toggle adapter enabled status
-  const toggleAdapterEnabled = async (adapterName: string) => {
-    if (!adapterSettings) return;
-
-    try {
-      setLoading(true);
-
-      // Get the current settings for this adapter
-      const currentSettings = adapterSettings[adapterName];
-      if (!currentSettings) {
-        throw new Error(`Settings for adapter '${adapterName}' not found`);
-      }
-
-      // Create updated settings with toggled enabled status
-      const updatedSettings: AdapterSettings = {
-        ...currentSettings,
-        enabled: !currentSettings.enabled,
-      };
-
-      // Update settings on the backend
-      await safeInvoke('update_adapter_settings', {
-        adapterName: adapterName,
-        settings: updatedSettings,
-      });
-
-      // If enabling, connect the adapter using our new direct command
-      if (updatedSettings.enabled) {
-        await safeInvoke('connect_adapter', {
-          adapterName: adapterName,
-        });
-      } else {
-        // If disabling, disconnect the adapter using our new direct command
-        await safeInvoke('disconnect_adapter', {
-          adapterName: adapterName,
-        });
-      }
-
-      // Show success message
-      addError({
-        code: 'INFO',
-        message: `${
-          updatedSettings.enabled ? 'Enabled' : 'Disabled'
-        } adapter: ${currentSettings.display_name}`,
-        severity: 'info',
-      });
-
-      // Refresh data
-      refreshData();
-    } catch (error) {
-      // Error already handled by safeInvoke
-      setLoading(false);
-    }
-  };
-
-  // Update adapter configuration
-  const updateAdapterConfig = async (
-    adapterName: string,
-    configUpdates: any
-  ) => {
-    if (!adapterSettings) return;
-
-    try {
-      setLoading(true);
-
-      // Get the current settings for this adapter
-      const currentSettings = adapterSettings[adapterName];
-      if (!currentSettings) {
-        throw new Error(`Settings for adapter '${adapterName}' not found`);
-      }
-
-      // Create updated settings with merged config
-      const updatedSettings: AdapterSettings = {
-        ...currentSettings,
-        config: {
-          ...currentSettings.config,
-          ...configUpdates,
-        },
-      };
-
-      // Update settings on the backend
-      await safeInvoke('update_adapter_settings', {
-        adapterName: adapterName,
-        settings: updatedSettings,
-      });
-
-      // Show success message
-      addError({
-        code: 'INFO',
-        message: `Updated configuration for: ${currentSettings.display_name}`,
-        severity: 'info',
-      });
-
-      // Refresh data
-      refreshData();
-    } catch (error) {
-      // Error already handled by safeInvoke
-      setLoading(false);
-    }
-  };
+  }, [activeTab]);
 
   return (
     <main className="container">
@@ -350,13 +200,13 @@ function App() {
       <div className="tabs">
         <button
           className={`tab-button ${activeTab === 'dashboard' ? 'active' : ''}`}
-          onClick={() => setActiveTab('dashboard')}
+          onClick={() => dispatch({ type: 'SET_ACTIVE_TAB', payload: 'dashboard' })}
         >
           Dashboard
         </button>
         <button
           className={`tab-button ${activeTab === 'settings' ? 'active' : ''}`}
-          onClick={() => setActiveTab('settings')}
+          onClick={() => dispatch({ type: 'SET_ACTIVE_TAB', payload: 'settings' })}
         >
           Settings
         </button>
@@ -375,475 +225,32 @@ function App() {
 
       {/* Content based on active tab */}
       {activeTab === 'dashboard' && (
-        <>
-          <div className="actions">
-            <button
-              onClick={sendTestEvent}
-              disabled={loading}
-              className="action-button"
-            >
-              {loading ? 'Processing...' : 'Send Test Event'}
-            </button>
-            <button
-              onClick={refreshData}
-              disabled={loading}
-              className="action-button"
-            >
-              {loading ? 'Loading...' : 'Refresh Data'}
-            </button>
-          </div>
-
-          {testEventResult && (
-            <div className="result-panel">
-              <h3>Test Event Result</h3>
-              <p>{testEventResult}</p>
-            </div>
-          )}
-        </>
+        <Dashboard
+          eventBusStats={eventBusStats}
+          adapterStatuses={adapterStatuses}
+          wsInfo={wsInfo}
+          lastUpdated={lastUpdated}
+          testEventResult={testEventResult}
+          loading={loading}
+          onSendTestEvent={handleSendTestEvent}
+          onRefreshData={refreshData}
+          onUpdatePort={handleUpdatePort}
+        />
       )}
 
       {activeTab === 'settings' && (
-        <div className="settings-section">
-          <h2>Adapter Configuration</h2>
-          <p className="settings-description">
-            Enable, disable, and configure data adapters. Changes to adapter
-            status will take effect immediately.
-          </p>
-
-          {loading ? (
-            <p className="loading">Loading adapter settings...</p>
-          ) : (
-            <div className="adapters-grid">
-              {adapterSettings &&
-                Object.entries(adapterSettings).map(
-                  ([adapterName, settings]) => {
-                    const status =
-                      adapterStatuses?.[adapterName] || 'Disconnected';
-                    return (
-                      <div
-                        key={adapterName}
-                        className={`adapter-card ${
-                          settings.enabled ? '' : 'disabled'
-                        }`}
-                      >
-                        <div className="adapter-header">
-                          <h3>{settings.display_name}</h3>
-                          <div
-                            className={`adapter-status status-${status.toLowerCase()}`}
-                          >
-                            {status}
-                          </div>
-                        </div>
-
-                        <p className="adapter-description">
-                          {settings.description}
-                        </p>
-
-                        <div className="adapter-config">
-                          {Object.entries(settings.config || {}).map(
-                            ([key, value]) => (
-                              <div key={key} className="config-item">
-                                <span className="config-label">{key}:</span>
-                                <span className="config-value">
-                                  {typeof value === 'boolean'
-                                    ? value
-                                      ? 'Yes'
-                                      : 'No'
-                                    : String(value)}
-                                </span>
-                              </div>
-                            )
-                          )}
-                        </div>
-
-                        <div className="adapter-actions">
-                          <button
-                            className={`toggle-button ${
-                              settings.enabled ? 'enabled' : 'disabled'
-                            }`}
-                            onClick={() => toggleAdapterEnabled(adapterName)}
-                          >
-                            {settings.enabled ? 'Disable' : 'Enable'}
-                          </button>
-
-                          <button
-                            className="config-button"
-                            onClick={() => setEditingAdapterConfig(adapterName)}
-                            disabled={!settings.enabled}
-                          >
-                            Configure
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  }
-                )}
-
-              {(!adapterSettings ||
-                Object.keys(adapterSettings).length === 0) && (
-                <p className="no-adapters">No adapters found</p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'dashboard' && (
-        <div className="stats-container">
-          <div className="stats-panel">
-            <div className="panel-header">
-              <h3>WebSocket Configuration</h3>
-            </div>
-
-            {wsInfo ? (
-              <div className="websocket-info">
-                <div className="websocket-connection">
-                  <h4>Event Stream Connection</h4>
-                  <p className="uri-display">
-                    <code>{wsInfo.uri}</code>
-                  </p>
-                  <div className="port-configuration">
-                    <div className="input-group">
-                      <label htmlFor="ws-port">Port:</label>
-                      <input
-                        id="ws-port"
-                        type="number"
-                        value={newPort}
-                        onChange={(e) => setNewPort(e.target.value)}
-                        min="1024"
-                        max="65535"
-                      />
-                      <button
-                        onClick={updatePort}
-                        disabled={loading || newPort === wsInfo.port.toString()}
-                        className="action-button small"
-                      >
-                        Update
-                      </button>
-                    </div>
-                    <p className="help-text">
-                      Change requires app restart to take effect
-                    </p>
-                  </div>
-                </div>
-
-                <div className="connection-help">
-                  <h4>Terminal Connection</h4>
-                  <p>Connect to the event stream using:</p>
-                  <pre className="terminal-command">{wsInfo.wscat}</pre>
-                  <p>Or with websocat:</p>
-                  <pre className="terminal-command">{wsInfo.websocat}</pre>
-                  <h4>HTTP API</h4>
-                  <p>REST API available at:</p>
-                  <pre className="terminal-command">{wsInfo.httpUri}</pre>
-                </div>
-              </div>
-            ) : (
-              <p className="loading">Loading WebSocket configuration...</p>
-            )}
-          </div>
-
-          <div className="stats-panel">
-            <div className="panel-header">
-              <h3>Event Bus Statistics</h3>
-              {lastUpdated && (
-                <span className="last-updated">
-                  Last updated: {lastUpdated.toLocaleTimeString()}
-                </span>
-              )}
-            </div>
-
-            {eventBusStats ? (
-              <div>
-                <div className="stat-summary">
-                  <div className="stat-box">
-                    <span className="stat-value">
-                      {eventBusStats.events_published}
-                    </span>
-                    <span className="stat-label">Events Published</span>
-                  </div>
-                  <div className="stat-box">
-                    <span className="stat-value">
-                      {eventBusStats.events_dropped}
-                    </span>
-                    <span className="stat-label">Events Dropped</span>
-                  </div>
-                </div>
-
-                <h4>Source Counts</h4>
-                <ul className="source-list">
-                  {Object.entries(eventBusStats.source_counts || {}).map(
-                    ([source, count]) => (
-                      <li key={source} className="source-item">
-                        <span className="source-name">{source}</span>
-                        <span className="source-count">{count as number}</span>
-                      </li>
-                    )
-                  )}
-                  {Object.keys(eventBusStats.source_counts || {}).length ===
-                    0 && <li className="empty-list">No events recorded yet</li>}
-                </ul>
-
-                <h4>Event Types</h4>
-                <ul className="type-list">
-                  {Object.entries(eventBusStats.type_counts || {}).map(
-                    ([type, count]) => (
-                      <li key={type} className="type-item">
-                        <span className="type-name">{type}</span>
-                        <span className="type-count">{count as number}</span>
-                      </li>
-                    )
-                  )}
-                  {Object.keys(eventBusStats.type_counts || {}).length ===
-                    0 && <li className="empty-list">No events recorded yet</li>}
-                </ul>
-              </div>
-            ) : (
-              <p className="loading">Loading event bus statistics...</p>
-            )}
-          </div>
-
-          <div className="stats-panel">
-            <div className="panel-header">
-              <h3>Adapter Status</h3>
-            </div>
-
-            {adapterStatuses ? (
-              <ul className="adapter-list">
-                {Object.entries(adapterStatuses).map(([adapter, status]) => {
-                  const statusClass =
-                    {
-                      Connected: 'status-connected',
-                      Connecting: 'status-connecting',
-                      Disconnected: 'status-disconnected',
-                      Error: 'status-error',
-                    }[status as string] || '';
-
-                  return (
-                    <li key={adapter} className={`adapter-item ${statusClass}`}>
-                      <span className="adapter-name">{adapter}</span>
-                      <span className="adapter-status">{status as string}</span>
-                    </li>
-                  );
-                })}
-                {Object.keys(adapterStatuses).length === 0 && (
-                  <li className="empty-list">No adapters registered</li>
-                )}
-              </ul>
-            ) : (
-              <p className="loading">Loading adapter statuses...</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Configuration Modal */}
-      {editingAdapterConfig && adapterSettings && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <h3>
-                Configure {adapterSettings[editingAdapterConfig]?.display_name}
-              </h3>
-              <button
-                className="modal-close"
-                onClick={() => setEditingAdapterConfig(null)}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="modal-content">
-              <ConfigurationForm
-                adapterName={editingAdapterConfig}
-                config={adapterSettings[editingAdapterConfig]?.config || {}}
-                onSave={(configUpdates) => {
-                  updateAdapterConfig(editingAdapterConfig, configUpdates);
-                  setEditingAdapterConfig(null);
-                }}
-                onCancel={() => setEditingAdapterConfig(null)}
-              />
-            </div>
-          </div>
-        </div>
+        <Settings
+          adapterSettings={adapterSettings}
+          adapterStatuses={adapterStatuses}
+          loading={loading}
+          editingAdapterConfig={editingAdapterConfig}
+          onToggleAdapter={handleToggleAdapter}
+          onConfigureAdapter={(name) => dispatch({ type: 'SET_EDITING_ADAPTER_CONFIG', payload: name })}
+          onCloseConfigModal={() => dispatch({ type: 'SET_EDITING_ADAPTER_CONFIG', payload: null })}
+          onSaveAdapterConfig={handleSaveAdapterConfig}
+        />
       )}
     </main>
-  );
-}
-
-// Simple information component for Twitch authentication
-function TwitchAuthInfo({
-  hasToken
-}: {
-  hasToken: boolean;
-}) {
-  return (
-    <div className="twitch-auth-container">
-      <h3>Twitch Authentication</h3>
-      
-      {hasToken ? (
-        <div className="auth-success">
-          <p>✓ Successfully authenticated with Twitch!</p>
-        </div>
-      ) : (
-        <div className="auth-instructions">
-          <p>To authenticate with Twitch:</p>
-          <ol>
-            <li>Set your Channel ID and Channel Login below</li>
-            <li>Enable the Twitch adapter using the toggle below</li>
-            <li>Watch the terminal for authentication instructions</li>
-            <li>Visit the URL shown in the terminal and enter the code</li>
-            <li>The adapter will automatically connect once authenticated</li>
-          </ol>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Configuration form component for adapter settings
-function ConfigurationForm({
-  adapterName,
-  config,
-  onSave,
-  onCancel,
-}: {
-  adapterName: string;
-  config: any;
-  onSave: (config: any) => void;
-  onCancel: () => void;
-}) {
-  const [formState, setFormState] = useState<any>(config);
-  const hasToken = Boolean(config.access_token);
-
-  // Handle input changes
-  const handleInputChange = (key: string, value: any) => {
-    setFormState({
-      ...formState,
-      [key]: value,
-    });
-  };
-
-  // Convert value to appropriate type based on original value
-  const convertValue = (key: string, value: string) => {
-    const originalValue = config[key];
-
-    // If original was a number, convert to number
-    if (typeof originalValue === 'number') {
-      return Number(value);
-    }
-
-    // If original was a boolean, convert to boolean
-    if (typeof originalValue === 'boolean') {
-      return value === 'true';
-    }
-
-    // Default to string
-    return value;
-  };
-
-  return (
-    <div>
-      {/* If Twitch adapter, show authentication info */}
-      {adapterName === 'twitch' && (
-        <div className="auth-section">
-          {/* Show requirements notice */}
-          <div className="auth-requirements">
-            <p className="note">
-              <strong>Note:</strong> For Twitch integration to work properly, you'll need to set 
-              either a Channel ID (numeric) or Channel Login (username) below. These are used 
-              after authentication to fetch channel and stream information.
-            </p>
-          </div>
-          
-          <TwitchAuthInfo hasToken={hasToken} />
-          
-          {hasToken && (
-            <div className="auth-actions">
-              <button 
-                className="action-button small"
-                onClick={() => {
-                  // Clear tokens and reset auth status
-                  const updatedConfig = {
-                    ...formState,
-                    access_token: null,
-                    refresh_token: null,
-                  };
-                  setFormState(updatedConfig);
-                }}
-              >
-                Disconnect
-              </button>
-            </div>
-          )}
-          
-          <hr className="section-divider" />
-        </div>
-      )}
-      
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSave(formState);
-        }}
-      >
-        {Object.entries(config).map(([key, value]) => {
-          // For Twitch adapter, hide token fields from editing
-          if (adapterName === 'twitch' && (key === 'access_token' || key === 'refresh_token')) {
-            return null;
-          }
-        
-          // Render appropriate input based on value type
-          if (typeof value === 'boolean') {
-            return (
-              <div key={key} className="form-group">
-                <label>{key}:</label>
-                <select
-                  value={formState[key]?.toString() || 'false'}
-                  onChange={(e) =>
-                    handleInputChange(key, e.target.value === 'true')
-                  }
-                >
-                  <option value="true">Yes</option>
-                  <option value="false">No</option>
-                </select>
-              </div>
-            );
-          } else if (typeof value === 'number') {
-            return (
-              <div key={key} className="form-group">
-                <label>{key}:</label>
-                <input
-                  type="number"
-                  value={formState[key] || 0}
-                  onChange={(e) => handleInputChange(key, Number(e.target.value))}
-                />
-              </div>
-            );
-          } else {
-            return (
-              <div key={key} className="form-group">
-                <label>{key}:</label>
-                <input
-                  type="text"
-                  value={formState[key] || ''}
-                  onChange={(e) => handleInputChange(key, e.target.value)}
-                />
-              </div>
-            );
-          }
-        })}
-
-        <div className="form-actions">
-          <button type="button" className="cancel-button" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="submit" className="save-button">
-            Save Changes
-          </button>
-        </div>
-      </form>
-    </div>
   );
 }
 
