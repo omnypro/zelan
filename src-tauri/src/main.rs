@@ -4,11 +4,14 @@
 use anyhow::{anyhow, Result};
 use serde_json::json;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{App, AppHandle, Manager, Runtime};
 use tauri_plugin_store::{Store, StoreExt};
 use tracing::{debug, error, info};
 use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 use zelan_lib::{plugin, Config, StreamService};
+
+#[cfg(target_os = "macos")]
+use window_vibrancy::{apply_vibrancy,  NSVisualEffectMaterial};
 
 /// Initialize all stores used by the application
 fn initialize_stores<R: Runtime>(app: &AppHandle<R>) -> Result<(Arc<Store<R>>, Arc<Store<R>>)> {
@@ -84,6 +87,15 @@ fn load_configuration<R: Runtime>(config_store: &Arc<Store<R>>) -> Result<Config
     Ok(config)
 }
 
+fn setup_decorations(app: &mut App) {
+    info!("Setting up window decorations");
+
+    let window = app.get_webview_window("main").unwrap();
+
+    #[cfg(target_os = "macos")]
+    apply_vibrancy(&window, NSVisualEffectMaterial::WindowBackground, None, Some(8.0)).expect("Unsupported platform! 'apply vibrancy' is only supported on macOS");
+}
+
 fn main() {
     // Load environment variables from .env file if it exists
     let env_file_path = match dotenvy::dotenv() {
@@ -97,7 +109,8 @@ fn main() {
             // Default to info level if RUST_LOG is not set
             if cfg!(debug_assertions) {
                 // More verbose in debug mode
-                "zelan_lib=info,zelan_lib::event_bus=trace,zelan_lib::adapters::obs=debug,warn".into()
+                "zelan_lib=info,zelan_lib::event_bus=trace,zelan_lib::adapters::obs=debug,warn"
+                    .into()
             } else {
                 // Less verbose in release mode
                 "zelan_lib=info,zelan_lib::adapters::obs=info,warn".into()
@@ -132,6 +145,8 @@ fn main() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             info!("Setting up Tauri application");
+
+            setup_decorations(app);
 
             // Create the Zelan state
             let zelan_state = plugin::init_state();
