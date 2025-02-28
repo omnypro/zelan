@@ -10,11 +10,14 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Zelan",
         "width": 864,
-        "height": 486
+        "height": 486,
+        "decorations": false,
+        "transparent": true
       }
     ],
     "security": {
