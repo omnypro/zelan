@@ -3,28 +3,32 @@
 ## Project Overview
 Zelan is a lightweight, locally-hosted data aggregation service that ingests data from streaming platforms (Twitch, OBS, etc.) and exposes it through a standardized API. It enables stream overlays and third-party applications to access unified data without direct coupling to source services. We're transitioning from Rust/Tauri to an Electron/TypeScript approach to improve development velocity and simplify complex features like authentication.
 
-## Recent Changes
-We're transitioning to an Electron architecture with RxJS:
-- Moved from Rust/Tauri to Electron for better ecosystem support
-- Implemented reactive programming patterns using RxJS
-- Created an event-driven architecture with Observable streams
-- Developed a more robust authentication system for OAuth flows
-- Simplified adapter interfaces for connecting to streaming services
+## Current State of the Codebase
+The project is in its initial setup phase using electron-vite as the foundation:
+- Fresh Electron/React/TypeScript project based on electron-vite template
+- Standard Electron architecture with main, preload, and renderer processes
+- Basic project structure in place but minimal implementation
+- Core functionalities from the architecture plan not yet implemented
+- Currently at the starting point for implementing the planned reactive architecture
 
-We also completed the frontend refactoring:
-- Implemented React components with RxJS hooks for reactive data
-- Created a dashboard for monitoring events
-- Developed an authentication UI with proper flow visualization
-- Added adapter status indicators and configuration interfaces
-- Built a WebSocket server info display with connection examples
+## Dependencies and Technologies
+- Electron 34.2.0 for cross-platform desktop application
+- React 18.3.1 with TypeScript 5.7.3 for UI development
+- Vite 6.1.0 with electron-vite for development and building
+- electron-builder for packaging applications for different platforms
+- No RxJS implementation yet (planned but not installed)
+- No authentication, adapters, or WebSocket server yet implemented
 
 ## Build Commands
-- `npm start` - Start React development server and Electron app
-- `npm run start:react` - Start only the React development server
-- `npm run start:electron` - Start only the Electron app
+- `npm run dev` - Start the development environment
+- `npm run start` - Preview the built application
 - `npm run build` - Build the frontend and compile TypeScript
-- `npm run package` - Package the app for distribution
-- `npm run make` - Create distributable formats
+- `npm run typecheck` - Run TypeScript type checking
+- `npm run lint` - Run ESLint for code quality
+- `npm run format` - Run Prettier for code formatting
+- `npm run build:mac` - Build for macOS
+- `npm run build:win` - Build for Windows
+- `npm run build:linux` - Build for Linux
 
 ## Environment Setup
 This project requires environment variables for certain features to work properly.
@@ -97,6 +101,7 @@ This project requires environment variables for certain features to work properl
 ### Electron
 - Keep main process code separate from renderer
 - Use proper IPC patterns for main-renderer communication
+- Use tRPC for type-safe IPC between main and renderer
 - Implement secure preload scripts for API exposure
 - Handle window management properly
 - Secure token storage using Electron Store with encryption
