@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { EventCategory } from '../../../shared/types/events';
-import { createEventStream, EventStream } from '../../../shared/core/bus/createEventStream';
-import { rendererEventBus } from '../services/eventBus';
-import { useObservable, useObservableWithStatus } from './useObservable';
+import { EventCategory } from '@shared/types/events';
+import { createEventStream, EventStream } from '@shared/core/bus/createEventStream';
+import { rendererEventBus } from '@renderer/services/eventBus';
+import { useObservable, useObservableWithStatus } from '@renderer/hooks/useObservable';
 
 /**
  * Create an event stream for a specific category and type

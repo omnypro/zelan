@@ -5,32 +5,32 @@ export interface Event<T = unknown> {
   /**
    * Unique identifier for the event
    */
-  id: string;
-  
+  id: string
+
   /**
    * Timestamp when the event was created
    */
-  timestamp: number;
-  
+  timestamp: number
+
   /**
    * Source of the event (adapter name, system, etc.)
    */
-  source: string;
-  
+  source: string
+
   /**
    * Event category for grouping related events
    */
-  category: EventCategory;
-  
+  category: EventCategory
+
   /**
    * Specific event type within the category
    */
-  type: string;
-  
+  type: string
+
   /**
    * Event payload containing the actual data
    */
-  payload: T;
+  payload: T
 }
 
 /**
@@ -44,7 +44,7 @@ export enum EventCategory {
   WEBSOCKET = 'websocket',
   TWITCH = 'twitch',
   OBS = 'obs',
-  TEST = 'test',
+  TEST = 'test'
 }
 
 /**
@@ -55,7 +55,7 @@ export enum SystemEventType {
   SHUTDOWN = 'shutdown',
   ERROR = 'error',
   WARNING = 'warning',
-  INFO = 'info',
+  INFO = 'info'
 }
 
 /**
@@ -67,7 +67,7 @@ export enum AuthEventType {
   LOGIN_FAILED = 'login_failed',
   LOGOUT = 'logout',
   TOKEN_REFRESH = 'token_refresh',
-  TOKEN_EXPIRED = 'token_expired',
+  TOKEN_EXPIRED = 'token_expired'
 }
 
 /**
@@ -79,7 +79,7 @@ export enum AdapterEventType {
   RECONNECTING = 'reconnecting',
   DATA_RECEIVED = 'data_received',
   ERROR = 'error',
-  STATUS_CHANGED = 'status_changed',
+  STATUS_CHANGED = 'status_changed'
 }
 
 /**
@@ -90,39 +90,39 @@ export enum WebSocketEventType {
   CLIENT_DISCONNECTED = 'client_disconnected',
   MESSAGE_RECEIVED = 'message_received',
   MESSAGE_SENT = 'message_sent',
-  ERROR = 'error',
+  ERROR = 'error'
 }
 
 /**
  * System event payload types
  */
 export interface SystemStartupPayload {
-  appVersion: string;
-  startTime: number;
+  appVersion: string
+  startTime: number
 }
 
 export interface SystemErrorPayload {
-  error: string;
-  code?: string | number;
-  stack?: string;
+  error: string
+  code?: string | number
+  stack?: string
 }
 
 /**
  * Authentication event payload types
  */
 export interface AuthPayload {
-  service: string;
-  userId?: string;
+  service: string
+  userId?: string
 }
 
 export interface AuthSuccessPayload extends AuthPayload {
-  expiresAt: number;
-  scopes: string[];
+  expiresAt: number
+  scopes: string[]
 }
 
 export interface AuthErrorPayload extends AuthPayload {
-  error: string;
-  code?: string;
+  error: string
+  code?: string
 }
 
 /**
@@ -130,11 +130,11 @@ export interface AuthErrorPayload extends AuthPayload {
  */
 export function isEvent(obj: unknown): obj is Event {
   if (!obj || typeof obj !== 'object') {
-    return false;
+    return false
   }
-  
-  const event = obj as Record<string, unknown>;
-  
+
+  const event = obj as Record<string, unknown>
+
   return (
     typeof event.id === 'string' &&
     typeof event.timestamp === 'number' &&
@@ -142,16 +142,16 @@ export function isEvent(obj: unknown): obj is Event {
     typeof event.category === 'string' &&
     typeof event.type === 'string' &&
     'payload' in event
-  );
+  )
 }
 
 /**
  * Type union for all event payloads
  */
-export type EventPayload = 
+export type EventPayload =
   | SystemStartupPayload
   | SystemErrorPayload
   | AuthPayload
   | AuthSuccessPayload
   | AuthErrorPayload
-  | unknown;
+  | unknown

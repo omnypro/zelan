@@ -4,15 +4,11 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
 // Import event bus and system events
-import { mainEventBus } from './services/eventBus'
-import { 
-  SystemStartupEvent, 
-  SystemShutdownEvent,
-  SystemInfoEvent
-} from '../shared/core/events'
+import { mainEventBus } from '@main/services/eventBus'
+import { SystemStartupEvent, SystemShutdownEvent, SystemInfoEvent } from '@shared/core/events'
 
 // Track the main window instance
-let mainWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindow | null = null
 
 /**
  * Initialize the event system
@@ -20,14 +16,14 @@ let mainWindow: BrowserWindow | null = null;
 function initializeEventSystem(): void {
   // Subscribe to events for system operations
   console.log('Initializing event system...')
-  
+
   // Emit startup event
   const startupPayload = {
     appVersion: app.getVersion(),
     startTime: Date.now()
   }
   mainEventBus.publish(new SystemStartupEvent(startupPayload))
-  
+
   // Log info event
   mainEventBus.publish(new SystemInfoEvent('Event system initialized'))
 }
@@ -51,7 +47,7 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
-    
+
     // Emit event when window is shown
     mainEventBus.publish(new SystemInfoEvent('Main window ready'))
   })
@@ -110,9 +106,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   // Emit shutdown event
   mainEventBus.publish(new SystemShutdownEvent())
-  
+
   // Allow time for any shutdown handlers to run
-  // For async shutdown operations, a more robust shutdown sequence 
+  // For async shutdown operations, a more robust shutdown sequence
   // would be needed with promises
 })
 

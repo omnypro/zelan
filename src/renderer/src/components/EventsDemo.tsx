@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { EventCategory, SystemEventType } from '../../../shared/types/events';
-import { useEvents, useEventPublisher } from '../hooks/useEventStream';
-import { rendererEventBus } from '../services/eventBus';
-import { SystemInfoEvent } from '../../../shared/core/events';
+import { EventCategory, SystemEventType } from '@shared/types/events';
+import { useEvents, useEventPublisher } from '@renderer/hooks/useEventStream';
+import { rendererEventBus } from '@renderer/services/eventBus';
+import { SystemInfoEvent } from '@shared/core/events';
 
 /**
  * Component to demonstrate the event system
