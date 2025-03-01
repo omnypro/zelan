@@ -244,6 +244,11 @@ impl TwitchAdapter {
     pub async fn load_tokens_from_manager(&self) -> Result<bool> {
         if let Some(tm) = &self.token_manager {
             info!("Attempting to load Twitch tokens from TokenManager");
+            
+            // First ensure token expiration is set
+            if let Err(e) = tm.ensure_twitch_token_expiration().await {
+                warn!("Failed to ensure token expiration during loading: {}", e);
+            }
 
             match tm.get_tokens("twitch").await {
                 Ok(Some(token_data)) => {
@@ -339,19 +344,33 @@ impl TwitchAdapter {
                         
                         // Set expiration from token
                         let expires_in = token.expires_in().as_secs();
-                        if expires_in > 0 {
-                            info!("Setting token expiration to {} seconds from now", expires_in);
-                            token_data.set_expiration(expires_in);
+                        
+                        // Default to 4 hours (14400 seconds) if no expiration is provided
+                        let expires_to_use = if expires_in > 0 {
+                            info!("Setting token expiration to {} seconds ({} minutes) from now", 
+                                 expires_in, expires_in / 60);
+                            expires_in
                         } else {
-                            warn!("Token has invalid expires_in value: {}", expires_in);
-                        }
+                            warn!("Token has invalid expires_in value: {}. Defaulting to 4 hours (14400 seconds)", expires_in);
+                            14400 // Default to 4 hours, which is the standard Twitch token lifetime
+                        };
+                        
+                        // Always set an expiration, even if we have to use the default
+                        token_data.set_expiration(expires_to_use);
                         
                         // Track when the refresh token was created/refreshed
                         token_data.track_refresh_token_created();
                         
                         // Store in TokenManager
                         match tm.store_tokens("twitch", token_data).await {
-                            Ok(_) => info!("Successfully updated token data in TokenManager with expiration info"),
+                            Ok(_) => {
+                                info!("Successfully updated token data in TokenManager with expiration info");
+                                
+                                // Double-check that expiration is set (handles null expiration case)
+                                if let Err(e) = tm.ensure_twitch_token_expiration().await {
+                                    warn!("Failed to ensure token expiration: {}", e);
+                                }
+                            },
                             Err(e) => warn!("Failed to update token data in TokenManager: {}", e),
                         }
                     }
@@ -524,6 +543,7 @@ impl TwitchAdapter {
                         AuthEvent::AuthenticationSuccess => "success",
                         AuthEvent::AuthenticationFailed { .. } => "failed",
                         AuthEvent::TokenRefreshed => "token_refreshed",
+                        AuthEvent::TokenRefreshDetails { .. } => "token_refresh_details",
                         AuthEvent::TokenExpired { .. } => "token_expired",
                     };
 
@@ -565,6 +585,10 @@ impl TwitchAdapter {
                                 "message": "Successfully refreshed Twitch token",
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })
+                        }
+                        AuthEvent::TokenRefreshDetails { expires_in, payload } => {
+                            // Forward the payload from the auth manager
+                            payload.clone()
                         }
                         AuthEvent::TokenExpired { error } => {
                             json!({
@@ -624,6 +648,15 @@ impl TwitchAdapter {
                         let mut config = adapter_clone.config.write().await;
                         config.access_token = None;
                         config.refresh_token = None;
+                        
+                        // Also clear tokens from TokenManager if available
+                        if let Some(tm) = &adapter_clone.token_manager {
+                            if let Err(remove_err) = tm.remove_tokens("twitch").await {
+                                error!("Failed to remove invalid tokens from TokenManager: {}", remove_err);
+                            } else {
+                                info!("Successfully removed invalid tokens from TokenManager");
+                            }
+                        }
 
                         // Publish an event so the UI can notify the user
                         let payload = json!({
@@ -842,10 +875,19 @@ impl TwitchAdapter {
 
                             // Set expiration if available
                             let expires_in = token.expires_in().as_secs();
-                            info!("Setting token expiration time in TokenData: {} seconds", expires_in);
-                            if expires_in > 0 {
-                                token_data.set_expiration(expires_in);
-                            }
+                            info!("Setting token expiration time in TokenData: {} seconds ({} minutes)", 
+                                  expires_in, expires_in / 60);
+                            
+                            // Default to 4 hours (14400 seconds) if no expiration is provided
+                            let expires_to_use = if expires_in > 0 {
+                                expires_in
+                            } else {
+                                info!("Token has no expiration time, defaulting to 4 hours (14400 seconds)");
+                                14400 // Default to 4 hours, which is the standard Twitch token lifetime
+                            };
+                            
+                            // Always set an expiration, even if we have to use the default
+                            token_data.set_expiration(expires_to_use);
 
                             // Track when the refresh token was created for 30-day monitoring
                             token_data.track_refresh_token_created();
@@ -860,7 +902,16 @@ impl TwitchAdapter {
 
                             // Store in token manager
                             match tm.store_tokens("twitch", token_data).await {
-                                Ok(_) => info!("Successfully stored Twitch tokens in TokenManager"),
+                                Ok(_) => {
+                                    info!("Successfully stored Twitch tokens in TokenManager");
+                                    
+                                    // Ensure expiration is set (handles null expiration case)
+                                    if let Err(e) = tm.ensure_twitch_token_expiration().await {
+                                        warn!("Failed to ensure token expiration: {}", e);
+                                    } else {
+                                        info!("Successfully ensured token expiration is set");
+                                    }
+                                },
                                 Err(e) => error!("Failed to store tokens in TokenManager: {}", e),
                             }
                         } else {
@@ -1209,26 +1260,28 @@ impl TwitchAdapter {
                 continue;
             }
 
-            // Reacquire auth_manager to get the token
-            let auth_manager = self.auth_manager.read().await;
+            // Get the auth manager first, then check if token needs refresh
+            // IMPORTANT: Need to use a write lock when refreshing tokens
+            let auth_manager = self.auth_manager.write().await;
+            
+            // Check if token needs refresh FIRST, before using it
+            info!("Checking if token needs refresh before using it");
+            let refresh_result = auth_manager.refresh_token_if_needed().await;
+            
+            // Now get the (potentially refreshed) token
             let token = match auth_manager.get_token().await {
                 Some(token) => token,
                 None => {
                     // This shouldn't happen as we just checked is_authenticated
                     error!("No token available despite being authenticated");
+                    drop(auth_manager); // Release the write lock
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     continue;
                 }
             };
 
-            // Update token in TokenManager if it's refreshed
-            let token_clone = match auth_manager.get_token().await {
-                Some(t) => Some(t),
-                None => None,
-            };
-
-            // Check if token needs refresh
-            let refresh_result = auth_manager.refresh_token_if_needed().await;
+            // Store token for comparison after refresh attempt
+            let token_clone = Some(token.clone());
 
             // If we got a refreshed token, update it in TokenManager
             if refresh_result.is_ok() {
@@ -1262,9 +1315,19 @@ impl TwitchAdapter {
 
                                 // Set expiration if available
                                 let expires_in = new_token.expires_in().as_secs();
-                                if expires_in > 0 {
-                                    token_data.set_expiration(expires_in);
-                                }
+                                
+                                // Default to 4 hours (14400 seconds) if no expiration is provided
+                                let expires_to_use = if expires_in > 0 {
+                                    info!("Refreshed token has expiration time: {} seconds ({} minutes)", 
+                                         expires_in, expires_in / 60);
+                                    expires_in
+                                } else {
+                                    info!("Refreshed token has no expiration time, defaulting to 4 hours");
+                                    14400 // Default to 4 hours, which is the standard Twitch token lifetime
+                                };
+                                
+                                // Always set an expiration, even if we have to use the default
+                                token_data.set_expiration(expires_to_use);
 
                                 // Track when the refresh token was created for 30-day monitoring
                                 token_data.track_refresh_token_created();
@@ -1283,6 +1346,29 @@ impl TwitchAdapter {
                                 let mut config = self.config.write().await;
                                 config.access_token = Some(access_token);
                                 config.refresh_token = refresh_token;
+                                
+                                // Log the token expiry to help with debugging
+                                // Can't use await in a closure, so we need to do this differently
+                                info!("Refreshed and updated token information in TokenManager");
+                                
+                                // Use a spawned task to log the token expiration info
+                                let tm_clone = tm.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    match tm_clone.get_tokens("twitch").await {
+                                        Ok(Some(token_data)) => {
+                                            if let Some(expires_at) = token_data.expires_in {
+                                                let now = chrono::Utc::now();
+                                                let duration = expires_at.signed_duration_since(now);
+                                                let seconds = duration.num_seconds();
+                                                info!("Token will expire in {} seconds ({} minutes)", 
+                                                    seconds, seconds / 60);
+                                            } else {
+                                                warn!("Token in TokenManager has no expiration time");
+                                            }
+                                        },
+                                        _ => warn!("Could not retrieve token from TokenManager for expiration check"),
+                                    }
+                                });
                             }
                         }
                     }

@@ -286,6 +286,13 @@ impl ZelanState {
         info!("Setting app handle on TokenManager");
         token_manager.set_app(app.clone()).await;
         info!("TokenManager app handle successfully set");
+        
+        // Ensure all tokens have expiration times set
+        if let Err(e) = token_manager.ensure_twitch_token_expiration().await {
+            warn!("Error ensuring Twitch token expiration: {}", e);
+        } else {
+            info!("Successfully ensured Twitch token expiration times");
+        }
 
         // Pass the app handle to the initialization task
         let app_handle = app.clone();

@@ -48,6 +48,18 @@ impl TokenData {
     pub fn set_expiration(&mut self, expires_in_secs: u64) {
         let expires_in = chrono::Utc::now() + chrono::Duration::seconds(expires_in_secs as i64);
         self.expires_in = Some(expires_in);
+        
+        // Also store the expiration time in metadata for better tracking
+        self.set_metadata_value(
+            "expires_at",
+            serde_json::Value::String(expires_in.to_rfc3339()),
+        );
+        
+        // Store the original seconds value for diagnostics
+        self.set_metadata_value(
+            "expires_in_seconds",
+            serde_json::Value::Number(serde_json::Number::from(expires_in_secs)),
+        );
     }
 
     /// Set the token metadata value
@@ -177,11 +189,12 @@ impl TokenManager {
             anyhow!("Failed to access secure store: {}", e)
         })?;
 
-        // Convert tokens to JSON
+        // Convert tokens to JSON, ensuring expires_in is properly serialized as a string
+        let expires_in_str = tokens.expires_in.map(|dt| dt.to_rfc3339());
         let token_json = json!({
             "access_token": tokens.access_token,
             "refresh_token": tokens.refresh_token,
-            "expires_in": tokens.expires_in,
+            "expires_in": expires_in_str,
             "metadata": tokens.metadata
         });
 
@@ -480,6 +493,50 @@ impl TokenManager {
         }
     }
     
+    /// Ensures tokens have an expiration time set
+    /// If no expiration time is set, uses a default token lifetime
+    pub async fn ensure_token_expiration(&self, adapter_name: &str, default_expiry_secs: u64) -> Result<()> {
+        info!(adapter = %adapter_name, "Ensuring token has expiration time set");
+        
+        // Get the current tokens
+        match self.get_tokens(adapter_name).await? {
+            Some(mut token_data) => {
+                // Check if token has an expiration time
+                if token_data.expires_in.is_none() {
+                    info!(
+                        adapter = %adapter_name, 
+                        "Token has no expiration time, setting default of {} seconds", 
+                        default_expiry_secs
+                    );
+                    
+                    // Set default expiration time
+                    token_data.set_expiration(default_expiry_secs);
+                    
+                    // Store the updated token
+                    self.store_tokens(adapter_name, token_data).await?;
+                    
+                    info!(adapter = %adapter_name, "Successfully updated token with default expiration time");
+                } else {
+                    debug!(adapter = %adapter_name, "Token already has expiration time set");
+                }
+                
+                Ok(())
+            },
+            None => {
+                debug!(adapter = %adapter_name, "No tokens found to update");
+                Ok(())
+            }
+        }
+    }
+    
+    /// Specifically ensure Twitch tokens have an expiration time
+    /// The default Twitch token lifetime is 4 hours (14400 seconds)
+    pub async fn ensure_twitch_token_expiration(&self) -> Result<()> {
+        // Default Twitch token lifetime is 4 hours (14400 seconds)
+        const DEFAULT_TWITCH_TOKEN_EXPIRY: u64 = 14400;
+        self.ensure_token_expiration("twitch", DEFAULT_TWITCH_TOKEN_EXPIRY).await
+    }
+
     /// Attempt to recover tokens with validation and error handling
     /// This provides a simple one-step method for secure token recovery
     pub async fn recover_tokens_with_validation(&self, adapter_name: &str) -> Result<Option<TokenData>> {

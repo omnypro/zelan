@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use serde_json::json;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -120,6 +121,11 @@ pub enum AuthEvent {
     AuthenticationFailed { error: String },
     /// Token refreshed
     TokenRefreshed,
+    /// Token refresh details for tracking expiration
+    TokenRefreshDetails {
+        expires_in: u64,
+        payload: serde_json::Value,
+    },
     /// Token expired or refresh failed
     TokenExpired { error: String },
 }
@@ -132,6 +138,7 @@ impl AuthEvent {
             AuthEvent::AuthenticationSuccess => "success",
             AuthEvent::AuthenticationFailed { .. } => "failed",
             AuthEvent::TokenRefreshed => "token_refreshed",
+            AuthEvent::TokenRefreshDetails { .. } => "token_refresh_details",
             AuthEvent::TokenExpired { .. } => "token_expired",
         }
     }
@@ -352,7 +359,7 @@ impl TwitchAuthManager {
         let http_client = reqwest::Client::new();
 
         info!("Validating token with Twitch API");
-        
+
         let response = http_client
             .get("https://id.twitch.tv/oauth2/validate")
             .header("Authorization", format!("OAuth {}", token.secret()))
@@ -361,13 +368,16 @@ impl TwitchAuthManager {
 
         // Log response status
         info!("Token validation response status: {}", response.status());
-        
+
         // Check if request succeeded
         let status = response.status();
         if !status.is_success() {
             // Clone the response for error text
             let error_text = response.text().await?;
-            error!("Token validation failed with status {}: {}", status, error_text);
+            error!(
+                "Token validation failed with status {}: {}",
+                status, error_text
+            );
             return Err(anyhow!(
                 "Failed to validate token: HTTP {} - {}",
                 status,
@@ -378,7 +388,7 @@ impl TwitchAuthManager {
         // Parse the response
         let response_text = response.text().await?;
         info!("Received valid token response, trying to parse");
-        
+
         match serde_json::from_str::<ValidatedToken>(&response_text) {
             Ok(validated) => {
                 info!(
@@ -418,16 +428,24 @@ impl TwitchAuthManager {
 
     /// Refresh the token if needed or force a refresh
     pub async fn refresh_token_if_needed(&self) -> Result<()> {
+        // IMPORTANT: We need to get a mutable reference to auth_state
         let auth_state = self.auth_state.read().await.clone();
 
         if let AuthState::Authenticated(mut token) = auth_state {
+            // Log more details about the token
+            let expires_in_secs = token.expires_in().as_secs();
+            let expires_in_mins = expires_in_secs / 60;
+            let expires_in_hours = expires_in_mins / 60;
+            
             // Check if token is about to expire (within 15 minutes - increased from 5 minutes for safety)
             // This gives us a wider buffer before the 4 hour expiry
-            let should_refresh = token.expires_in().as_secs() < 900;
-            
+            let should_refresh = expires_in_secs < 900;
+
             info!(
-                "Current token: expires_in={}s, has_refresh_token={}, should_refresh={}",
-                token.expires_in().as_secs(),
+                "Current token: expires_in={}s ({}m or {}h), has_refresh_token={}, should_refresh={}",
+                expires_in_secs,
+                expires_in_mins,
+                expires_in_hours,
                 token.refresh_token.is_some(),
                 should_refresh
             );
@@ -465,41 +483,68 @@ impl TwitchAuthManager {
                         // Send refresh event
                         self.send_event(AuthEvent::TokenRefreshed).await?;
 
-                        // Return the refreshed token details for TokenManager update
-                        info!("Sending refreshed token data to TokenManager for secure storage");
+                        // Get token details for potential TokenManager update
+                        info!("Refreshed token ready for TokenManager update");
+                        
+                        // Emit an event with additional information about expiration
+                        let expires_in_secs = token.expires_in().as_secs();
+                        let token_refresh_payload = json!({
+                            "event": "token_refresh_details",
+                            "access_token_len": token.access_token.secret().len(),
+                            "has_refresh_token": token.refresh_token.is_some(),
+                            "expires_in_seconds": expires_in_secs,
+                            "expires_in_minutes": expires_in_secs / 60,
+                            "expires_in_hours": expires_in_secs / 3600,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        });
+                        
+                        // Try to send this additional information
+                        // Create a token refresh details event
+                        let refresh_details_event = AuthEvent::TokenRefreshDetails { 
+                            expires_in: expires_in_secs,
+                            payload: token_refresh_payload
+                        };
+                        
+                        // Try to send the event
+                        if let Err(e) = self.send_event(refresh_details_event).await {
+                            warn!("Could not send token refresh details: {}", e);
+                        }
 
                         Ok(())
                     }
                     Err(e) => {
                         // Enhanced error logging
                         error!("Failed to refresh token: {}", e);
-                        
+
                         // Try to extract more details from error
                         let error_string = e.to_string();
                         if error_string.contains("invalid_grant") {
                             error!("Refresh token is invalid or expired (invalid_grant)");
-                            
+
                             // This is the 30-day expiry case
                             warn!("Refresh token appears to be expired (30 day limit). Need to re-authenticate using device code flow.");
                         } else if error_string.contains("invalid_request") {
                             error!("Invalid refresh request (invalid_request)");
                         } else if error_string.contains("HTTP status") {
                             error!("HTTP error during refresh: {}", error_string);
-                            
+
                             // Try to extract more HTTP details if available
                             if let Some(status_start) = error_string.find("HTTP status") {
                                 if let Some(status_end) = error_string[status_start..].find('\n') {
-                                    let status_line = &error_string[status_start..(status_start + status_end)];
+                                    let status_line =
+                                        &error_string[status_start..(status_start + status_end)];
                                     error!("HTTP status details: {}", status_line);
                                 }
                             }
                         }
-                        
+
                         // Try to extract the raw response if available
                         if error_string.contains("response text") {
                             if let Some(text_start) = error_string.find("response text") {
-                                error!("Response text from failed refresh: {}", 
-                                       &error_string[text_start..]);
+                                error!(
+                                    "Response text from failed refresh: {}",
+                                    &error_string[text_start..]
+                                );
                             }
                         }
 
@@ -570,7 +615,7 @@ impl TwitchAuthManager {
                     Err(e) => {
                         // This is not as critical since the token was still valid
                         warn!("Failed to perform proactive token refresh: {}", e);
-                        
+
                         // Try to extract more details from error
                         let error_string = e.to_string();
                         if error_string.contains("invalid_grant") {
@@ -606,7 +651,7 @@ impl TwitchAuthManager {
 
         // Create access token object
         let access_token_obj = AccessToken::new(access_token);
-        let refresh_token_obj = refresh_token.map(RefreshToken::new);
+        let refresh_token_obj = refresh_token.clone().map(RefreshToken::new);
 
         // Create a single HTTP client we'll reuse for all operations
         let http_client = reqwest::Client::builder()
@@ -631,7 +676,8 @@ impl TwitchAuthManager {
                     access_token_obj,
                     refresh_token_obj,
                     None,
-                ).await?;
+                )
+                .await?;
 
                 // Token is valid, store it and return
                 info!("Successfully validated existing token");
@@ -640,113 +686,85 @@ impl TwitchAuthManager {
             }
             Err(e) => {
                 // Token is invalid, try to refresh if we have a refresh token
-                if let Some(refresh_token) = refresh_token_obj.clone() {
-                    info!("Token validation failed: {}. Trying to refresh token.", e);
-
-                    // Create a token from existing token components using the safe method
-                    let mut temporary_token = UserToken::from_existing(
+                if let Some(refresh_token_str) = refresh_token {
+                    info!("Token validation failed: {}. Trying to refresh token directly.", e);
+                    
+                    // Get client ID for token refresh
+                    let client_id = get_client_id()?;
+                    
+                    // Build the refresh request directly using HTTP
+                    let refresh_params = [
+                        ("client_id", client_id.as_str()),
+                        ("grant_type", "refresh_token"),
+                        ("refresh_token", &refresh_token_str),
+                    ];
+                    
+                    info!("Sending direct token refresh request to Twitch API");
+                    
+                    // Send the refresh request directly via HTTP
+                    let refresh_response = http_client
+                        .post("https://id.twitch.tv/oauth2/token")
+                        .form(&refresh_params)
+                        .send()
+                        .await?;
+                    
+                    let status = refresh_response.status();
+                    info!("Direct refresh response status: {}", status);
+                    
+                    // Check if refresh succeeded
+                    if !status.is_success() {
+                        let error_text = refresh_response.text().await?;
+                        error!("Direct refresh request failed: {}", error_text);
+                        return Err(anyhow!("Failed to refresh token: {}", error_text));
+                    }
+                    
+                    // Parse successful response
+                    let refresh_json: serde_json::Value = refresh_response.json().await?;
+                    
+                    // Extract new tokens
+                    let new_access_token = match refresh_json.get("access_token") {
+                        Some(token) => token.as_str().ok_or_else(|| anyhow!("Missing access_token"))?,
+                        None => return Err(anyhow!("Refresh response missing access_token")),
+                    };
+                    
+                    let new_refresh_token = match refresh_json.get("refresh_token") {
+                        Some(token) => Some(token.as_str().ok_or_else(|| anyhow!("Invalid refresh_token"))?),
+                        None => {
+                            warn!("No new refresh token received, which is unexpected for device code flow");
+                            None
+                        },
+                    };
+                    
+                    let expires_in = match refresh_json.get("expires_in") {
+                        Some(exp) => exp.as_u64().unwrap_or(14400),
+                        None => 14400, // Default to 4 hours
+                    };
+                    
+                    info!("Successfully obtained new tokens via direct refresh. Expires in {}s", expires_in);
+                    
+                    // Create new token objects
+                    let new_access_token_obj = AccessToken::new(new_access_token.to_string());
+                    let new_refresh_token_obj = new_refresh_token.map(|t| RefreshToken::new(t.to_string()));
+                    
+                    // Now we can create a proper UserToken
+                    info!("Creating proper UserToken from refreshed tokens");
+                    let token = UserToken::from_existing(
                         &http_client,
-                        access_token_obj,
-                        Some(refresh_token),
+                        new_access_token_obj,
+                        new_refresh_token_obj,
                         None,
                     ).await?;
 
-                    info!("Created temporary token for refresh, attempting to refresh now");
-
-                    // Use the token's built-in refresh functionality with additional error capture
-                    match temporary_token.refresh_token(&http_client).await {
-                        Ok(()) => {
-                            // Token was refreshed successfully
-                            info!("Successfully refreshed token");
-
-                            // Log token details (without exposing the actual token)
-                            info!(
-                                "New token details: expires_in={}s, has_refresh_token={}",
-                                temporary_token.expires_in().as_secs(),
-                                temporary_token.refresh_token.is_some()
-                            );
-
-                            // Check if we received a new refresh token (DCF refresh tokens are one-time use)
-                            if temporary_token.refresh_token.is_none() {
-                                warn!("No new refresh token received after refresh. Refresh tokens should be one-time use for device code flow.");
-                            } else {
-                                info!("Received new refresh token as expected");
-                            }
-
-                            // We need to validate the new token to get user data
-                            let validated = self
-                                .validate_token(temporary_token.access_token.clone())
-                                .await?;
-
-                            // Parse scope strings to Scope objects
-                            let scopes: Vec<Scope> = validated
-                                .scopes
-                                .iter()
-                                .filter_map(|s| parse_scope(s))
-                                .collect();
-
-                            info!("Refreshed token has {} scopes", scopes.len());
-
-                            // Continue using the same HTTP client
-                                
-                            // Create a proper token with the refreshed data using the safe method
-                            let token = UserToken::from_existing(
-                                &http_client,
-                                temporary_token.access_token,
-                                temporary_token.refresh_token,
-                                None,
-                            ).await?;
-
-                            // Update auth state with refreshed token
-                            *self.auth_state.write().await =
-                                AuthState::Authenticated(token.clone());
-
-                            // Send refresh event
-                            self.send_event(AuthEvent::TokenRefreshed).await?;
-
-                            Ok(token)
-                        }
-                        Err(refresh_err) => {
-                            // Enhanced error logging for refresh failures
-                            error!("Token refresh failed: {}", refresh_err);
-                            
-                            // Try to extract the raw response if available
-                            let error_string = refresh_err.to_string();
-                            if error_string.contains("response text") {
-                                if let Some(text_start) = error_string.find("response text") {
-                                    error!("Response text from failed refresh: {}", 
-                                          &error_string[text_start..]);
-                                }
-                            }
-                            
-                            // Try to determine if it's a 30-day expiry issue
-                            if error_string.contains("invalid_grant") {
-                                error!("Refresh token appears to be expired (30-day limit)");
-                            } else if error_string.contains("invalid_request") {
-                                error!("Invalid refresh request format");
-                            } else if error_string.contains("bad_client") {
-                                error!("Client authentication failed, check client ID");
-                            }
-
-                            // Send token expired event
-                            if let Err(event_err) = self
-                                .send_event(AuthEvent::TokenExpired {
-                                    error: format!(
-                                        "Token validation and refresh failed: {}",
-                                        refresh_err
-                                    ),
-                                })
-                                .await
-                            {
-                                warn!("Failed to send token expired event: {}", event_err);
-                            }
-
-                            Err(anyhow!(
-                                "Token validation and refresh failed: {}. Need to re-authenticate",
-                                refresh_err
-                            ))
-                        }
-                    }
+                    // Update auth state with the new token
+                    *self.auth_state.write().await = AuthState::Authenticated(token.clone());
+                    
+                    // Send refresh event
+                    self.send_event(AuthEvent::TokenRefreshed).await?;
+                    
+                    info!("Successfully refreshed token via direct OAuth refresh flow");
+                    
+                    // Return the new token
+                    Ok(token)
                 } else {
                     // No refresh token available
                     error!("Token validation failed: {}. No refresh token available. Re-authentication required", e);
@@ -795,15 +813,17 @@ mod tests {
     use std::env;
     use std::sync::Arc;
     use std::sync::Mutex;
-    use twitch_oauth2::{id::DeviceCodeResponse, AccessToken, ClientId, RefreshToken, Scope, UserToken};
-    
+    use twitch_oauth2::{
+        id::DeviceCodeResponse, AccessToken, ClientId, RefreshToken, Scope, UserToken,
+    };
+
     use twitch_api::types::{Nickname, UserId};
 
     // Mock the environment variable - ensuring it's properly set for all tests
     fn mock_env_var() {
         // Always set the environment variable directly to ensure it's present for this test
         env::set_var("TWITCH_CLIENT_ID", "test_client_id");
-        
+
         // Print for debugging
         match env::var("TWITCH_CLIENT_ID") {
             Ok(val) => println!("TWITCH_CLIENT_ID set to: {}", val),
@@ -884,22 +904,22 @@ mod tests {
     async fn test_token_refresh_mock_simulation() {
         // Mock the environment variable
         mock_env_var();
-        
+
         // Set client ID explicitly to avoid env var issues
         env::set_var("TWITCH_CLIENT_ID", "test_client_id");
 
         // Create a basic auth manager
         let mut auth_manager = TwitchAuthManager::new("test_client_id".to_string());
-        
+
         // Set up event capture to verify events
         let event_capture = AuthEventCapture::new();
         auth_manager.set_auth_callback(event_capture.callback());
-        
+
         // First let's create an invalid token state (would normally be after a failed validation)
         let client_id = ClientId::new("test_client_id".to_string());
         let login = Nickname::new("test_user".to_string());
         let user_id = UserId::new("12345".to_string());
-        
+
         // For tests, we can use from_existing_unchecked
         // IMPORTANT: This is test-only code, don't use this in production!
         let token = UserToken::from_existing_unchecked(
@@ -910,34 +930,37 @@ mod tests {
             login.clone(),
             user_id.clone(),
             Some(vec![Scope::ChannelReadSubscriptions]), // scopes
-            Some(std::time::Duration::from_secs(14400)) // 4 hours
+            Some(std::time::Duration::from_secs(14400)), // 4 hours
         );
-        
+
         // Set the token directly to simulate a successful refresh operation
         auth_manager.set_token(token).unwrap();
-        
+
         // Manually send a refresh event to simulate the refresh_token_if_needed behavior
-        auth_manager.send_event(AuthEvent::TokenRefreshed).await.unwrap();
-        
+        auth_manager
+            .send_event(AuthEvent::TokenRefreshed)
+            .await
+            .unwrap();
+
         // Verify we're now authenticated
         assert!(auth_manager.is_authenticated().await);
-        
+
         // Get the token to verify it was set correctly
         let stored_token = auth_manager.get_token().await.unwrap();
         assert_eq!(stored_token.login.to_string(), login.to_string());
         assert_eq!(stored_token.user_id.to_string(), user_id.to_string());
         assert_eq!(stored_token.access_token.secret(), "refreshed_token");
-        
+
         // Check that the token refresh event was sent
         let events = event_capture.get_events();
         assert_eq!(events.len(), 1, "Expected 1 event, got {}", events.len());
-        
+
         // Verify it's a TokenRefreshed event
         match &events[0] {
             AuthEvent::TokenRefreshed => (),
             other => panic!("Expected TokenRefreshed event, got {:?}", other),
         }
-        
+
         // Cleanup
         unmock_env_var();
     }
@@ -1059,7 +1082,7 @@ mod tests {
             login,
             user_id,
             Some(vec![Scope::ChannelReadSubscriptions, Scope::UserReadEmail]),
-            Some(std::time::Duration::from_secs(5)),  // 5 seconds, about to expire
+            Some(std::time::Duration::from_secs(5)), // 5 seconds, about to expire
         );
 
         // Set the token directly
