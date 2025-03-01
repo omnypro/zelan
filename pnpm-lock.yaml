@@ -37,7 +37,7 @@ importers:
         specifier: ^1.0.1
         version: 1.0.1(@types/node@22.13.8)
       '@types/node':
-        specifier: ^22.13.4
+        specifier: ^22.13.8
         version: 22.13.8
       '@types/react':
         specifier: ^18.3.18
@@ -52,7 +52,7 @@ importers:
         specifier: ^4.3.4
         version: 4.3.4(vite@6.2.0(@types/node@22.13.8))
       electron:
-        specifier: ^34.2.0
+        specifier: ^34.3.0
         version: 34.3.0
       electron-builder:
         specifier: ^25.1.8
@@ -61,19 +61,19 @@ importers:
         specifier: ^3.0.0
         version: 3.0.0(vite@6.2.0(@types/node@22.13.8))
       eslint:
-        specifier: ^9.20.1
+        specifier: ^9.21.0
         version: 9.21.0
       eslint-plugin-react:
         specifier: ^7.37.4
         version: 7.37.4(eslint@9.21.0)
       eslint-plugin-react-hooks:
-        specifier: ^5.1.0
+        specifier: ^5.2.0
         version: 5.2.0(eslint@9.21.0)
       eslint-plugin-react-refresh:
         specifier: ^0.4.19
         version: 0.4.19(eslint@9.21.0)
       prettier:
-        specifier: ^3.5.1
+        specifier: ^3.5.2
         version: 3.5.2
       react:
         specifier: ^18.3.1
@@ -82,10 +82,10 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       typescript:
-        specifier: ^5.7.3
+        specifier: ^5.8.2
         version: 5.8.2
       vite:
-        specifier: ^6.1.0
+        specifier: ^6.2.0
         version: 6.2.0(@types/node@22.13.8)
 
 packages:
