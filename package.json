@@ -23,7 +23,10 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^4.0.0",
-    "electron-updater": "^6.3.9"
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.3.9",
+    "rxjs": "^7.8.2",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -32,6 +35,7 @@
     "@types/node": "^22.13.4",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/uuid": "^9.0.8",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^34.2.0",
     "electron-builder": "^25.1.8",

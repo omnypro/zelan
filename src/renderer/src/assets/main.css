@@ -1,13 +1,39 @@
 @import './base.css';
 
 body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
+    Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  background-color: #242424;
+  color: #efefef;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
   overflow: hidden;
-  background-image: url('./wavy-lines.svg');
-  background-size: cover;
-  user-select: none;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-top: 0;
+  color: white;
+}
+
+button {
+  font-family: inherit;
+}
+
+input, button, textarea, select {
+  font: inherit;
+}
+
+button:focus,
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
 }
 
 code {
@@ -26,146 +52,101 @@ code {
   font-size: 85%;
 }
 
-#root {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  margin-bottom: 80px;
+/* Dark theme styling */
+:root {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252525;
+  --bg-tertiary: #2d2d2d;
+  --text-primary: #ffffff;
+  --text-secondary: #cccccc;
+  --text-muted: #999999;
+  --border: #333333;
+  --primary: #0078d4;
+  --primary-light: #2b88d8;
+  --danger: #d83b01;
+  --success: #107c10;
+  --warning: #f2c811;
 }
 
+/* Logo styling */
 .logo {
-  margin-bottom: 20px;
   -webkit-user-drag: none;
-  height: 128px;
-  width: 128px;
+  height: 36px;
+  width: 36px;
   will-change: filter;
   transition: filter 300ms;
 }
 
 .logo:hover {
-  filter: drop-shadow(0 0 1.2em #6988e6aa);
+  filter: drop-shadow(0 0 0.8em #6988e6aa);
 }
 
-.creator {
-  font-size: 14px;
-  line-height: 16px;
-  color: var(--ev-c-text-2);
-  font-weight: 600;
-  margin-bottom: 10px;
-}
-
-.text {
-  font-size: 28px;
-  color: var(--ev-c-text-1);
-  font-weight: 700;
-  line-height: 32px;
-  text-align: center;
-  margin: 0 10px;
-  padding: 16px 0;
-}
-
-.tip {
-  font-size: 16px;
-  line-height: 24px;
-  color: var(--ev-c-text-2);
-  font-weight: 600;
-}
-
-.react {
-  background: -webkit-linear-gradient(315deg, #087ea4 55%, #7c93ee);
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 700;
-}
-
-.ts {
-  background: -webkit-linear-gradient(315deg, #3178c6 45%, #f0dc4e);
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 700;
-}
-
-.actions {
-  display: flex;
-  padding-top: 32px;
-  margin: -6px;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-}
-
-.action {
-  flex-shrink: 0;
-  padding: 6px;
-}
-
-.action a {
-  cursor: pointer;
-  text-decoration: none;
-  display: inline-block;
-  border: 1px solid transparent;
-  text-align: center;
-  font-weight: 600;
-  white-space: nowrap;
-  border-radius: 20px;
-  padding: 0 20px;
-  line-height: 38px;
-  font-size: 14px;
-  border-color: var(--ev-button-alt-border);
-  color: var(--ev-button-alt-text);
-  background-color: var(--ev-button-alt-bg);
-}
-
-.action a:hover {
-  border-color: var(--ev-button-alt-hover-border);
-  color: var(--ev-button-alt-hover-text);
-  background-color: var(--ev-button-alt-hover-bg);
-}
-
+/* Versions component styling */
 .versions {
-  position: absolute;
-  bottom: 30px;
-  margin: 0 auto;
-  padding: 15px 0;
+  margin: 20px 0;
+  padding: 15px;
   font-family: 'Menlo', 'Lucida Console', monospace;
   display: inline-flex;
   overflow: hidden;
   align-items: center;
-  border-radius: 22px;
+  border-radius: 8px;
   background-color: #202127;
-  backdrop-filter: blur(24px);
+}
+
+.versions ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
 }
 
 .versions li {
   display: block;
-  float: left;
-  border-right: 1px solid var(--ev-c-gray-1);
-  padding: 0 20px;
-  font-size: 14px;
+  border-right: 1px solid #333;
+  padding: 0 15px;
+  font-size: 13px;
   line-height: 14px;
   opacity: 0.8;
-  &:last-child {
-    border: none;
-  }
 }
 
-@media (max-width: 720px) {
-  .text {
-    font-size: 20px;
-  }
+.versions li:first-child {
+  padding-left: 0;
 }
 
-@media (max-width: 620px) {
-  .versions {
-    display: none;
-  }
+.versions li:last-child {
+  border: none;
 }
 
-@media (max-width: 350px) {
-  .tip,
-  .actions {
-    display: none;
-  }
+/* Remove the auto-fill background in Chrome */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  transition: background-color 5000s ease-in-out 0s;
+  -webkit-text-fill-color: var(--text-primary);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #2d2d2d;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #444444;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
+
+/* Selection color */
+::selection {
+  background-color: rgba(0, 120, 212, 0.4);
+  color: white;
 }

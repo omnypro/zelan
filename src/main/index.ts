@@ -1,11 +1,43 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
+// Import event bus and system events
+import { mainEventBus } from './services/eventBus'
+import { 
+  SystemStartupEvent, 
+  SystemShutdownEvent,
+  SystemInfoEvent
+} from '../shared/core/events'
+
+// Track the main window instance
+let mainWindow: BrowserWindow | null = null;
+
+/**
+ * Initialize the event system
+ */
+function initializeEventSystem(): void {
+  // Subscribe to events for system operations
+  console.log('Initializing event system...')
+  
+  // Emit startup event
+  const startupPayload = {
+    appVersion: app.getVersion(),
+    startTime: Date.now()
+  }
+  mainEventBus.publish(new SystemStartupEvent(startupPayload))
+  
+  // Log info event
+  mainEventBus.publish(new SystemInfoEvent('Event system initialized'))
+}
+
+/**
+ * Create the main application window
+ */
 function createWindow(): void {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
     show: false,
@@ -18,7 +50,10 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    mainWindow?.show()
+    
+    // Emit event when window is shown
+    mainEventBus.publish(new SystemInfoEvent('Main window ready'))
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -49,9 +84,10 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  // Initialize the event system
+  initializeEventSystem()
 
+  // Create the main window
   createWindow()
 
   app.on('activate', function () {
@@ -68,6 +104,16 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+// Handle application quit
+app.on('before-quit', () => {
+  // Emit shutdown event
+  mainEventBus.publish(new SystemShutdownEvent())
+  
+  // Allow time for any shutdown handlers to run
+  // For async shutdown operations, a more robust shutdown sequence 
+  // would be needed with promises
 })
 
 // In this file you can include the rest of your app's specific main process
