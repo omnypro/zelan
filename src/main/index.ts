@@ -7,6 +7,10 @@ import icon from '../../resources/icon.png?asset'
 import { mainEventBus } from '@main/services/eventBus'
 import { SystemStartupEvent, SystemShutdownEvent, SystemInfoEvent } from '@shared/core/events'
 
+// Import adapter system
+import { adapterManager } from '@main/services/adapters'
+import { adapterFactories } from '@main/adapters'
+
 // Track the main window instance
 let mainWindow: BrowserWindow | null = null
 
@@ -26,6 +30,40 @@ function initializeEventSystem(): void {
 
   // Log info event
   mainEventBus.publish(new SystemInfoEvent('Event system initialized'))
+}
+
+/**
+ * Initialize the adapter system
+ */
+async function initializeAdapterSystem(): Promise<void> {
+  console.log('Initializing adapter system...')
+  
+  // Register adapter factories
+  adapterManager.registerFactories(adapterFactories)
+  
+  // Load saved adapters
+  await adapterManager.loadAdapters()
+  
+  // Create a test adapter if none exists
+  const testAdapters = adapterManager.getAdaptersByType('test')
+  if (testAdapters.length === 0) {
+    console.log('Creating default test adapter...')
+    const adapter = await adapterManager.createAdapter('test', {
+      name: 'Default Test Adapter',
+      enabled: true,
+      autoConnect: true,
+      settings: {
+        eventInterval: 10000, // 10 seconds
+        eventTypes: ['info', 'warning'],
+        simulateFailures: false,
+        failureRate: 0.1
+      }
+    })
+    
+    mainEventBus.publish(new SystemInfoEvent(`Created default test adapter: ${adapter.name} (${adapter.id})`))
+  }
+  
+  mainEventBus.publish(new SystemInfoEvent('Adapter system initialized'))
 }
 
 /**
@@ -83,6 +121,13 @@ app.whenReady().then(() => {
   // Initialize the event system
   initializeEventSystem()
 
+  // Initialize the adapter system
+  initializeAdapterSystem()
+    .catch(error => {
+      console.error('Failed to initialize adapter system:', error)
+      mainEventBus.publish(new SystemInfoEvent(`Error initializing adapter system: ${error.message}`))
+    })
+
   // Create the main window
   createWindow()
 
@@ -103,13 +148,23 @@ app.on('window-all-closed', () => {
 })
 
 // Handle application quit
-app.on('before-quit', () => {
-  // Emit shutdown event
-  mainEventBus.publish(new SystemShutdownEvent())
+app.on('before-quit', async (event) => {
+  // Prevent the app from quitting immediately
+  event.preventDefault()
 
-  // Allow time for any shutdown handlers to run
-  // For async shutdown operations, a more robust shutdown sequence
-  // would be needed with promises
+  try {
+    // Emit shutdown event
+    mainEventBus.publish(new SystemShutdownEvent())
+
+    // Dispose of adapters
+    await adapterManager.dispose()
+    
+    // Now actually quit
+    app.exit()
+  } catch (error) {
+    console.error('Error during shutdown:', error)
+    app.exit(1) // Exit with error code
+  }
 })
 
 // In this file you can include the rest of your app's specific main process
