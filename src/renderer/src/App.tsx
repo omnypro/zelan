@@ -2,11 +2,14 @@ import { useState } from 'react'
 import Versions from './components/Versions'
 import EventsDemo from './components/EventsDemo'
 import TwitchAuth from './components/TwitchAuth'
+import ReactiveDemo from './components/ReactiveDemo'
 import electronLogo from './assets/electron.svg'
 import wavyLines from './assets/wavy-lines.svg'
 
 function App(): JSX.Element {
-  const [showEventsDemo, setShowEventsDemo] = useState(false)
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'eventsDemo' | 'reactiveDemo'>(
+    'dashboard'
+  )
 
   return (
     <div className="app-container">
@@ -22,18 +25,26 @@ function App(): JSX.Element {
             <ul>
               <li>
                 <button
-                  className={!showEventsDemo ? 'active' : ''}
-                  onClick={() => setShowEventsDemo(false)}
+                  className={activeTab === 'dashboard' ? 'active' : ''}
+                  onClick={() => setActiveTab('dashboard')}
                 >
                   Dashboard
                 </button>
               </li>
               <li>
                 <button
-                  className={showEventsDemo ? 'active' : ''}
-                  onClick={() => setShowEventsDemo(true)}
+                  className={activeTab === 'eventsDemo' ? 'active' : ''}
+                  onClick={() => setActiveTab('eventsDemo')}
                 >
                   Events Demo
+                </button>
+              </li>
+              <li>
+                <button
+                  className={activeTab === 'reactiveDemo' ? 'active' : ''}
+                  onClick={() => setActiveTab('reactiveDemo')}
+                >
+                  Reactive Demo
                 </button>
               </li>
             </ul>
@@ -41,13 +52,19 @@ function App(): JSX.Element {
         </div>
 
         <main className="main-content">
-          {showEventsDemo ? (
+          {activeTab === 'eventsDemo' ? (
             <EventsDemo />
+          ) : activeTab === 'reactiveDemo' ? (
+            <ReactiveDemo />
           ) : (
             <div className="dashboard">
               <h2>Dashboard</h2>
               <p>Welcome to Zelan, your stream data aggregation service.</p>
               <p>Click on &quot;Events Demo&quot; to see the reactive event system in action.</p>
+              <p>
+                Check out the &quot;Reactive Demo&quot; to explore the new reactive state management
+                features.
+              </p>
 
               <div className="dashboard-section">
                 <h3>Service Connections</h3>
@@ -165,6 +182,33 @@ function App(): JSX.Element {
           margin-top: 0;
           margin-bottom: 1rem;
           font-size: 1.2rem;
+        }
+        
+        .reactive-demo {
+          max-width: 800px;
+          margin: 0 auto;
+        }
+        
+        .demo-section {
+          margin: 2rem 0;
+          padding: 1.5rem;
+          background: rgba(0, 0, 0, 0.15);
+          border-radius: 0.5rem;
+        }
+        
+        .demo-section h3 {
+          margin-top: 0;
+          margin-bottom: 1rem;
+        }
+        
+        .notes-section {
+          margin-top: 1rem;
+          padding-top: 1rem;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .notes-section ul {
+          padding-left: 1.5rem;
         }
 
         .background-decoration {

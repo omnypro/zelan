@@ -1,55 +1,51 @@
-import React, { useEffect, useState } from 'react';
-import { EventCategory, SystemEventType } from '@shared/types/events';
-import { useEvents, useEventPublisher } from '@renderer/hooks/useEventStream';
-import { rendererEventBus } from '@renderer/services/eventBus';
-import { SystemInfoEvent } from '@shared/core/events';
+import React, { useEffect, useState } from 'react'
+import { EventCategory, SystemEventType } from '@shared/types/events'
+import { useEvents, useEventPublisher } from '@renderer/hooks/useEventStream'
+import { rendererEventBus } from '@renderer/services/eventBus'
+import { SystemInfoEvent } from '@shared/core/events'
 
 /**
  * Component to demonstrate the event system
  */
 export const EventsDemo: React.FC = () => {
   // Get events from the system category
-  const systemEvents = useEvents<{ message?: string; appVersion?: string }>(EventCategory.SYSTEM);
-  
+  const systemEvents = useEvents<{ message?: string; appVersion?: string }>(EventCategory.SYSTEM)
+
   // Create a publisher for system info events
   const publishSystemInfo = useEventPublisher(
-    EventCategory.SYSTEM, 
+    EventCategory.SYSTEM,
     SystemEventType.INFO,
     'events-demo'
-  );
-  
+  )
+
   // Input state for custom event
-  const [message, setMessage] = useState('');
-  
+  const [message, setMessage] = useState('')
+
   // Publish a demo event when component mounts
   useEffect(() => {
     // Use the renderer event bus directly
-    rendererEventBus.publish(
-      new SystemInfoEvent('EventsDemo component mounted')
-    );
-    
+    rendererEventBus.publish(new SystemInfoEvent('EventsDemo component mounted'))
+
     // Cleanup when unmounting
     return () => {
-      rendererEventBus.publish(
-        new SystemInfoEvent('EventsDemo component unmounted')
-      );
-    };
-  }, []);
-  
+      rendererEventBus.publish(new SystemInfoEvent('EventsDemo component unmounted'))
+    }
+  }, [])
+
   // Handle form submission
   const handleSubmit = (e: React.FormEvent): void => {
-    e.preventDefault();
+    e.preventDefault()
     if (message.trim()) {
       // Use the publisher from the hook
-      publishSystemInfo({ message });
-      setMessage('');
+      publishSystemInfo({ message })
+      setMessage('')
     }
-  };
-  
+  }
+
   return (
     <div className="events-demo">
       <h2>Event System Demo</h2>
-      
+
       <div className="event-publisher">
         <h3>Publish Event</h3>
         <form onSubmit={handleSubmit}>
@@ -62,15 +58,13 @@ export const EventsDemo: React.FC = () => {
           <button type="submit">Publish Event</button>
         </form>
       </div>
-      
+
       <div className="event-list">
         <h3>System Events ({systemEvents.length})</h3>
         <ul>
           {systemEvents.map((event) => (
             <li key={event.id}>
-              <div className="event-time">
-                {new Date(event.timestamp).toLocaleTimeString()}
-              </div>
+              <div className="event-time">{new Date(event.timestamp).toLocaleTimeString()}</div>
               <div className="event-content">
                 {event.payload.message ? (
                   <span>{event.payload.message}</span>
@@ -84,7 +78,7 @@ export const EventsDemo: React.FC = () => {
           ))}
         </ul>
       </div>
-      
+
       <style>{`
         .events-demo {
           padding: 20px;
@@ -152,7 +146,7 @@ export const EventsDemo: React.FC = () => {
         }
       `}</style>
     </div>
-  );
-};
+  )
+}
 
-export default EventsDemo;
+export default EventsDemo
