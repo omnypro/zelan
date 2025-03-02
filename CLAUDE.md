@@ -1,10 +1,13 @@
 # Zelan Project Guide
 
 ## Project Overview
+
 Zelan is a lightweight, locally-hosted data aggregation service that ingests data from streaming platforms (Twitch, OBS, etc.) and exposes it through a standardized API. It enables stream overlays and third-party applications to access unified data without direct coupling to source services. We're transitioning from Rust/Tauri to an Electron/TypeScript approach to improve development velocity and simplify complex features like authentication.
 
 ## Current State of the Codebase
+
 The project is in its initial setup phase using electron-vite as the foundation:
+
 - Fresh Electron/React/TypeScript project based on electron-vite template
 - Standard Electron architecture with main, preload, and renderer processes
 - Basic project structure in place but minimal implementation
@@ -12,6 +15,7 @@ The project is in its initial setup phase using electron-vite as the foundation:
 - Currently at the starting point for implementing the planned reactive architecture
 
 ## Dependencies and Technologies
+
 - Electron 34.2.0 for cross-platform desktop application
 - React 18.3.1 with TypeScript 5.7.3 for UI development
 - Vite 6.1.0 with electron-vite for development and building
@@ -20,20 +24,23 @@ The project is in its initial setup phase using electron-vite as the foundation:
 - No authentication, adapters, or WebSocket server yet implemented
 
 ## Build Commands
-- `npm run dev` - Start the development environment
-- `npm run start` - Preview the built application
-- `npm run build` - Build the frontend and compile TypeScript
-- `npm run typecheck` - Run TypeScript type checking
-- `npm run lint` - Run ESLint for code quality
-- `npm run format` - Run Prettier for code formatting
-- `npm run build:mac` - Build for macOS
-- `npm run build:win` - Build for Windows
-- `npm run build:linux` - Build for Linux
+
+- `pnpm run dev` - Start the development environment
+- `pnpm run start` - Preview the built application
+- `pnpm run build` - Build the frontend and compile TypeScript
+- `pnpm run typecheck` - Run TypeScript type checking
+- `pnpm run lint` - Run ESLint for code quality
+- `pnpm run format` - Run Prettier for code formatting
+- `pnpm run build:mac` - Build for macOS
+- `pnpm run build:win` - Build for Windows
+- `pnpm run build:linux` - Build for Linux
 
 ## Environment Setup
+
 This project requires environment variables for certain features to work properly.
 
 ### Twitch Integration
+
 - Requires the `TWITCH_CLIENT_ID` environment variable to be set in a `.env` file
 - Uses device code flow authentication (suitable for desktop applications)
 - Only requests minimum necessary scopes for read operations
@@ -42,12 +49,14 @@ This project requires environment variables for certain features to work properl
 ## Architecture
 
 ### Event-Driven Reactive Core
+
 - **EventBus**: Central reactive system using RxJS Subjects/Observables
 - **Event Streams**: Typed event streams with filtering and transformation
 - **Observable Patterns**: Reactive programming for data flow and UI updates
 - **Declarative Data Flow**: Transform data through Observable operators
 
 ### Authentication System
+
 - **AuthService**: Manages authentication state and token lifecycle
 - **TokenManager**: Secure storage and retrieval of authentication tokens
 - **Auth Providers**: Pluggable authentication for different services
@@ -55,6 +64,7 @@ This project requires environment variables for certain features to work properl
 - **Token Lifecycle**: Complete management of token expiration and refresh
 
 ### Adapter System
+
 - **BaseAdapter**: Foundation for all service adapters with common functionality
 - **ServiceAdapter**: Core interface all adapters must implement
 - Each adapter handles a specific platform:
@@ -63,12 +73,14 @@ This project requires environment variables for certain features to work properl
   - **TestAdapter**: Generates test events for debugging
 
 ### WebSocket Server
+
 - **Real-time Events**: Streams events to external clients
 - **Connection Management**: Handles client connections and disconnections
 - **Standardized Format**: JSON-formatted events with consistent structure
 - **Ping/Pong Protocol**: Ensures connections remain alive
 
 ### Frontend Architecture
+
 - **Component-Based Structure**:
   - Dashboard for event monitoring
   - Settings for adapter configuration
@@ -87,6 +99,7 @@ This project requires environment variables for certain features to work properl
 ## Code Style Guidelines
 
 ### TypeScript/React
+
 - Use React functional components with hooks
 - Integrate RxJS Observables with React using custom hooks
 - Prefer explicit type annotations with TypeScript
@@ -99,6 +112,7 @@ This project requires environment variables for certain features to work properl
 - Design with desktop-friendly UI/UX patterns in mind
 
 ### Electron
+
 - Keep main process code separate from renderer
 - Use proper IPC patterns for main-renderer communication
 - Use tRPC for type-safe IPC between main and renderer
@@ -108,6 +122,7 @@ This project requires environment variables for certain features to work properl
 - Manage process lifecycle correctly
 
 ### RxJS Patterns
+
 - Treat state as Observable streams
 - Use pipe() for data transformations
 - Implement proper error handling in streams
@@ -118,6 +133,7 @@ This project requires environment variables for certain features to work properl
 - Implement proper error recovery for streams
 
 ### Twitch Integration
+
 - Use proper device code flow implementation for desktop apps
 - Always ensure token expiration times are properly tracked and stored
 - When working with tokens, make sure they're fully validated before use
@@ -126,6 +142,7 @@ This project requires environment variables for certain features to work properl
 - When refreshing tokens, ensure the new token is properly stored
 
 ### Authentication
+
 - Prefer OAuth device code flow for desktop applications
 - Request minimal scopes necessary for functionality
 - Handle token refreshing and restoration automatically
@@ -134,6 +151,7 @@ This project requires environment variables for certain features to work properl
 - Create clear user feedback during authentication process
 
 ### WebSocket Server
+
 - Implement proper connection management
 - Handle client connection/disconnection gracefully
 - Use ping/pong protocol to maintain connections
@@ -142,6 +160,7 @@ This project requires environment variables for certain features to work properl
 - Document the WebSocket API for consumers
 
 ### General
+
 - Document public APIs and complex functions
 - Handle errors explicitly rather than throwing
 - Prefer the simplest solution that uses what the libraries provide
@@ -150,6 +169,7 @@ This project requires environment variables for certain features to work properl
 - Use ESLint and Prettier before committing
 
 ### Documentation
+
 - Keep architecture diagrams up to date
 - Document the WebSocket API clearly for external consumers
 - Provide examples for common integration patterns
