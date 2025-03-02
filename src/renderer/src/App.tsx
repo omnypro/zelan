@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import Versions from './components/Versions';
-import EventsDemo from './components/EventsDemo';
-import electronLogo from './assets/electron.svg';
-import wavyLines from './assets/wavy-lines.svg';
+import { useState } from 'react'
+import Versions from './components/Versions'
+import EventsDemo from './components/EventsDemo'
+import TwitchAuth from './components/TwitchAuth'
+import electronLogo from './assets/electron.svg'
+import wavyLines from './assets/wavy-lines.svg'
 
 function App(): JSX.Element {
-  const [showEventsDemo, setShowEventsDemo] = useState(false);
+  const [showEventsDemo, setShowEventsDemo] = useState(false)
 
   return (
     <div className="app-container">
@@ -14,13 +15,13 @@ function App(): JSX.Element {
         <h1>Zelan</h1>
         <p className="tagline">Stream Data Aggregation Service</p>
       </header>
-      
+
       <div className="content-container">
         <div className="sidebar">
           <nav>
             <ul>
               <li>
-                <button 
+                <button
                   className={!showEventsDemo ? 'active' : ''}
                   onClick={() => setShowEventsDemo(false)}
                 >
@@ -28,7 +29,7 @@ function App(): JSX.Element {
                 </button>
               </li>
               <li>
-                <button 
+                <button
                   className={showEventsDemo ? 'active' : ''}
                   onClick={() => setShowEventsDemo(true)}
                 >
@@ -38,7 +39,7 @@ function App(): JSX.Element {
             </ul>
           </nav>
         </div>
-        
+
         <main className="main-content">
           {showEventsDemo ? (
             <EventsDemo />
@@ -47,14 +48,20 @@ function App(): JSX.Element {
               <h2>Dashboard</h2>
               <p>Welcome to Zelan, your stream data aggregation service.</p>
               <p>Click on &quot;Events Demo&quot; to see the reactive event system in action.</p>
+
+              <div className="dashboard-section">
+                <h3>Service Connections</h3>
+                <TwitchAuth />
+              </div>
+
               <Versions />
             </div>
           )}
         </main>
       </div>
-      
+
       <img src={wavyLines} className="background-decoration" alt="" aria-hidden="true" />
-      
+
       <style>{`
         .app-container {
           display: flex;
@@ -62,7 +69,7 @@ function App(): JSX.Element {
           height: 100vh;
           overflow: hidden;
         }
-        
+
         .app-header {
           background: #1e1e1e;
           color: white;
@@ -71,48 +78,48 @@ function App(): JSX.Element {
           align-items: center;
           border-bottom: 1px solid #333;
         }
-        
+
         .app-header .logo {
           width: 36px;
           height: 36px;
           margin-right: 15px;
         }
-        
+
         .app-header h1 {
           margin: 0;
           font-size: 24px;
           font-weight: 600;
         }
-        
+
         .tagline {
           margin: 0 0 0 15px;
           opacity: 0.7;
           font-size: 14px;
         }
-        
+
         .content-container {
           display: flex;
           flex: 1;
           overflow: hidden;
         }
-        
+
         .sidebar {
           width: 220px;
           background: #252525;
           border-right: 1px solid #333;
           padding: 20px 0;
         }
-        
+
         .sidebar nav ul {
           list-style: none;
           padding: 0;
           margin: 0;
         }
-        
+
         .sidebar nav li {
           margin-bottom: 5px;
         }
-        
+
         .sidebar nav button {
           width: 100%;
           text-align: left;
@@ -124,29 +131,42 @@ function App(): JSX.Element {
           cursor: pointer;
           border-left: 3px solid transparent;
         }
-        
+
         .sidebar nav button:hover {
           background: rgba(255, 255, 255, 0.05);
         }
-        
+
         .sidebar nav button.active {
           color: white;
           background: rgba(255, 255, 255, 0.1);
           border-left-color: #0078d4;
         }
-        
+
         .main-content {
           flex: 1;
           padding: 20px;
           overflow-y: auto;
           position: relative;
         }
-        
+
         .dashboard {
           max-width: 800px;
           margin: 0 auto;
         }
-        
+
+        .dashboard-section {
+          margin: 2rem 0;
+          padding: 1.5rem;
+          background: rgba(0, 0, 0, 0.15);
+          border-radius: 0.5rem;
+        }
+
+        .dashboard-section h3 {
+          margin-top: 0;
+          margin-bottom: 1rem;
+          font-size: 1.2rem;
+        }
+
         .background-decoration {
           position: absolute;
           bottom: 0;
@@ -158,7 +178,7 @@ function App(): JSX.Element {
         }
       `}</style>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App

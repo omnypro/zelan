@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -11,8 +11,17 @@ import { SystemStartupEvent, SystemShutdownEvent, SystemInfoEvent } from '@share
 import { adapterManager } from '@main/services/adapters'
 import { adapterFactories } from '@main/adapters'
 
+// Import TwitchAuthService
+import { TwitchAuthService } from '@main/services/auth'
+
 // Track the main window instance
 let mainWindow: BrowserWindow | null = null
+
+// Initialize the TwitchAuthService
+const twitchAuthService = new TwitchAuthService(process.env.TWITCH_CLIENT_ID || '', [
+  'chat:read',
+  'channel:read:subscriptions'
+])
 
 /**
  * Initialize the event system
@@ -37,13 +46,13 @@ function initializeEventSystem(): void {
  */
 async function initializeAdapterSystem(): Promise<void> {
   console.log('Initializing adapter system...')
-  
+
   // Register adapter factories
   adapterManager.registerFactories(adapterFactories)
-  
+
   // Load saved adapters
   await adapterManager.loadAdapters()
-  
+
   // Create a test adapter if none exists
   const testAdapters = adapterManager.getAdaptersByType('test')
   if (testAdapters.length === 0) {
@@ -59,10 +68,12 @@ async function initializeAdapterSystem(): Promise<void> {
         failureRate: 0.1
       }
     })
-    
-    mainEventBus.publish(new SystemInfoEvent(`Created default test adapter: ${adapter.name} (${adapter.id})`))
+
+    mainEventBus.publish(
+      new SystemInfoEvent(`Created default test adapter: ${adapter.name} (${adapter.id})`)
+    )
   }
-  
+
   mainEventBus.publish(new SystemInfoEvent('Adapter system initialized'))
 }
 
@@ -78,7 +89,7 @@ function createWindow(): void {
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false
     }
   })
@@ -122,11 +133,13 @@ app.whenReady().then(() => {
   initializeEventSystem()
 
   // Initialize the adapter system
-  initializeAdapterSystem()
-    .catch(error => {
-      console.error('Failed to initialize adapter system:', error)
-      mainEventBus.publish(new SystemInfoEvent(`Error initializing adapter system: ${error.message}`))
-    })
+  initializeAdapterSystem().catch((error) => {
+    console.error('Failed to initialize adapter system:', error)
+    mainEventBus.publish(new SystemInfoEvent(`Error initializing adapter system: ${error.message}`))
+  })
+
+  // Set up IPC handlers for auth service
+  setupAuthIpcHandlers()
 
   // Create the main window
   createWindow()
@@ -158,7 +171,7 @@ app.on('before-quit', async (event) => {
 
     // Dispose of adapters
     await adapterManager.dispose()
-    
+
     // Now actually quit
     app.exit()
   } catch (error) {
@@ -166,6 +179,32 @@ app.on('before-quit', async (event) => {
     app.exit(1) // Exit with error code
   }
 })
+
+/**
+ * Set up IPC handlers for auth service
+ */
+function setupAuthIpcHandlers(): void {
+  // Forward auth state to renderer
+  twitchAuthService.state.subscribe((authState) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('auth:state', authState)
+    }
+  })
+
+  // Handle start auth request
+  ipcMain.on('auth:start', async () => {
+    try {
+      await twitchAuthService.startAuth()
+    } catch (error) {
+      console.error('Error starting auth:', error)
+    }
+  })
+
+  // Handle logout request
+  ipcMain.on('auth:logout', () => {
+    twitchAuthService.logout()
+  })
+}
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.

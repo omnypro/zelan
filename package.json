@@ -24,6 +24,7 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^4.0.0",
+    "dotenv": "^16.4.7",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.3.9",
     "rxjs": "^7.8.2",
@@ -33,6 +34,8 @@
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.0.0",
     "@electron-toolkit/tsconfig": "^1.0.1",
+    "@twurple/api": "^7.2.1",
+    "@twurple/auth": "^7.2.1",
     "@types/node": "^22.13.8",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",

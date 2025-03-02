@@ -150,3 +150,117 @@ input:-webkit-autofill:active {
   background-color: rgba(0, 120, 212, 0.4);
   color: white;
 }
+
+/* Auth Component Styles */
+.auth-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.25rem;
+}
+
+.auth-status.authorized {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: rgb(16, 185, 129);
+}
+
+.auth-status.unauthorized {
+  background-color: rgba(107, 114, 128, 0.1);
+  color: rgb(107, 114, 128);
+}
+
+.auth-status.authenticating {
+  background-color: rgba(59, 130, 246, 0.1);
+  color: rgb(59, 130, 246);
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.auth-status.error {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: rgb(239, 68, 68);
+}
+
+.auth-steps {
+  width: 100%;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.auth-code-container {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.auth-code {
+  font-family: monospace;
+  font-size: 1.25rem;
+  font-weight: bold;
+  letter-spacing: 0.25rem;
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.25rem;
+}
+
+.auth-link {
+  color: rgb(59, 130, 246);
+  text-decoration: underline;
+}
+
+.auth-button {
+  background-color: rgb(59, 130, 246);
+  color: white;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.auth-button:hover {
+  background-color: rgb(37, 99, 235);
+}
+
+.auth-button.logout {
+  background-color: rgb(107, 114, 128);
+}
+
+.auth-button.logout:hover {
+  background-color: rgb(75, 85, 99);
+}
+
+.auth-copy-button {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: rgb(59, 130, 246);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s;
+}
+
+.auth-copy-button:hover {
+  background-color: rgba(59, 130, 246, 0.1);
+}
+
+.auth-copy-button.copied {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: rgb(16, 185, 129);
+  border-color: rgba(16, 185, 129, 0.5);
+}
