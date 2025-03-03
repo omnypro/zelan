@@ -28,10 +28,10 @@ export class TokenManager {
   private store: Store<z.infer<typeof TokenStoreSchema>>;
   
   private constructor() {
-    this.store = new Store<z.infer<typeof TokenStoreSchema>>({
+    this.store = new Store({
       name: 'auth-tokens',
       encryptionKey: 'app-specific-encryption-key', // In production, use a secure key
-    });
+    }) as Store<z.infer<typeof TokenStoreSchema>>;
   }
   
   /**

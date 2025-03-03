@@ -40,7 +40,21 @@ export class WebSocketServer {
   private stateSubject = new BehaviorSubject<boolean>(false)
 
   private constructor(config: Partial<WebSocketServerConfig> = {}) {
-    this.config = WebSocketServerConfigSchema.parse(config)
+    // Try to load WebSocket config from app settings if available
+    try {
+      const { ConfigManager } = require('../config/configManager');
+      const configManager = ConfigManager.getInstance();
+      const storedConfig = configManager.getWebSocketConfig();
+      
+      // Merge stored config with provided config, with provided config taking precedence
+      this.config = WebSocketServerConfigSchema.parse({
+        ...storedConfig,
+        ...config
+      });
+    } catch (error) {
+      // Fall back to just using the provided config if ConfigManager is not available
+      this.config = WebSocketServerConfigSchema.parse(config);
+    }
   }
 
   /**

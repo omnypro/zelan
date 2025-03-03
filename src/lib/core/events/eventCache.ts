@@ -10,6 +10,20 @@ export class EventCache {
   private maxEvents: number = 1000
 
   private constructor() {
+    // Try to load max events setting from config
+    try {
+      const { ConfigManager } = require('../config/configManager');
+      const configManager = ConfigManager.getInstance();
+      const eventConfig = configManager.getEventConfig();
+      
+      if (eventConfig && eventConfig.maxCachedEvents) {
+        this.maxEvents = eventConfig.maxCachedEvents;
+      }
+    } catch (error) {
+      // Use default if config isn't available yet
+      console.log('Using default event cache size: 1000');
+    }
+    
     const eventBus = EventBus.getInstance()
     eventBus.events().subscribe((event) => {
       this.addEvent(event)

@@ -6,6 +6,7 @@ import { useElectronAPI } from './lib/hooks/useElectronAPI'
 import type { AdapterStatus } from './lib/trpc/shared/types'
 import { TrpcDemo } from './components/TrpcDemo'
 import { EventsDemo } from './components/EventsDemo'
+import { SettingsDemo } from './components/SettingsDemo'
 import './components/TrpcDemo.css'
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
   const [adapterStatus, setAdapterStatus] = useState<AdapterStatus | null>(null)
   const [showTrpcDemo, setShowTrpcDemo] = useState<boolean>(false)
   const [showEventsDemo, setShowEventsDemo] = useState<boolean>(false)
+  const [showSettingsDemo, setShowSettingsDemo] = useState<boolean>(false)
 
   // Use the Electron API hook instead of direct window access
   const { isElectron, adapters } = useElectronAPI()
@@ -86,6 +88,11 @@ function App() {
   const toggleEventsDemo = () => {
     setShowEventsDemo((prev) => !prev)
   }
+  
+  // Toggle Settings demo visibility
+  const toggleSettingsDemo = () => {
+    setShowSettingsDemo((prev) => !prev)
+  }
 
   return (
     <>
@@ -126,13 +133,18 @@ function App() {
                 {showTrpcDemo ? 'Hide tRPC Demo' : 'Show tRPC Demo'}
               </button>
 
-              <button onClick={toggleEventsDemo}>
+              <button onClick={toggleEventsDemo} style={{ marginRight: '10px' }}>
                 {showEventsDemo ? 'Hide Events Demo' : 'Show Events Demo'}
+              </button>
+              
+              <button onClick={toggleSettingsDemo}>
+                {showSettingsDemo ? 'Hide Settings Demo' : 'Show Settings Demo'}
               </button>
             </div>
 
             {showTrpcDemo && <TrpcDemo />}
             {showEventsDemo && <EventsDemo />}
+            {showSettingsDemo && <SettingsDemo />}
           </>
         )}
       </div>

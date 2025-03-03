@@ -190,6 +190,15 @@ export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> imple
       // Validate new config
       this.configValue = this.configSchema.parse(newConfig);
       
+      // Try to save to the persistence layer
+      try {
+        const { AdapterSettingsManager } = require('../config/adapterSettingsManager');
+        const settingsManager = AdapterSettingsManager.getInstance();
+        settingsManager.updateSettings(this.adapterId, config);
+      } catch (saveError) {
+        console.warn(`Could not save adapter settings: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+      }
+      
       // Reconnect if necessary
       this.handleConfigChange();
     } catch (error) {

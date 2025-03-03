@@ -3,6 +3,7 @@ import { AdapterManager } from './adapters'
 import { TestAdapter } from './adapters'
 import { WebSocketServer } from './websocket'
 import { AuthService } from './auth'
+import { ConfigManager, AdapterSettingsManager, UserDataManager } from './config'
 
 /**
  * Bootstrap the application core
@@ -15,6 +16,12 @@ export async function bootstrap(config: {
   webSocketPath?: string
   initTrpc?: boolean
 }) {
+  // Initialize configuration and persistence layer first
+  const configManager = ConfigManager.getInstance()
+  const adapterSettingsManager = AdapterSettingsManager.getInstance()
+  const userDataManager = UserDataManager.getInstance()
+  console.log('Configuration and persistence layer initialized')
+  
   // Get instances of core services
   const eventBus = EventBus.getInstance()
   const adapterManager = AdapterManager.getInstance()
@@ -57,6 +64,12 @@ export async function bootstrap(config: {
 
   // Return the initialized services
   return {
+    // Configuration
+    configManager,
+    adapterSettingsManager,
+    userDataManager,
+    
+    // Core services
     eventBus,
     adapterManager,
     authService,

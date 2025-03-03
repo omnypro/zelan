@@ -42,10 +42,30 @@ export class TestAdapter extends BaseAdapter<TestAdapterConfig> {
    * Create a new test adapter
    */
   constructor(config: Partial<TestAdapterConfig> = {}) {
+    // Try to get settings from AdapterSettingsManager
+    let mergedConfig = config;
+    
+    try {
+      const { AdapterSettingsManager } = require('../config/adapterSettingsManager');
+      const settingsManager = AdapterSettingsManager.getInstance();
+      const savedSettings = settingsManager.getSettings<TestAdapterConfig>('test-adapter');
+      
+      if (savedSettings) {
+        // Merge saved settings with provided config, with provided config taking precedence
+        mergedConfig = {
+          ...savedSettings,
+          ...config
+        };
+        console.log('Test adapter loaded settings from AdapterSettingsManager');
+      }
+    } catch (error) {
+      console.log('Using default test adapter settings');
+    }
+    
     super(
       'test-adapter',
       'Test Adapter',
-      config,
+      mergedConfig,
       TestAdapterConfigSchema
     );
   }
