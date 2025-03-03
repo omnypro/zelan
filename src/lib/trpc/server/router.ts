@@ -1,20 +1,22 @@
-import { z } from 'zod';
-import { initTRPC } from '@trpc/server';
-import { 
-  AdapterStatusSchema, 
-  OperationResultSchema, 
-  WebSocketStatusSchema, 
+import { z } from 'zod'
+import { initTRPC } from '@trpc/server'
+import {
+  AdapterStatusSchema,
+  OperationResultSchema,
+  WebSocketStatusSchema,
   AuthStateSchema,
   EventsResponseSchema,
-  WebSocketConfigSchema
-} from '../shared/types';
+  WebSocketConfigSchema,
+  EventFilterSchema,
+  BaseEventSchema
+} from '../shared/types'
 
 // Initialize tRPC backend
-const t = initTRPC.create();
+const t = initTRPC.create()
 
 // Create procedures
-const procedure = t.procedure;
-const router = t.router;
+const procedure = t.procedure
+const router = t.router
 
 // Define the router
 export const appRouter = router({
@@ -24,39 +26,39 @@ export const appRouter = router({
       .input(z.string())
       .output(AdapterStatusSchema)
       .query(async ({ input }) => {
-        const { AdapterManager } = await import('../../core/adapters');
-        const adapterManager = AdapterManager.getInstance();
-        const adapter = adapterManager.getAdapter(input);
+        const { AdapterManager } = await import('../../core/adapters')
+        const adapterManager = AdapterManager.getInstance()
+        const adapter = adapterManager.getAdapter(input)
 
         if (!adapter) {
-          return { status: 'not-found', isConnected: false };
+          return { status: 'not-found', isConnected: false }
         }
 
         return {
           status: adapter.state,
           isConnected: adapter.isConnected(),
           config: adapter.config
-        };
+        }
       }),
 
     connect: procedure
       .input(z.string())
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AdapterManager } = await import('../../core/adapters');
-        const adapterManager = AdapterManager.getInstance();
-        const adapter = adapterManager.getAdapter(input);
+        const { AdapterManager } = await import('../../core/adapters')
+        const adapterManager = AdapterManager.getInstance()
+        const adapter = adapterManager.getAdapter(input)
 
         if (!adapter) {
-          return { success: false, error: 'Adapter not found' };
+          return { success: false, error: 'Adapter not found' }
         }
 
         try {
-          await adapter.connect();
-          return { success: true };
+          await adapter.connect()
+          return { success: true }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return { success: false, error: errorMessage };
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
         }
       }),
 
@@ -64,85 +66,100 @@ export const appRouter = router({
       .input(z.string())
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AdapterManager } = await import('../../core/adapters');
-        const adapterManager = AdapterManager.getInstance();
-        const adapter = adapterManager.getAdapter(input);
+        const { AdapterManager } = await import('../../core/adapters')
+        const adapterManager = AdapterManager.getInstance()
+        const adapter = adapterManager.getAdapter(input)
 
         if (!adapter) {
-          return { success: false, error: 'Adapter not found' };
+          return { success: false, error: 'Adapter not found' }
         }
 
         try {
-          await adapter.disconnect();
-          return { success: true };
+          await adapter.disconnect()
+          return { success: true }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return { success: false, error: errorMessage };
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
         }
       }),
 
     updateConfig: procedure
-      .input(z.object({
-        adapterId: z.string(),
-        config: z.record(z.any())
-      }))
+      .input(
+        z.object({
+          adapterId: z.string(),
+          config: z.record(z.any())
+        })
+      )
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AdapterManager } = await import('../../core/adapters');
-        const adapterManager = AdapterManager.getInstance();
-        const adapter = adapterManager.getAdapter(input.adapterId);
+        const { AdapterManager } = await import('../../core/adapters')
+        const adapterManager = AdapterManager.getInstance()
+        const adapter = adapterManager.getAdapter(input.adapterId)
 
         if (!adapter) {
-          return { success: false, error: 'Adapter not found' };
+          return { success: false, error: 'Adapter not found' }
         }
 
         try {
-          adapter.updateConfig(input.config);
-          return { success: true };
+          adapter.updateConfig(input.config)
+          return { success: true }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return { success: false, error: errorMessage };
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
         }
-      }),
+      })
   }),
 
   // WebSocket procedures
   websocket: router({
-    getStatus: procedure
-      .output(WebSocketStatusSchema)
-      .query(async () => {
-        return {
-          isRunning: false,
-          clientCount: 0
-        };
-      }),
+    getStatus: procedure.output(WebSocketStatusSchema).query(async () => {
+      const { WebSocketServer } = await import('../../core/websocket')
+      const wsServer = WebSocketServer.getInstance()
 
-    start: procedure
-      .output(OperationResultSchema)
-      .mutation(async () => {
-        return {
-          success: false,
-          error: 'WebSocket server is disabled'
-        };
-      }),
+      return {
+        isRunning: wsServer.isRunning(),
+        clientCount: wsServer.getClientCount()
+      }
+    }),
 
-    stop: procedure
-      .output(OperationResultSchema)
-      .mutation(async () => {
-        return {
-          success: true
-        };
-      }),
+    start: procedure.output(OperationResultSchema).mutation(async () => {
+      try {
+        const { WebSocketServer } = await import('../../core/websocket')
+        const wsServer = WebSocketServer.getInstance()
+        wsServer.start()
+        return { success: true }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        return { success: false, error: errorMessage }
+      }
+    }),
+
+    stop: procedure.output(OperationResultSchema).mutation(async () => {
+      try {
+        const { WebSocketServer } = await import('../../core/websocket')
+        const wsServer = WebSocketServer.getInstance()
+        wsServer.stop()
+        return { success: true }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        return { success: false, error: errorMessage }
+      }
+    }),
 
     updateConfig: procedure
       .input(WebSocketConfigSchema)
       .output(OperationResultSchema)
-      .mutation(async () => {
-        return {
-          success: false,
-          error: 'WebSocket server is disabled'
-        };
-      }),
+      .mutation(async ({ input }) => {
+        try {
+          const { WebSocketServer } = await import('../../core/websocket')
+          const wsServer = WebSocketServer.getInstance()
+          wsServer.updateConfig(input)
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      })
   }),
 
   // Auth procedures
@@ -151,28 +168,28 @@ export const appRouter = router({
       .input(z.string())
       .output(AuthStateSchema)
       .query(async ({ input }) => {
-        const { AuthService, AuthState } = await import('../../core/auth');
-        const authService = AuthService.getInstance();
+        const { AuthService, AuthState } = await import('../../core/auth')
+        const authService = AuthService.getInstance()
 
         return {
           state: authService.getAuthState(input),
           isAuthenticated: authService.getAuthState(input) === AuthState.AUTHENTICATED
-        };
+        }
       }),
 
     authenticate: procedure
       .input(z.string())
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AuthService } = await import('../../core/auth');
-        const authService = AuthService.getInstance();
+        const { AuthService } = await import('../../core/auth')
+        const authService = AuthService.getInstance()
 
         try {
-          await authService.authenticate(input);
-          return { success: true };
+          await authService.authenticate(input)
+          return { success: true }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return { success: false, error: errorMessage };
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
         }
       }),
 
@@ -180,17 +197,17 @@ export const appRouter = router({
       .input(z.string())
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AuthService } = await import('../../core/auth');
-        const authService = AuthService.getInstance();
+        const { AuthService } = await import('../../core/auth')
+        const authService = AuthService.getInstance()
 
         try {
-          await authService.logout(input);
-          return { success: true };
+          await authService.logout(input)
+          return { success: true }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return { success: false, error: errorMessage };
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
         }
-      }),
+      })
   }),
 
   // Event procedures
@@ -198,13 +215,59 @@ export const appRouter = router({
     getRecentEvents: procedure
       .input(z.number().default(10))
       .output(EventsResponseSchema)
-      .query(async () => {
+      .query(async ({ input }) => {
+        const { EventCache } = await import('../../core/events')
+        const eventCache = EventCache.getInstance()
+
         return {
-          events: []
-        };
+          events: eventCache.getRecentEvents(input)
+        }
       }),
-  }),
-});
+
+    getFilteredEvents: procedure
+      .input(EventFilterSchema)
+      .output(EventsResponseSchema)
+      .query(async ({ input }) => {
+        const { EventCache } = await import('../../core/events')
+        const eventCache = EventCache.getInstance()
+
+        return {
+          events: eventCache.filterEvents(input)
+        }
+      }),
+
+    publishEvent: procedure
+      .input(
+        BaseEventSchema.extend({
+          data: z.record(z.any()).optional()
+        })
+      )
+      .output(OperationResultSchema)
+      .mutation(async ({ input }) => {
+        try {
+          const { EventBus } = await import('../../core/events')
+          const eventBus = EventBus.getInstance()
+          eventBus.publish(input)
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      }),
+
+    clearEvents: procedure.output(OperationResultSchema).mutation(async () => {
+      try {
+        const { EventCache } = await import('../../core/events')
+        const eventCache = EventCache.getInstance()
+        eventCache.clear()
+        return { success: true }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        return { success: false, error: errorMessage }
+      }
+    })
+  })
+})
 
 // Export type definition of the API
-export type AppRouter = typeof appRouter;
+export type AppRouter = typeof appRouter

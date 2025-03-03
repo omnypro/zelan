@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { bootstrap, shutdown } from '../src/lib/core/bootstrap'
-import { appRouter } from '../src/lib/trpc/server/router'
 import { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
 import type { AppRouter } from '../src/lib/trpc/server/router'
 
@@ -24,19 +23,21 @@ let coreInitialized = false
 
 // Define types for tRPC router - these will be used in the future
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-type RouterInput = inferRouterInputs<AppRouter>;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars 
-type RouterOutput = inferRouterOutputs<AppRouter>;
+type RouterInput = inferRouterInputs<AppRouter>
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type RouterOutput = inferRouterOutputs<AppRouter>
 
 // Initialize the core services
 async function initializeCore() {
   if (coreInitialized) return
 
   try {
-    // Bootstrap with only test adapter for now, no WebSocket server
+    // Bootstrap with test adapter and WebSocket server
     await bootstrap({
       enableTestAdapter: true,
-      startWebSocketServer: false
+      startWebSocketServer: true,
+      webSocketPort: 9090, // Use a different port to avoid conflicts
+      webSocketPath: '/events'
     })
 
     console.log('Core services initialized')
@@ -162,29 +163,51 @@ const handlers = {
 
   // WebSocket server handlers
   getWebSocketStatus: async () => {
+    const { WebSocketServer } = await import('../src/lib/core/websocket')
+    const wsServer = WebSocketServer.getInstance()
+
     return {
-      isRunning: false,
-      clientCount: 0
+      isRunning: wsServer.isRunning(),
+      clientCount: wsServer.getClientCount()
     }
   },
 
   startWebSocketServer: async () => {
-    return {
-      success: false,
-      error: 'WebSocket server is disabled'
+    try {
+      const { WebSocketServer } = await import('../src/lib/core/websocket')
+      const wsServer = WebSocketServer.getInstance()
+      wsServer.start()
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('Failed to start WebSocket server:', errorMessage)
+      return { success: false, error: errorMessage }
     }
   },
 
   stopWebSocketServer: async () => {
-    return {
-      success: true
+    try {
+      const { WebSocketServer } = await import('../src/lib/core/websocket')
+      const wsServer = WebSocketServer.getInstance()
+      wsServer.stop()
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('Failed to stop WebSocket server:', errorMessage)
+      return { success: false, error: errorMessage }
     }
   },
 
   updateWebSocketConfig: async (config: Record<string, unknown>) => {
-    return {
-      success: false,
-      error: 'WebSocket server is disabled'
+    try {
+      const { WebSocketServer } = await import('../src/lib/core/websocket')
+      const wsServer = WebSocketServer.getInstance()
+      wsServer.updateConfig(config)
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('Failed to update WebSocket config:', errorMessage)
+      return { success: false, error: errorMessage }
     }
   },
 
@@ -227,8 +250,62 @@ const handlers = {
 
   // Event handlers
   getRecentEvents: async (count = 10) => {
-    return {
-      events: []
+    try {
+      const { EventCache } = await import('../src/lib/core/events')
+      const eventCache = EventCache.getInstance()
+      return {
+        events: eventCache.getRecentEvents(count)
+      }
+    } catch (error) {
+      console.error('Failed to get recent events:', error)
+      return {
+        events: []
+      }
+    }
+  },
+
+  getFilteredEvents: async (options: { type?: string; source?: string; count?: number }) => {
+    try {
+      const { EventCache } = await import('../src/lib/core/events')
+      const eventCache = EventCache.getInstance()
+      return {
+        events: eventCache.filterEvents(options)
+      }
+    } catch (error) {
+      console.error('Failed to get filtered events:', error)
+      return {
+        events: []
+      }
+    }
+  },
+
+  publishEvent: async (event: unknown) => {
+    try {
+      const { EventBus, BaseEventSchema } = await import('../src/lib/core/events')
+      const eventBus = EventBus.getInstance()
+
+      // Validate the event
+      const validatedEvent = BaseEventSchema.parse(event)
+
+      eventBus.publish(validatedEvent)
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('Failed to publish event:', errorMessage)
+      return { success: false, error: errorMessage }
+    }
+  },
+
+  clearEvents: async () => {
+    try {
+      const { EventCache } = await import('../src/lib/core/events')
+      const eventCache = EventCache.getInstance()
+      eventCache.clear()
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('Failed to clear events:', errorMessage)
+      return { success: false, error: errorMessage }
     }
   }
 }
@@ -236,123 +313,132 @@ const handlers = {
 // Register tRPC and IPC handlers
 function registerHandlers() {
   // Increase the maximum number of listeners to avoid memory leak warnings
-  ipcMain.setMaxListeners(20);
+  ipcMain.setMaxListeners(20)
   // Single entry point for all tRPC calls
   ipcMain.handle('trpc', async (_event, req) => {
-    const { path, type, input } = req;
-    
+    const { path, type, input } = req
+
     // Split the path by dot to get the procedure path
-    const [namespace, procedure] = path.split('.');
-    
-    console.log(`tRPC ${type} request: ${path}`, input);
-    
+    const [namespace, procedure] = path.split('.')
+
+    console.log(`tRPC ${type} request: ${path}`, input)
+
     try {
-      let result;
-      
+      let result
+
       // Instead of accessing the tRPC router directly, map to our handlers
       switch (`${namespace}.${procedure}`) {
         case 'adapter.getStatus':
-          result = await handlers.getAdapterStatus(input);
-          break;
+          result = await handlers.getAdapterStatus(input)
+          break
         case 'adapter.connect':
-          result = await handlers.connectAdapter(input);
-          break;
+          result = await handlers.connectAdapter(input)
+          break
         case 'adapter.disconnect':
-          result = await handlers.disconnectAdapter(input);
-          break;
+          result = await handlers.disconnectAdapter(input)
+          break
         case 'adapter.updateConfig':
-          result = await handlers.updateAdapterConfig(input.adapterId, input.config);
-          break;
+          result = await handlers.updateAdapterConfig(input.adapterId, input.config)
+          break
         case 'websocket.getStatus':
-          result = await handlers.getWebSocketStatus();
-          break;
+          result = await handlers.getWebSocketStatus()
+          break
         case 'websocket.start':
-          result = await handlers.startWebSocketServer();
-          break;
+          result = await handlers.startWebSocketServer()
+          break
         case 'websocket.stop':
-          result = await handlers.stopWebSocketServer();
-          break;
+          result = await handlers.stopWebSocketServer()
+          break
         case 'websocket.updateConfig':
-          result = await handlers.updateWebSocketConfig(input);
-          break;
+          result = await handlers.updateWebSocketConfig(input)
+          break
         case 'auth.getState':
-          result = await handlers.getAuthState(input);
-          break;
+          result = await handlers.getAuthState(input)
+          break
         case 'auth.authenticate':
-          result = await handlers.authenticate(input);
-          break;
+          result = await handlers.authenticate(input)
+          break
         case 'auth.logout':
-          result = await handlers.logout(input);
-          break;
+          result = await handlers.logout(input)
+          break
         case 'event.getRecentEvents':
-          result = await handlers.getRecentEvents(input);
-          break;
+          result = await handlers.getRecentEvents(input)
+          break
+        case 'event.getFilteredEvents':
+          result = await handlers.getFilteredEvents(input)
+          break
+        case 'event.publishEvent':
+          result = await handlers.publishEvent(input)
+          break
+        case 'event.clearEvents':
+          result = await handlers.clearEvents()
+          break
         default:
-          throw new Error(`Unknown procedure: ${path}`);
+          throw new Error(`Unknown procedure: ${path}`)
       }
-      
-      console.log(`tRPC ${type} response for ${path}:`, result);
-      return result;
+
+      console.log(`tRPC ${type} response for ${path}:`, result)
+      return result
     } catch (error) {
-      console.error('tRPC handler error:', error);
+      console.error('tRPC handler error:', error)
       // Properly format error for tRPC client
       return {
         error: {
           message: error instanceof Error ? error.message : String(error),
           code: 'INTERNAL_SERVER_ERROR'
         }
-      };
+      }
     }
-  });
-  
+  })
+
   // Legacy IPC handlers for backward compatibility
   ipcMain.handle('get-adapter-status', async (_event, adapterId) => {
-    return await handlers.getAdapterStatus(adapterId);
-  });
+    return await handlers.getAdapterStatus(adapterId)
+  })
 
   ipcMain.handle('connect-adapter', async (_event, adapterId) => {
-    return await handlers.connectAdapter(adapterId);
-  });
+    return await handlers.connectAdapter(adapterId)
+  })
 
   ipcMain.handle('disconnect-adapter', async (_event, adapterId) => {
-    return await handlers.disconnectAdapter(adapterId);
-  });
+    return await handlers.disconnectAdapter(adapterId)
+  })
 
   ipcMain.handle('update-adapter-config', async (_event, adapterId, config) => {
-    return await handlers.updateAdapterConfig(adapterId, config);
-  });
+    return await handlers.updateAdapterConfig(adapterId, config)
+  })
 
   ipcMain.handle('get-websocket-status', async () => {
-    return await handlers.getWebSocketStatus();
-  });
+    return await handlers.getWebSocketStatus()
+  })
 
   ipcMain.handle('start-websocket-server', async () => {
-    return await handlers.startWebSocketServer();
-  });
+    return await handlers.startWebSocketServer()
+  })
 
   ipcMain.handle('stop-websocket-server', async () => {
-    return await handlers.stopWebSocketServer();
-  });
+    return await handlers.stopWebSocketServer()
+  })
 
   ipcMain.handle('update-websocket-config', async (_event, config) => {
-    return await handlers.updateWebSocketConfig(config);
-  });
+    return await handlers.updateWebSocketConfig(config)
+  })
 
   ipcMain.handle('get-auth-state', async (_event, serviceId) => {
-    return await handlers.getAuthState(serviceId);
-  });
+    return await handlers.getAuthState(serviceId)
+  })
 
   ipcMain.handle('authenticate', async (_event, serviceId) => {
-    return await handlers.authenticate(serviceId);
-  });
+    return await handlers.authenticate(serviceId)
+  })
 
   ipcMain.handle('logout', async (_event, serviceId) => {
-    return await handlers.logout(serviceId);
-  });
+    return await handlers.logout(serviceId)
+  })
 
   ipcMain.handle('get-recent-events', async (_event, count = 10) => {
-    return await handlers.getRecentEvents(count);
-  });
+    return await handlers.getRecentEvents(count)
+  })
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common

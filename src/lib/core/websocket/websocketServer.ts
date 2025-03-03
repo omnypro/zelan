@@ -1,7 +1,7 @@
-import { WebSocket, WebSocketServer as WSServer } from 'ws';
-import { EventBus, BaseEvent } from '../events';
-import { BehaviorSubject, Observable, Subject, Subscription, filter, takeUntil, timer } from 'rxjs';
-import { z } from 'zod';
+import { WebSocket, WebSocketServer as WSServer } from 'ws'
+import { EventBus, BaseEvent } from '../events'
+import { BehaviorSubject, Observable, Subject, Subscription, takeUntil, timer } from 'rxjs'
+import { z } from 'zod'
 
 /**
  * Schema for WebSocket server configuration
@@ -9,10 +9,10 @@ import { z } from 'zod';
 export const WebSocketServerConfigSchema = z.object({
   port: z.number().int().positive().default(8080),
   pingInterval: z.number().int().positive().default(30000),
-  path: z.string().default('/events'),
-});
+  path: z.string().default('/events')
+})
 
-export type WebSocketServerConfig = z.infer<typeof WebSocketServerConfigSchema>;
+export type WebSocketServerConfig = z.infer<typeof WebSocketServerConfigSchema>
 
 /**
  * Schema for WebSocket message
@@ -20,289 +20,294 @@ export type WebSocketServerConfig = z.infer<typeof WebSocketServerConfigSchema>;
 export const WebSocketMessageSchema = z.object({
   type: z.string(),
   payload: z.any(),
-  timestamp: z.number(),
-});
+  timestamp: z.number()
+})
 
-export type WebSocketMessage = z.infer<typeof WebSocketMessageSchema>;
+export type WebSocketMessage = z.infer<typeof WebSocketMessageSchema>
 
 /**
  * WebSocketServer provides a real-time events API for external clients
  */
 export class WebSocketServer {
-  private static instance: WebSocketServer;
-  private server: WSServer | null = null;
-  private clients: Set<WebSocket> = new Set();
-  private eventBus: EventBus = EventBus.getInstance();
-  private eventSubscription: Subscription | null = null;
-  private pingInterval: Subscription | null = null;
-  private destroy$ = new Subject<void>();
-  private config: WebSocketServerConfig;
-  private stateSubject = new BehaviorSubject<boolean>(false);
-  
+  private static instance: WebSocketServer
+  private server: WSServer | null = null
+  private clients: Set<WebSocket> = new Set()
+  private eventBus: EventBus = EventBus.getInstance()
+  private eventSubscription: Subscription | null = null
+  private pingInterval: Subscription | null = null
+  private destroy$ = new Subject<void>()
+  private config: WebSocketServerConfig
+  private stateSubject = new BehaviorSubject<boolean>(false)
+
   private constructor(config: Partial<WebSocketServerConfig> = {}) {
-    this.config = WebSocketServerConfigSchema.parse(config);
+    this.config = WebSocketServerConfigSchema.parse(config)
   }
-  
+
   /**
    * Get singleton instance of WebSocketServer
    */
   public static getInstance(config?: Partial<WebSocketServerConfig>): WebSocketServer {
     if (!WebSocketServer.instance) {
-      WebSocketServer.instance = new WebSocketServer(config);
+      WebSocketServer.instance = new WebSocketServer(config)
     } else if (config) {
-      WebSocketServer.instance.updateConfig(config);
+      WebSocketServer.instance.updateConfig(config)
     }
-    
-    return WebSocketServer.instance;
+
+    return WebSocketServer.instance
   }
-  
+
   /**
    * Start the WebSocket server
    */
   public start(): void {
     if (this.server) {
-      console.log('WebSocket server already running');
-      return;
+      console.log('WebSocket server already running')
+      return
     }
-    
+
     try {
       // Create server
       this.server = new WSServer({
         port: this.config.port,
-        path: this.config.path,
-      });
-      
+        path: this.config.path
+      })
+
       // Set up event handlers
-      this.server.on('connection', this.handleConnection.bind(this));
-      this.server.on('error', this.handleServerError.bind(this));
-      
+      this.server.on('connection', this.handleConnection.bind(this))
+      this.server.on('error', this.handleServerError.bind(this))
+
       // Subscribe to events
-      this.subscribeToEvents();
-      
+      this.subscribeToEvents()
+
       // Start ping interval
-      this.startPingInterval();
-      
+      this.startPingInterval()
+
       // Update state
-      this.stateSubject.next(true);
-      
-      console.log(`WebSocket server started on port ${this.config.port}`);
+      this.stateSubject.next(true)
+
+      console.log(`WebSocket server started on port ${this.config.port}`)
     } catch (error) {
-      console.error('Failed to start WebSocket server:', error);
-      this.stateSubject.next(false);
+      console.error('Failed to start WebSocket server:', error)
+      this.stateSubject.next(false)
     }
   }
-  
+
   /**
    * Stop the WebSocket server
    */
   public stop(): void {
     if (!this.server) {
-      return;
+      return
     }
-    
+
     // Close all connections
     for (const client of this.clients) {
-      client.terminate();
+      client.terminate()
     }
-    this.clients.clear();
-    
+    this.clients.clear()
+
     // Unsubscribe from events
-    this.unsubscribeFromEvents();
-    
+    this.unsubscribeFromEvents()
+
     // Stop ping interval
-    this.stopPingInterval();
-    
+    this.stopPingInterval()
+
     // Close server
-    this.server.close();
-    this.server = null;
-    
+    this.server.close()
+    this.server = null
+
     // Update state
-    this.stateSubject.next(false);
-    
-    console.log('WebSocket server stopped');
+    this.stateSubject.next(false)
+
+    console.log('WebSocket server stopped')
   }
-  
+
   /**
    * Update server configuration
    */
   public updateConfig(config: Partial<WebSocketServerConfig>): void {
-    const wasRunning = this.isRunning();
-    
+    const wasRunning = this.isRunning()
+
     // Stop server if running
     if (wasRunning) {
-      this.stop();
+      this.stop()
     }
-    
+
     // Update config
     this.config = WebSocketServerConfigSchema.parse({
       ...this.config,
-      ...config,
-    });
-    
+      ...config
+    })
+
     // Restart server if it was running
     if (wasRunning) {
-      this.start();
+      this.start()
     }
   }
-  
+
   /**
    * Check if server is running
    */
   public isRunning(): boolean {
-    return this.server !== null;
+    return this.server !== null
   }
-  
+
   /**
    * Get server state as an observable
    */
   public state$(): Observable<boolean> {
-    return this.stateSubject.asObservable();
+    return this.stateSubject.asObservable()
   }
-  
+
   /**
    * Get the number of connected clients
    */
   public getClientCount(): number {
-    return this.clients.size;
+    return this.clients.size
   }
-  
+
   /**
    * Broadcast a message to all connected clients
    */
   public broadcast(message: WebSocketMessage): void {
     if (!this.isRunning() || this.clients.size === 0) {
-      return;
+      return
     }
-    
-    const messageString = JSON.stringify(message);
-    
+
+    const messageString = JSON.stringify(message)
+
     for (const client of this.clients) {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(messageString);
+        client.send(messageString)
       }
     }
   }
-  
+
   /**
    * Handle a new WebSocket connection
    */
   private handleConnection(socket: WebSocket): void {
     // Add to clients set
-    this.clients.add(socket);
-    console.log(`Client connected. Total clients: ${this.clients.size}`);
-    
+    this.clients.add(socket)
+    console.log(`Client connected. Total clients: ${this.clients.size}`)
+
     // Set up event handlers
-    socket.on('message', (data: string) => this.handleMessage(socket, data));
-    socket.on('close', () => this.handleClose(socket));
-    socket.on('error', (error: Error) => this.handleClientError(socket, error));
-    
+    socket.on('message', (data: string) => this.handleMessage(socket, data))
+    socket.on('close', () => this.handleClose(socket))
+    socket.on('error', (error: Error) => this.handleClientError(socket, error))
+
     // Send welcome message
-    socket.send(JSON.stringify({
-      type: 'connection.established',
-      payload: { message: 'Connected to Zelan WebSocket Server' },
-      timestamp: Date.now(),
-    }));
+    socket.send(
+      JSON.stringify({
+        type: 'connection.established',
+        payload: { message: 'Connected to Zelan WebSocket Server' },
+        timestamp: Date.now()
+      })
+    )
   }
-  
+
   /**
    * Handle a WebSocket message
    */
   private handleMessage(socket: WebSocket, data: string): void {
     try {
-      const message = JSON.parse(data);
-      
+      const message = JSON.parse(data)
+
       // Handle ping message
       if (message.type === 'ping') {
-        socket.send(JSON.stringify({
-          type: 'pong',
-          payload: {},
-          timestamp: Date.now(),
-        }));
+        socket.send(
+          JSON.stringify({
+            type: 'pong',
+            payload: {},
+            timestamp: Date.now()
+          })
+        )
       }
     } catch (error) {
-      console.error('Error parsing WebSocket message:', error);
+      console.error('Error parsing WebSocket message:', error)
     }
   }
-  
+
   /**
    * Handle a WebSocket connection close
    */
   private handleClose(socket: WebSocket): void {
     // Remove from clients set
-    this.clients.delete(socket);
-    console.log(`Client disconnected. Total clients: ${this.clients.size}`);
+    this.clients.delete(socket)
+    console.log(`Client disconnected. Total clients: ${this.clients.size}`)
   }
-  
+
   /**
    * Handle a WebSocket client error
    */
   private handleClientError(socket: WebSocket, error: Error): void {
-    console.error('WebSocket client error:', error);
-    
+    console.error('WebSocket client error:', error)
+
     // Remove from clients set
-    this.clients.delete(socket);
+    this.clients.delete(socket)
   }
-  
+
   /**
    * Handle a WebSocket server error
    */
   private handleServerError(error: Error): void {
-    console.error('WebSocket server error:', error);
-    
+    console.error('WebSocket server error:', error)
+
     // Stop server
-    this.stop();
+    this.stop()
   }
-  
+
   /**
    * Subscribe to EventBus events
    */
   private subscribeToEvents(): void {
     // Unsubscribe if already subscribed
-    this.unsubscribeFromEvents();
-    
+    this.unsubscribeFromEvents()
+
     // Subscribe to all events
-    this.eventSubscription = this.eventBus.events()
+    this.eventSubscription = this.eventBus
+      .events()
       .pipe(takeUntil(this.destroy$))
-      .subscribe(event => {
-        this.broadcastEvent(event);
-      });
+      .subscribe((event) => {
+        this.broadcastEvent(event)
+      })
   }
-  
+
   /**
    * Unsubscribe from EventBus events
    */
   private unsubscribeFromEvents(): void {
     if (this.eventSubscription) {
-      this.eventSubscription.unsubscribe();
-      this.eventSubscription = null;
+      this.eventSubscription.unsubscribe()
+      this.eventSubscription = null
     }
   }
-  
+
   /**
    * Start ping interval to keep connections alive
    */
   private startPingInterval(): void {
     // Stop if already running
-    this.stopPingInterval();
-    
+    this.stopPingInterval()
+
     // Start new interval
     this.pingInterval = timer(this.config.pingInterval, this.config.pingInterval)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
-        this.pingClients();
-      });
+        this.pingClients()
+      })
   }
-  
+
   /**
    * Stop ping interval
    */
   private stopPingInterval(): void {
     if (this.pingInterval) {
-      this.pingInterval.unsubscribe();
-      this.pingInterval = null;
+      this.pingInterval.unsubscribe()
+      this.pingInterval = null
     }
   }
-  
+
   /**
    * Ping all connected clients
    */
@@ -310,12 +315,12 @@ export class WebSocketServer {
     const pingMessage = {
       type: 'server.ping',
       payload: {},
-      timestamp: Date.now(),
-    };
-    
-    this.broadcast(pingMessage);
+      timestamp: Date.now()
+    }
+
+    this.broadcast(pingMessage)
   }
-  
+
   /**
    * Broadcast an event to all connected clients
    */
@@ -323,21 +328,21 @@ export class WebSocketServer {
     const message: WebSocketMessage = {
       type: event.type,
       payload: event,
-      timestamp: Date.now(),
-    };
-    
-    this.broadcast(message);
+      timestamp: Date.now()
+    }
+
+    this.broadcast(message)
   }
-  
+
   /**
    * Clean up resources
    */
   public destroy(): void {
     // Stop server
-    this.stop();
-    
+    this.stop()
+
     // Complete destroy subject
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroy$.next()
+    this.destroy$.complete()
   }
 }
