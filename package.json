@@ -1,40 +1,57 @@
 {
-  "name": "vite-project",
+  "name": "zelan",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "build": "tsc && vite build && electron-builder",
+    "dev": "vite",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "build:mac": "npm run build -- --mac",
+    "build:win": "npm run build -- --win",
+    "build:linux": "npm run build -- --linux"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.0.9",
+    "@trpc/client": "^10.45.2",
+    "@trpc/server": "^10.45.2",
+    "bufferutil": "^4.0.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "crypto-browserify": "^3.12.1",
     "lucide-react": "^0.477.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.0.2",
     "tailwindcss": "^4.0.9",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "utf-8-validate": "^6.0.5",
+    "ws": "^8.15.0"
   },
   "devDependencies": {
+    "@tanstack/store": "^0.7.0",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
+    "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^7.1.1",
     "@typescript-eslint/parser": "^7.1.1",
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^30.0.1",
     "electron-builder": "^24.13.3",
+    "electron-store": "^10.0.1",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "rxjs": "^7.8.2",
     "typescript": "^5.2.2",
     "vite": "^5.1.6",
     "vite-plugin-electron": "^0.28.6",
-    "vite-plugin-electron-renderer": "^0.14.5"
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "zod": "^3.24.2"
   },
   "main": "dist-electron/main.js"
 }
