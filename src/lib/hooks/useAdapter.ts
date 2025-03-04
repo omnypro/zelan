@@ -1,63 +1,127 @@
-import { useCallback } from 'react';
-import { AdapterManager, AdapterState, ServiceAdapter } from '../core/adapters';
-import { useObservable } from './useObservable';
+import { useState, useEffect, useCallback } from 'react';
+import { useTrpc } from './useTrpc';
+import type { AdapterStatus } from '../trpc/shared/types';
 
 /**
- * Hook for interacting with adapters
- * Provides adapter state and control functions
+ * Hook for interacting with adapters through tRPC
+ * Provides adapter status and control functions
  */
-export function useAdapter<T extends ServiceAdapter>(adapterId: string) {
-  const adapterManager = AdapterManager.getInstance();
-  
-  // Get the adapter
-  const adapter = adapterManager.getAdapter<T>(adapterId);
-  
-  // Get adapter state if available
-  const adapterState = adapter ? 
-    useObservable(adapter.state$, adapter.state) : 
-    AdapterState.DISCONNECTED;
-  
-  // Convenience state getters
-  const isConnected = adapterState === AdapterState.CONNECTED;
-  const isConnecting = adapterState === AdapterState.CONNECTING;
-  const hasError = adapterState === AdapterState.ERROR;
-  
+export function useAdapter(adapterId: string) {
+  const trpc = useTrpc();
+  const [status, setStatus] = useState<AdapterStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch adapter status
+  const fetchStatus = useCallback(async () => {
+    if (!trpc.client) {
+      console.error('TRPC client not available');
+      setError('TRPC client not available');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const adapterStatus = await trpc.client.adapter.getStatus.query(adapterId);
+      setStatus(adapterStatus);
+    } catch (err) {
+      console.error('Error fetching adapter status:', err);
+      const message = err instanceof Error ? err.message : 'Failed to fetch adapter status';
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [trpc.client, adapterId]);
+
+  // Initial load
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
   // Connect the adapter
   const connect = useCallback(async () => {
-    if (adapter) {
-      await adapter.connect();
-    } else {
-      throw new Error(`Adapter with ID ${adapterId} not found`);
+    if (!trpc.client) {
+      console.error('TRPC client not available');
+      setError('TRPC client not available');
+      return;
     }
-  }, [adapter, adapterId]);
-  
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      await trpc.client.adapter.connect.mutate(adapterId);
+      await fetchStatus(); // Refresh status after connecting
+    } catch (err) {
+      console.error('Error connecting adapter:', err);
+      const message = err instanceof Error ? err.message : 'Failed to connect adapter';
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [trpc.client, adapterId, fetchStatus]);
+
   // Disconnect the adapter
   const disconnect = useCallback(async () => {
-    if (adapter) {
-      await adapter.disconnect();
-    } else {
-      throw new Error(`Adapter with ID ${adapterId} not found`);
+    if (!trpc.client) {
+      console.error('TRPC client not available');
+      setError('TRPC client not available');
+      return;
     }
-  }, [adapter, adapterId]);
-  
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      await trpc.client.adapter.disconnect.mutate(adapterId);
+      await fetchStatus(); // Refresh status after disconnecting
+    } catch (err) {
+      console.error('Error disconnecting adapter:', err);
+      const message = err instanceof Error ? err.message : 'Failed to disconnect adapter';
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [trpc.client, adapterId, fetchStatus]);
+
   // Update adapter configuration
-  const updateConfig = useCallback((config: any) => {
-    if (adapter) {
-      adapter.updateConfig(config);
-    } else {
-      throw new Error(`Adapter with ID ${adapterId} not found`);
-    }
-  }, [adapter, adapterId]);
-  
+  const updateConfig = useCallback(
+    async (config: Record<string, unknown>) => {
+      if (!trpc.client) {
+        console.error('TRPC client not available');
+        setError('TRPC client not available');
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        await trpc.client.adapter.updateConfig.mutate({
+          adapterId,
+          config,
+        });
+        await fetchStatus(); // Refresh status after updating config
+      } catch (err) {
+        console.error('Error updating adapter config:', err);
+        const message = err instanceof Error ? err.message : 'Failed to update adapter config';
+        setError(message);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [trpc.client, adapterId, fetchStatus]
+  );
+
   return {
-    adapter,
-    adapterState,
-    isConnected,
-    isConnecting,
-    hasError,
+    status,
+    isLoading,
+    error,
     connect,
     disconnect,
     updateConfig,
-    config: adapter ? adapter.config : null,
+    refreshStatus: fetchStatus,
   };
 }

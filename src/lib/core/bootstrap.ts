@@ -1,6 +1,6 @@
 import { EventBus, EventType, createEvent, BaseEventSchema, EventCache } from './events'
 import { AdapterManager } from './adapters'
-import { TestAdapter } from './adapters'
+import { TestAdapter, ObsAdapter } from './adapters'
 import { WebSocketServer } from './websocket'
 import { AuthService } from './auth'
 import { ConfigManager, AdapterSettingsManager, UserDataManager } from './config'
@@ -11,6 +11,7 @@ import { ConfigManager, AdapterSettingsManager, UserDataManager } from './config
  */
 export async function bootstrap(config: {
   enableTestAdapter?: boolean
+  enableObsAdapter?: boolean
   startWebSocketServer?: boolean
   webSocketPort?: number
   webSocketPath?: string
@@ -49,6 +50,22 @@ export async function bootstrap(config: {
     })
 
     adapterManager.registerAdapter(testAdapter)
+  }
+  
+  // Add OBS adapter if enabled
+  if (config.enableObsAdapter) {
+    console.log('Enabling OBS adapter')
+    const obsAdapter = new ObsAdapter({
+      address: 'localhost',
+      port: 4455,
+      autoConnect: false, // Don't auto-connect until configured
+      enabled: true       // Adapter is enabled but won't connect automatically
+    })
+    
+    adapterManager.registerAdapter(obsAdapter)
+    
+    // Log connection parameters for debugging
+    console.log('OBS adapter initial config:', obsAdapter.config)
   }
 
   // Start WebSocket server if enabled

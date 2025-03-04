@@ -32,9 +32,10 @@ async function initializeCore() {
   if (coreInitialized) return
 
   try {
-    // Bootstrap with test adapter and WebSocket server
+    // Bootstrap with test adapter, OBS adapter, and WebSocket server
     await bootstrap({
       enableTestAdapter: true,
+      enableObsAdapter: true,
       startWebSocketServer: true,
       webSocketPort: 9090, // Use a different port to avoid conflicts
       webSocketPath: '/events'
