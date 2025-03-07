@@ -23,6 +23,7 @@
     /* Paths */
     "baseUrl": ".",
     "paths": {
+      "~/*": ["./electron/*"],
       "@/*": ["./src/*"]
     }
   },

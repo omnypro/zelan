@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useEvents } from '../lib/hooks/useEvents'
-import { useWebSocketServerTrpc } from '../lib/hooks/useWebSocketServerTrpc'
-import { EventType } from '../lib/core/events/types'
+import { useEvents } from '@/lib/hooks/useEvents'
+import { useWebSocketServerTrpc } from '@/lib/hooks/useWebSocketServerTrpc'
+import { EventType } from '@/lib/core/events/types'
 
 /**
  * EventsDemo - A component to demonstrate the events and WebSocket integration

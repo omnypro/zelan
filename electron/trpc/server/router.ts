@@ -10,7 +10,7 @@ import {
   EventFilterSchema,
   BaseEventSchema,
   ConfigResponseSchema
-} from '~/trpc/shared/types'
+} from '../shared/types'
 
 // Initialize tRPC backend
 const t = initTRPC.create()
@@ -28,7 +28,7 @@ export const appRouter = router({
       .input(z.string())
       .output(ConfigResponseSchema)
       .query(async ({ input }) => {
-        const { AdapterSettingsStore } = await import('~/store')
+        const { AdapterSettingsStore } = await import('../../store')
         const settingsStore = AdapterSettingsStore.getInstance()
         const settings = settingsStore.getSettings(input)
         
@@ -48,12 +48,12 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { AdapterSettingsStore } = await import('~/store')
+          const { AdapterSettingsStore } = await import('../../store')
           const settingsStore = AdapterSettingsStore.getInstance()
           settingsStore.updateSettings(input.adapterId, input.settings)
           
           // Update adapter runtime config if connected
-          const { AdapterManager } = await import('~/core/adapters')
+          const { AdapterManager } = await import('../../core/adapters')
           const adapterManager = AdapterManager.getInstance()
           const adapter = adapterManager.getAdapter(input.adapterId)
           
@@ -72,7 +72,7 @@ export const appRouter = router({
     getAllAdapterSettings: procedure
       .output(ConfigResponseSchema)
       .query(async () => {
-        const { AdapterSettingsStore } = await import('~/store')
+        const { AdapterSettingsStore } = await import('../../store')
         const settingsStore = AdapterSettingsStore.getInstance()
         const settings = settingsStore.getAllSettings()
         
@@ -91,7 +91,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { AdapterSettingsStore } = await import('~/store')
+          const { AdapterSettingsStore } = await import('../../store')
           const settingsStore = AdapterSettingsStore.getInstance()
           settingsStore.setAdapterEnabled(input.adapterId, input.enabled)
           return { success: true }
@@ -110,7 +110,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { AdapterSettingsStore } = await import('~/store')
+          const { AdapterSettingsStore } = await import('../../store')
           const settingsStore = AdapterSettingsStore.getInstance()
           settingsStore.setAdapterAutoConnect(input.adapterId, input.autoConnect)
           return { success: true }
@@ -124,7 +124,7 @@ export const appRouter = router({
     getAppConfig: procedure
       .output(ConfigResponseSchema)
       .query(async () => {
-        const { ConfigStore } = await import('~/store')
+        const { ConfigStore } = await import('../../store')
         const configStore = ConfigStore.getInstance()
         const config = configStore.getConfig()
         
@@ -140,7 +140,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { ConfigStore } = await import('~/store')
+          const { ConfigStore } = await import('../../store')
           const configStore = ConfigStore.getInstance()
           configStore.updateConfig(input)
           return { success: true }
@@ -154,7 +154,7 @@ export const appRouter = router({
     getUserData: procedure
       .output(ConfigResponseSchema)
       .query(async () => {
-        const { UserDataStore } = await import('~/store')
+        const { UserDataStore } = await import('../../store')
         const userDataStore = UserDataStore.getInstance()
         const userData = userDataStore.getData()
         
@@ -170,7 +170,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { UserDataStore } = await import('~/store')
+          const { UserDataStore } = await import('../../store')
           const userDataStore = UserDataStore.getInstance()
           userDataStore.updateData(input)
           return { success: true }
@@ -185,7 +185,7 @@ export const appRouter = router({
       .input(z.string())
       .output(ConfigResponseSchema)
       .query(async ({ input }) => {
-        const { TokenStore } = await import('~/store')
+        const { TokenStore } = await import('../../store')
         const tokenStore = TokenStore.getInstance()
         const token = tokenStore.getToken(input)
         
@@ -210,7 +210,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { TokenStore } = await import('~/store')
+          const { TokenStore } = await import('../../store')
           const tokenStore = TokenStore.getInstance()
           tokenStore.saveToken(input.serviceId, input.token)
           return { success: true }
@@ -225,7 +225,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { TokenStore } = await import('~/store')
+          const { TokenStore } = await import('../../store')
           const tokenStore = TokenStore.getInstance()
           tokenStore.deleteToken(input)
           return { success: true }
@@ -239,7 +239,7 @@ export const appRouter = router({
       .input(z.string())
       .output(ConfigResponseSchema)
       .query(async ({ input }) => {
-        const { TokenStore } = await import('~/store')
+        const { TokenStore } = await import('../../store')
         const tokenStore = TokenStore.getInstance()
         const isValid = tokenStore.hasValidToken(input)
         
@@ -253,7 +253,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async () => {
         try {
-          const { TokenStore } = await import('~/store')
+          const { TokenStore } = await import('../../store')
           const tokenStore = TokenStore.getInstance()
           tokenStore.clearAllTokens()
           return { success: true }
@@ -270,7 +270,7 @@ export const appRouter = router({
       .input(z.string())
       .output(AdapterStatusSchema)
       .query(async ({ input }) => {
-        const { AdapterManager } = await import('~/core/adapters')
+        const { AdapterManager } = await import('../../core/adapters')
         const adapterManager = AdapterManager.getInstance()
         const adapter = adapterManager.getAdapter(input)
 
@@ -289,7 +289,7 @@ export const appRouter = router({
       .input(z.string())
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AdapterManager } = await import('~/core/adapters')
+        const { AdapterManager } = await import('../../core/adapters')
         const adapterManager = AdapterManager.getInstance()
         const adapter = adapterManager.getAdapter(input)
 
@@ -310,7 +310,7 @@ export const appRouter = router({
       .input(z.string())
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AdapterManager } = await import('~/core/adapters')
+        const { AdapterManager } = await import('../../core/adapters')
         const adapterManager = AdapterManager.getInstance()
         const adapter = adapterManager.getAdapter(input)
 
@@ -336,7 +336,7 @@ export const appRouter = router({
       )
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AdapterManager } = await import('~/core/adapters')
+        const { AdapterManager } = await import('../../core/adapters')
         const adapterManager = AdapterManager.getInstance()
         const adapter = adapterManager.getAdapter(input.adapterId)
 
@@ -357,7 +357,7 @@ export const appRouter = router({
   // WebSocket procedures
   websocket: router({
     getStatus: procedure.output(WebSocketStatusSchema).query(async () => {
-      const { WebSocketServer } = await import('~/core/websocket/websocketServer')
+      const { WebSocketServer } = await import('../../core/websocket')
       const wsServer = WebSocketServer.getInstance()
 
       return {
@@ -368,7 +368,7 @@ export const appRouter = router({
 
     start: procedure.output(OperationResultSchema).mutation(async () => {
       try {
-        const { WebSocketServer } = await import('~/core/websocket/websocketServer')
+        const { WebSocketServer } = await import('../../core/websocket')
         const wsServer = WebSocketServer.getInstance()
         wsServer.start()
         return { success: true }
@@ -380,7 +380,7 @@ export const appRouter = router({
 
     stop: procedure.output(OperationResultSchema).mutation(async () => {
       try {
-        const { WebSocketServer } = await import('~/core/websocket/websocketServer')
+        const { WebSocketServer } = await import('../../core/websocket')
         const wsServer = WebSocketServer.getInstance()
         wsServer.stop()
         return { success: true }
@@ -395,7 +395,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { WebSocketServer } = await import('~/core/websocket/websocketServer')
+          const { WebSocketServer } = await import('../../core/websocket')
           const wsServer = WebSocketServer.getInstance()
           wsServer.updateConfig(input)
           return { success: true }
@@ -412,7 +412,7 @@ export const appRouter = router({
       .input(z.string())
       .output(AuthStateSchema)
       .query(async ({ input }) => {
-        const { AuthService, AuthState } = await import('~/core/auth')
+        const { AuthService, AuthState } = await import('../../core/auth')
         const authService = AuthService.getInstance()
 
         return {
@@ -425,7 +425,7 @@ export const appRouter = router({
       .input(z.string())
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AuthService } = await import('~/core/auth')
+        const { AuthService } = await import('../../core/auth')
         const authService = AuthService.getInstance()
 
         try {
@@ -441,7 +441,7 @@ export const appRouter = router({
       .input(z.string())
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
-        const { AuthService } = await import('~/core/auth')
+        const { AuthService } = await import('../../core/auth')
         const authService = AuthService.getInstance()
 
         try {
@@ -460,7 +460,7 @@ export const appRouter = router({
       .input(z.number().default(10))
       .output(EventsResponseSchema)
       .query(async ({ input }) => {
-        const { EventCache } = await import('~/core/events')
+        const { EventCache } = await import('../../core/events')
         const eventCache = EventCache.getInstance()
 
         return {
@@ -472,7 +472,7 @@ export const appRouter = router({
       .input(EventFilterSchema)
       .output(EventsResponseSchema)
       .query(async ({ input }) => {
-        const { EventCache } = await import('~/core/events')
+        const { EventCache } = await import('../../core/events')
         const eventCache = EventCache.getInstance()
 
         return {
@@ -489,7 +489,7 @@ export const appRouter = router({
       .output(OperationResultSchema)
       .mutation(async ({ input }) => {
         try {
-          const { EventBus } = await import('~/core/events')
+          const { EventBus } = await import('../../core/events')
           const eventBus = EventBus.getInstance()
           eventBus.publish(input)
           return { success: true }
@@ -501,7 +501,7 @@ export const appRouter = router({
 
     clearEvents: procedure.output(OperationResultSchema).mutation(async () => {
       try {
-        const { EventCache } = await import('~/core/events')
+        const { EventCache } = await import('../../core/events')
         const eventCache = EventCache.getInstance()
         eventCache.clear()
         return { success: true }

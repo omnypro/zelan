@@ -1,15 +1,5 @@
-import { z } from 'zod';
-
-// Import TokenSchema type from electron store to maintain consistency
-export const TokenSchema = z.object({
-  accessToken: z.string(),
-  refreshToken: z.string().optional(),
-  expiresAt: z.number(),
-  scopes: z.array(z.string()).default([]),
-  tokenType: z.string().default('bearer'),
-});
-
-export type Token = z.infer<typeof TokenSchema>;
+// Import TokenSchema and Token types from electron implementation for consistency
+import { TokenSchema, Token } from '~/core/auth';
 
 /**
  * TokenManager handles secure storage and retrieval of authentication tokens
@@ -43,7 +33,7 @@ export class TokenManager {
       const validatedToken = TokenSchema.parse(token);
       
       // Use tRPC from renderer
-      const { client } = await import('../../trpc/client');
+      const { client } = await import('@/lib/trpc/client');
       await client.config.saveToken.mutate({ 
         serviceId, 
         token: validatedToken 
@@ -60,7 +50,7 @@ export class TokenManager {
   public async getToken(serviceId: string): Promise<Token | null> {
     try {
       // Use tRPC from renderer
-      const { client } = await import('../../trpc/client');
+      const { client } = await import('@/lib/trpc/client');
       const result = await client.config.getToken.query(serviceId);
       
       if (!result.success || !result.data) {
@@ -85,7 +75,7 @@ export class TokenManager {
   public async hasValidToken(serviceId: string): Promise<boolean> {
     try {
       // Use tRPC from renderer
-      const { client } = await import('../../trpc/client');
+      const { client } = await import('@/lib/trpc/client');
       const result = await client.config.hasValidToken.query(serviceId);
       return result.success ? result.data.isValid : false;
     } catch (error) {
@@ -100,7 +90,7 @@ export class TokenManager {
   public async deleteToken(serviceId: string): Promise<void> {
     try {
       // Use tRPC from renderer
-      const { client } = await import('../../trpc/client');
+      const { client } = await import('@/lib/trpc/client');
       const result = await client.config.deleteToken.mutate(serviceId);
       
       if (!result.success) {
@@ -118,7 +108,7 @@ export class TokenManager {
   public async clearAllTokens(): Promise<void> {
     try {
       // Use tRPC from renderer
-      const { client } = await import('../../trpc/client');
+      const { client } = await import('@/lib/trpc/client');
       const result = await client.config.clearAllTokens.mutate();
       
       if (!result.success) {

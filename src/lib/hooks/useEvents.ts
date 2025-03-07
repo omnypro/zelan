@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTrpc } from './useTrpc'
-import type { Event, BaseEvent } from '../trpc/shared/types'
+import type { Event, BaseEvent } from '@/lib/trpc/shared/types'
 
 /**
  * Hook for working with events through tRPC

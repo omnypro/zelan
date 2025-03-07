@@ -2,12 +2,16 @@
 export * from './bootstrap';
 
 // Config managers
-export * from './config/configManager';
-export * from './config/adapterSettingsManager';
-export * from './config/userDataManager';
+export * from './config';
 
 // Auth
-export * from './auth/tokenManager';
+export * from './auth';
 
 // WebSocket
-export * from './websocket/websocketServer';
+export * from './websocket';
+
+// Adapters
+export * from './adapters';
+
+// Events
+export * from './events';

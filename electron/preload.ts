@@ -1,5 +1,5 @@
 import { ipcRenderer, contextBridge } from 'electron'
-import type { AdapterStatus, OperationResult, WebSocketStatus, AuthState, EventsResponse, WebSocketConfig } from '../src/lib/trpc/shared/types'
+import type { AdapterStatus, OperationResult, WebSocketStatus, AuthState, EventsResponse, WebSocketConfig } from './trpc/shared/types'
 
 // --------- Expose tRPC bridge to the Renderer process ---------
 contextBridge.exposeInMainWorld('trpcBridge', {

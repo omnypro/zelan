@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTrpc } from './useTrpc';
 import { useAdapterSettings } from './useAdapterSettings';
-import type { AdapterStatus } from '../trpc/shared/types';
+import type { AdapterStatus } from '@/lib/trpc/shared/types';
 import { BehaviorSubject } from 'rxjs';
 
 // Create a subject for each adapter's status

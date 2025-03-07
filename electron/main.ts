@@ -1,10 +1,9 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { initializeMainProcess, shutdownMainProcess } from './core/bootstrap'
-import { bootstrap, shutdown } from '../src/lib/core/bootstrap'
+import { initializeMainProcess, shutdownMainProcess } from '~/core/bootstrap'
 import { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
-import type { AppRouter } from './trpc/router'
+import type { AppRouter } from '~/trpc/router'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -33,18 +32,13 @@ async function initializeCore() {
   if (coreInitialized) return
 
   try {
-    // First initialize the Electron main process components
-    const mainProcessComponents = await initializeMainProcess({
-      startWebSocketServer: true,
-      webSocketPort: 9090,
-      webSocketPath: '/events'
-    });
-    
-    // Then bootstrap the application core with adapters
-    await bootstrap({
+    // Initialize the Electron main process components with adapters
+    await initializeMainProcess({
       enableTestAdapter: true,
       enableObsAdapter: true,
-      startWebSocketServer: false, // WebSocket server already started in main process
+      startWebSocketServer: true,
+      webSocketPort: 9090,
+      webSocketPath: '/events',
       initTrpc: true
     });
 
@@ -60,10 +54,7 @@ async function shutdownCore() {
   if (!coreInitialized) return
 
   try {
-    // First shutdown the application core
-    await shutdown();
-    
-    // Then shutdown the Electron main process components
+    // Shutdown the Electron main process components
     await shutdownMainProcess();
     
     console.log('Core services shut down');
@@ -105,7 +96,7 @@ function createWindow() {
 const handlers = {
   // Adapter handlers
   getAdapterStatus: async (adapterId: string) => {
-    const { AdapterManager } = await import('../src/lib/core/adapters')
+    const { AdapterManager } = await import('~/core/adapters')
     const adapterManager = AdapterManager.getInstance()
     const adapter = adapterManager.getAdapter(adapterId)
 
@@ -121,7 +112,7 @@ const handlers = {
   },
 
   connectAdapter: async (adapterId: string) => {
-    const { AdapterManager } = await import('../src/lib/core/adapters')
+    const { AdapterManager } = await import('~/core/adapters')
     const adapterManager = AdapterManager.getInstance()
     const adapter = adapterManager.getAdapter(adapterId)
 
@@ -139,7 +130,7 @@ const handlers = {
   },
 
   disconnectAdapter: async (adapterId: string) => {
-    const { AdapterManager } = await import('../src/lib/core/adapters')
+    const { AdapterManager } = await import('~/core/adapters')
     const adapterManager = AdapterManager.getInstance()
     const adapter = adapterManager.getAdapter(adapterId)
 
@@ -157,7 +148,7 @@ const handlers = {
   },
 
   updateAdapterConfig: async (adapterId: string, config: Record<string, unknown>) => {
-    const { AdapterManager } = await import('../src/lib/core/adapters')
+    const { AdapterManager } = await import('~/core/adapters')
     const adapterManager = AdapterManager.getInstance()
     const adapter = adapterManager.getAdapter(adapterId)
 
@@ -176,7 +167,7 @@ const handlers = {
 
   // WebSocket server handlers
   getWebSocketStatus: async () => {
-    const { WebSocketServer } = await import('./core/websocket/websocketServer')
+    const { WebSocketServer } = await import('~/core/websocket')
     const wsServer = WebSocketServer.getInstance()
 
     return {
@@ -187,7 +178,7 @@ const handlers = {
 
   startWebSocketServer: async () => {
     try {
-      const { WebSocketServer } = await import('./core/websocket/websocketServer')
+      const { WebSocketServer } = await import('~/core/websocket')
       const wsServer = WebSocketServer.getInstance()
       wsServer.start()
       return { success: true }
@@ -200,7 +191,7 @@ const handlers = {
 
   stopWebSocketServer: async () => {
     try {
-      const { WebSocketServer } = await import('./core/websocket/websocketServer')
+      const { WebSocketServer } = await import('~/core/websocket')
       const wsServer = WebSocketServer.getInstance()
       wsServer.stop()
       return { success: true }
@@ -213,7 +204,7 @@ const handlers = {
 
   updateWebSocketConfig: async (config: Record<string, unknown>) => {
     try {
-      const { WebSocketServer } = await import('./core/websocket/websocketServer')
+      const { WebSocketServer } = await import('~/core/websocket')
       const wsServer = WebSocketServer.getInstance()
       wsServer.updateConfig(config)
       return { success: true }
@@ -226,7 +217,7 @@ const handlers = {
 
   // Auth handlers
   getAuthState: async (serviceId: string) => {
-    const { AuthService, AuthState } = await import('../src/lib/core/auth')
+    const { AuthService, AuthState } = await import('~/core/auth')
     const authService = AuthService.getInstance()
 
     return {
@@ -236,7 +227,7 @@ const handlers = {
   },
 
   authenticate: async (serviceId: string) => {
-    const { AuthService } = await import('../src/lib/core/auth')
+    const { AuthService } = await import('~/core/auth')
     const authService = AuthService.getInstance()
 
     try {
@@ -249,7 +240,7 @@ const handlers = {
   },
 
   logout: async (serviceId: string) => {
-    const { AuthService } = await import('../src/lib/core/auth')
+    const { AuthService } = await import('~/core/auth')
     const authService = AuthService.getInstance()
 
     try {
@@ -264,7 +255,7 @@ const handlers = {
   // Event handlers
   getRecentEvents: async (count = 10) => {
     try {
-      const { EventCache } = await import('../src/lib/core/events')
+      const { EventCache } = await import('~/core/events')
       const eventCache = EventCache.getInstance()
       return {
         events: eventCache.getRecentEvents(count)
@@ -279,7 +270,7 @@ const handlers = {
 
   getFilteredEvents: async (options: { type?: string; source?: string; count?: number }) => {
     try {
-      const { EventCache } = await import('../src/lib/core/events')
+      const { EventCache } = await import('~/core/events')
       const eventCache = EventCache.getInstance()
       return {
         events: eventCache.filterEvents(options)
@@ -294,7 +285,7 @@ const handlers = {
 
   publishEvent: async (event: unknown) => {
     try {
-      const { EventBus, BaseEventSchema } = await import('../src/lib/core/events')
+      const { EventBus, BaseEventSchema } = await import('~/core/events')
       const eventBus = EventBus.getInstance()
 
       // Validate the event
@@ -311,7 +302,7 @@ const handlers = {
 
   clearEvents: async () => {
     try {
-      const { EventCache } = await import('../src/lib/core/events')
+      const { EventCache } = await import('~/core/events')
       const eventCache = EventCache.getInstance()
       eventCache.clear()
       return { success: true }
@@ -327,7 +318,7 @@ const handlers = {
 const configHandlers = {
   // Adapter settings handlers
   getAdapterSettings: async (adapterId: string) => {
-    const { AdapterSettingsStore } = await import('./store')
+    const { AdapterSettingsStore } = await import('~/store')
     const settingsStore = AdapterSettingsStore.getInstance()
     const settings = settingsStore.getSettings(adapterId)
     
@@ -340,12 +331,12 @@ const configHandlers = {
   
   updateAdapterSettings: async (adapterId: string, settings: Record<string, unknown>) => {
     try {
-      const { AdapterSettingsStore } = await import('./store')
+      const { AdapterSettingsStore } = await import('~/store')
       const settingsStore = AdapterSettingsStore.getInstance()
       settingsStore.updateSettings(adapterId, settings)
       
       // Update adapter runtime config if connected
-      const { AdapterManager } = await import('../src/lib/core/adapters')
+      const { AdapterManager } = await import('~/core/adapters')
       const adapterManager = AdapterManager.getInstance()
       const adapter = adapterManager.getAdapter(adapterId)
       
@@ -361,7 +352,7 @@ const configHandlers = {
   },
   
   getAllAdapterSettings: async () => {
-    const { AdapterSettingsStore } = await import('./store')
+    const { AdapterSettingsStore } = await import('~/store')
     const settingsStore = AdapterSettingsStore.getInstance()
     const settings = settingsStore.getAllSettings()
     
@@ -373,7 +364,7 @@ const configHandlers = {
   
   setAdapterEnabled: async (adapterId: string, enabled: boolean) => {
     try {
-      const { AdapterSettingsStore } = await import('./store')
+      const { AdapterSettingsStore } = await import('~/store')
       const settingsStore = AdapterSettingsStore.getInstance()
       settingsStore.setAdapterEnabled(adapterId, enabled)
       return { success: true }
@@ -385,7 +376,7 @@ const configHandlers = {
   
   setAdapterAutoConnect: async (adapterId: string, autoConnect: boolean) => {
     try {
-      const { AdapterSettingsStore } = await import('./store')
+      const { AdapterSettingsStore } = await import('~/store')
       const settingsStore = AdapterSettingsStore.getInstance()
       settingsStore.setAdapterAutoConnect(adapterId, autoConnect)
       return { success: true }
@@ -397,7 +388,7 @@ const configHandlers = {
   
   // App config handlers
   getAppConfig: async () => {
-    const { ConfigStore } = await import('./store')
+    const { ConfigStore } = await import('~/store')
     const configStore = ConfigStore.getInstance()
     const config = configStore.getConfig()
     
@@ -409,7 +400,7 @@ const configHandlers = {
   
   updateAppConfig: async (config: Record<string, unknown>) => {
     try {
-      const { ConfigStore } = await import('./store')
+      const { ConfigStore } = await import('~/store')
       const configStore = ConfigStore.getInstance()
       configStore.updateConfig(config)
       return { success: true }
@@ -421,7 +412,7 @@ const configHandlers = {
   
   // User data handlers
   getUserData: async () => {
-    const { UserDataStore } = await import('./store')
+    const { UserDataStore } = await import('~/store')
     const userDataStore = UserDataStore.getInstance()
     const userData = userDataStore.getData()
     
@@ -433,7 +424,7 @@ const configHandlers = {
   
   updateUserData: async (data: Record<string, unknown>) => {
     try {
-      const { UserDataStore } = await import('./store')
+      const { UserDataStore } = await import('~/store')
       const userDataStore = UserDataStore.getInstance()
       userDataStore.updateData(data)
       return { success: true }
@@ -446,7 +437,7 @@ const configHandlers = {
   // Token handlers
   getToken: async (serviceId: string) => {
     try {
-      const { TokenStore } = await import('./store')
+      const { TokenStore } = await import('~/store')
       const tokenStore = TokenStore.getInstance()
       const token = tokenStore.getToken(serviceId)
       
@@ -468,7 +459,7 @@ const configHandlers = {
   
   saveToken: async (serviceId: string, token: Record<string, unknown>) => {
     try {
-      const { TokenStore, TokenSchema } = await import('./store')
+      const { TokenStore, TokenSchema } = await import('~/store')
       const tokenStore = TokenStore.getInstance()
       // Validate token using Zod schema first
       const validToken = TokenSchema.parse(token)
@@ -482,7 +473,7 @@ const configHandlers = {
   
   deleteToken: async (serviceId: string) => {
     try {
-      const { TokenStore } = await import('./store')
+      const { TokenStore } = await import('~/store')
       const tokenStore = TokenStore.getInstance()
       tokenStore.deleteToken(serviceId)
       return { success: true }
@@ -494,7 +485,7 @@ const configHandlers = {
   
   hasValidToken: async (serviceId: string) => {
     try {
-      const { TokenStore } = await import('./store')
+      const { TokenStore } = await import('~/store')
       const tokenStore = TokenStore.getInstance()
       const isValid = tokenStore.hasValidToken(serviceId)
       
@@ -515,7 +506,7 @@ const configHandlers = {
   
   clearAllTokens: async () => {
     try {
-      const { TokenStore } = await import('./store')
+      const { TokenStore } = await import('~/store')
       const tokenStore = TokenStore.getInstance()
       tokenStore.clearAllTokens()
       return { success: true }

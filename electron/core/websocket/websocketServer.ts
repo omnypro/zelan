@@ -1,23 +1,10 @@
 import { WebSocket, WebSocketServer as WSServer } from 'ws'
-import { EventBus, BaseEvent } from '../../../src/lib/core/events'
+import { EventBus, BaseEvent } from '../events'
 import { BehaviorSubject, Observable, Subject, Subscription, takeUntil, timer } from 'rxjs'
 import { z } from 'zod'
 import { ConfigManager } from '../config/configManager'
+import { WebSocketConfig, WebSocketConfigSchema } from './index'
 
-/**
- * Schema for WebSocket server configuration
- */
-export const WebSocketServerConfigSchema = z.object({
-  port: z.number().int().positive().default(8080),
-  pingInterval: z.number().int().positive().default(30000),
-  path: z.string().default('/events')
-})
-
-export type WebSocketServerConfig = z.infer<typeof WebSocketServerConfigSchema>
-
-/**
- * Schema for WebSocket message
- */
 export const WebSocketMessageSchema = z.object({
   type: z.string(),
   payload: z.any(),
@@ -38,30 +25,30 @@ export class WebSocketServer {
   private eventSubscription: Subscription | null = null
   private pingInterval: Subscription | null = null
   private destroy$ = new Subject<void>()
-  private config: WebSocketServerConfig
+  private config: WebSocketConfig
   private stateSubject = new BehaviorSubject<boolean>(false)
 
-  private constructor(config: Partial<WebSocketServerConfig> = {}) {
+  private constructor(config: Partial<WebSocketConfig> = {}) {
     // Try to load WebSocket config from app settings if available
     try {
       const configManager = ConfigManager.getInstance();
       const storedConfig = configManager.getWebSocketConfig();
       
       // Merge stored config with provided config, with provided config taking precedence
-      this.config = WebSocketServerConfigSchema.parse({
+      this.config = WebSocketConfigSchema.parse({
         ...storedConfig,
         ...config
       });
     } catch (error) {
       // Fall back to just using the provided config if ConfigManager is not available
-      this.config = WebSocketServerConfigSchema.parse(config);
+      this.config = WebSocketConfigSchema.parse(config);
     }
   }
 
   /**
    * Get singleton instance of WebSocketServer
    */
-  public static getInstance(config?: Partial<WebSocketServerConfig>): WebSocketServer {
+  public static getInstance(config?: Partial<WebSocketConfig>): WebSocketServer {
     if (!WebSocketServer.instance) {
       WebSocketServer.instance = new WebSocketServer(config)
     } else if (config) {
@@ -140,7 +127,7 @@ export class WebSocketServer {
   /**
    * Update server configuration
    */
-  public updateConfig(config: Partial<WebSocketServerConfig>): void {
+  public updateConfig(config: Partial<WebSocketConfig>): void {
     const wasRunning = this.isRunning()
 
     // Stop server if running
@@ -149,7 +136,7 @@ export class WebSocketServer {
     }
 
     // Update config
-    this.config = WebSocketServerConfigSchema.parse({
+    this.config = WebSocketConfigSchema.parse({
       ...this.config,
       ...config
     })

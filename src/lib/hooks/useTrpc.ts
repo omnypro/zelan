@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { trpcClient } from '../trpc/client'
+import { client } from '@/lib/trpc/client'
 import { TRPCClientError } from '@trpc/client'
 
 /**
@@ -25,7 +25,7 @@ export function useTrpc() {
       try {
         console.log('Testing tRPC client initialization...')
         // Simple test to ensure tRPC is working
-        const result = await trpcClient.adapter.getStatus.query('test-adapter')
+        const result = await client.adapter.getStatus.query('test-adapter')
         console.log('tRPC test successful:', result)
 
         setIsError(false)
@@ -57,6 +57,6 @@ export function useTrpc() {
     isAvailable,
     isError,
     errorMessage,
-    client: isAvailable && !isError ? trpcClient : null
+    client: isAvailable && !isError ? client : null
   }
 }

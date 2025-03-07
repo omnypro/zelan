@@ -11,23 +11,34 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
+        vite: {
+          resolve: {
+            alias: {
+              '@': path.resolve(__dirname, './src'),
+              '~': path.resolve(__dirname, './electron')
+            }
+          }
+        }
       },
       preload: {
         input: path.join(__dirname, 'electron/preload.ts'),
+        vite: {
+          resolve: {
+            alias: {
+              '@': path.resolve(__dirname, './src'),
+              '~': path.resolve(__dirname, './electron')
+            }
+          }
+        }
       },
-      renderer: {},
+      renderer: {}
     }),
     tailwindcss()
   ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '~': path.resolve(__dirname, './electron')
     }
-  },
-  define: {
-    // Provide empty shims for Node builtins
-    'process.env': {},
-    'process.platform': JSON.stringify(''),
-    'process.version': JSON.stringify('')
   }
 })
