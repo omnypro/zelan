@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { useAdapter } from '../lib/hooks'
-import { useEvents } from '../lib/hooks'
-import { useAdapterSettings } from '../lib/hooks'
-import { ObsEventType } from '../lib/core/adapters/obsAdapter'
+import { useAdapter } from '@/lib/hooks'
+import { useEvents } from '@/lib/hooks'
+import { useAdapterSettings } from '@/lib/hooks'
+import { ObsEventType } from '@/lib/core/adapters/obsAdapter'
 
 /**
  * ObsDemo - A component to demonstrate the OBS Studio adapter functionality

@@ -1,9 +1,9 @@
 import { interval, Subscription, takeUntil } from 'rxjs';
 import { z } from 'zod';
 import { BaseAdapter } from './baseAdapter';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '../events';
+import { EventBus, EventType, createEvent, BaseEventSchema } from '~/core/events';
 import { AdapterConfig } from './types';
-import { AdapterSettingsStore } from '../../store';
+import { AdapterSettingsStore } from '~/store';
 
 /**
  * Test event schemas for generating sample events

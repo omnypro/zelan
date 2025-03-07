@@ -1,4 +1,4 @@
-import { TokenStore, TokenSchema, Token } from '../../store/tokenStore';
+import { TokenStore, TokenSchema, Token } from '~/store/tokenStore';
 
 /**
  * TokenManager handles secure storage and retrieval of authentication tokens

@@ -1,6 +1,6 @@
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { z } from 'zod';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '../events';
+import { EventBus, EventType, createEvent, BaseEventSchema } from '~/core/events';
 import { AdapterConfig, AdapterConfigSchema, AdapterState, ServiceAdapter } from './types';
 
 /**

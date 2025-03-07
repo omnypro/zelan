@@ -1,6 +1,6 @@
 import { BehaviorSubject, Observable, timer, Subscription } from 'rxjs';
 import { TokenManager, Token } from './tokenManager';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '../events';
+import { EventBus, EventType, createEvent, BaseEventSchema } from '~/core/events';
 import { z } from 'zod';
 
 /**

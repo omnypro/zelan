@@ -1,8 +1,8 @@
 import { WebSocket, WebSocketServer as WSServer } from 'ws'
-import { EventBus, BaseEvent } from '../events'
+import { EventBus, BaseEvent } from '~/core/events'
 import { BehaviorSubject, Observable, Subject, Subscription, takeUntil, timer } from 'rxjs'
 import { z } from 'zod'
-import { ConfigManager } from '../config/configManager'
+import { ConfigManager } from '~/core/config/configManager'
 import { WebSocketConfig, WebSocketConfigSchema } from './index'
 
 export const WebSocketMessageSchema = z.object({

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAdapterSettings, useUserPreferences } from '../lib/hooks';
+import { useAdapterSettings, useUserPreferences } from '@/lib/hooks';
 
 /**
  * SettingsDemo - A component to demonstrate the persistence layer

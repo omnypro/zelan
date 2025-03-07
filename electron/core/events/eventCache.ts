@@ -1,6 +1,6 @@
 import { BaseEvent } from './types'
 import { EventBus } from './eventBus'
-import { ConfigManager } from '../config/configManager'
+import { ConfigManager } from '~/core/config/configManager'
 
 /**
  * EventCache - Stores recent events for query access in the main process

@@ -2,9 +2,9 @@ import { z } from 'zod';
 import { interval, Subscription, takeUntil, filter } from 'rxjs';
 import OBSWebSocket from 'obs-websocket-js';
 import { BaseAdapter } from './baseAdapter';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '../events';
+import { EventBus, EventType, createEvent, BaseEventSchema } from '~/core/events';
 import { AdapterConfig, AdapterState } from './types';
-import { AdapterSettingsStore } from '../../store';
+import { AdapterSettingsStore } from '~/store';
 
 /**
  * OBS event schemas for specific OBS events

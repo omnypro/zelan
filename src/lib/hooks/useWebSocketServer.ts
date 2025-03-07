@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { WebSocketConfig } from '../core/websocket';
+import { WebSocketConfig } from '@/lib/core/websocket';
 import { useTrpc } from './useTrpc';
 
 /**

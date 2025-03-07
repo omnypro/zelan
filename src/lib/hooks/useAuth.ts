@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AuthService, AuthState, Token } from '../core/auth';
+import { AuthService, AuthState, Token } from '@/lib/core/auth';
 import { useObservable } from './useObservable';
 
 /**

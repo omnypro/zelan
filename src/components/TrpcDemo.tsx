@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useTrpc } from '../lib/hooks/useTrpc';
-import { useElectronAPI } from '../lib/hooks/useElectronAPI';
-import type { AdapterStatus } from '../lib/trpc/shared/types';
+import { useTrpc } from '@/lib/hooks/useTrpc';
+import { useElectronAPI } from '@/lib/hooks/useElectronAPI';
+import type { AdapterStatus } from '@/lib/trpc/shared/types';
 
 /**
  * Demo component that shows both tRPC and direct IPC approaches side by side

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTrpc } from './useTrpc';
-import type { WebSocketConfig } from '../trpc/shared/types';
+import type { WebSocketConfig } from '@/lib/trpc/shared/types';
 import { BehaviorSubject } from 'rxjs';
 
 // Reactive subjects for config changes
