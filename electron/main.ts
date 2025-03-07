@@ -1,9 +1,10 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { initializeMainProcess, shutdownMainProcess } from './core/bootstrap'
 import { bootstrap, shutdown } from '../src/lib/core/bootstrap'
 import { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
-import type { AppRouter } from '../src/lib/trpc/server/router'
+import type { AppRouter } from './trpc/router'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -32,19 +33,25 @@ async function initializeCore() {
   if (coreInitialized) return
 
   try {
-    // Bootstrap with test adapter, OBS adapter, and WebSocket server
+    // First initialize the Electron main process components
+    const mainProcessComponents = await initializeMainProcess({
+      startWebSocketServer: true,
+      webSocketPort: 9090,
+      webSocketPath: '/events'
+    });
+    
+    // Then bootstrap the application core with adapters
     await bootstrap({
       enableTestAdapter: true,
       enableObsAdapter: true,
-      startWebSocketServer: true,
-      webSocketPort: 9090, // Use a different port to avoid conflicts
-      webSocketPath: '/events'
-    })
+      startWebSocketServer: false, // WebSocket server already started in main process
+      initTrpc: true
+    });
 
-    console.log('Core services initialized')
-    coreInitialized = true
+    console.log('Core services initialized');
+    coreInitialized = true;
   } catch (error) {
-    console.error('Failed to initialize core services:', error)
+    console.error('Failed to initialize core services:', error);
   }
 }
 
@@ -53,11 +60,16 @@ async function shutdownCore() {
   if (!coreInitialized) return
 
   try {
-    await shutdown()
-    console.log('Core services shut down')
-    coreInitialized = false
+    // First shutdown the application core
+    await shutdown();
+    
+    // Then shutdown the Electron main process components
+    await shutdownMainProcess();
+    
+    console.log('Core services shut down');
+    coreInitialized = false;
   } catch (error) {
-    console.error('Failed to shut down core services:', error)
+    console.error('Failed to shut down core services:', error);
   }
 }
 
@@ -164,7 +176,7 @@ const handlers = {
 
   // WebSocket server handlers
   getWebSocketStatus: async () => {
-    const { WebSocketServer } = await import('../src/lib/core/websocket')
+    const { WebSocketServer } = await import('./core/websocket/websocketServer')
     const wsServer = WebSocketServer.getInstance()
 
     return {
@@ -175,7 +187,7 @@ const handlers = {
 
   startWebSocketServer: async () => {
     try {
-      const { WebSocketServer } = await import('../src/lib/core/websocket')
+      const { WebSocketServer } = await import('./core/websocket/websocketServer')
       const wsServer = WebSocketServer.getInstance()
       wsServer.start()
       return { success: true }
@@ -188,7 +200,7 @@ const handlers = {
 
   stopWebSocketServer: async () => {
     try {
-      const { WebSocketServer } = await import('../src/lib/core/websocket')
+      const { WebSocketServer } = await import('./core/websocket/websocketServer')
       const wsServer = WebSocketServer.getInstance()
       wsServer.stop()
       return { success: true }
@@ -201,7 +213,7 @@ const handlers = {
 
   updateWebSocketConfig: async (config: Record<string, unknown>) => {
     try {
-      const { WebSocketServer } = await import('../src/lib/core/websocket')
+      const { WebSocketServer } = await import('./core/websocket/websocketServer')
       const wsServer = WebSocketServer.getInstance()
       wsServer.updateConfig(config)
       return { success: true }

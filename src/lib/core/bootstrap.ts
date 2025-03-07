@@ -1,7 +1,6 @@
 import { EventBus, EventType, createEvent, BaseEventSchema, EventCache } from './events'
 import { AdapterManager } from './adapters'
 import { TestAdapter, ObsAdapter } from './adapters'
-import { WebSocketServer } from './websocket'
 import { AuthService } from './auth'
 import { ConfigStore, AdapterSettingsStore, UserDataStore } from '../../../electron/store'
 
@@ -22,7 +21,7 @@ export async function bootstrap(config: {
   const adapterSettingsStore = AdapterSettingsStore.getInstance()
   const userDataStore = UserDataStore.getInstance()
   console.log('Configuration and persistence layer initialized')
-  
+
   // Get instances of core services
   const eventBus = EventBus.getInstance()
   const adapterManager = AdapterManager.getInstance()
@@ -44,12 +43,12 @@ export async function bootstrap(config: {
   // Add test adapter if enabled
   if (config.enableTestAdapter) {
     console.log('Enabling test adapter')
-    
+
     let testConfig = {
       interval: 2000,
       generateErrors: false
     };
-    
+
     // Try to load settings
     try {
       const savedSettings = adapterSettingsStore.getSettings('test-adapter');
@@ -65,15 +64,15 @@ export async function bootstrap(config: {
     } catch (error) {
       console.warn('Could not load test adapter settings, using defaults');
     }
-    
+
     const testAdapter = new TestAdapter(testConfig);
     adapterManager.registerAdapter(testAdapter);
   }
-  
+
   // Add OBS adapter if enabled
   if (config.enableObsAdapter) {
     console.log('Enabling OBS adapter')
-    
+
     // Try to get saved settings first
     let obsConfig = {
       host: 'localhost',
@@ -81,7 +80,7 @@ export async function bootstrap(config: {
       autoConnect: false, // Don't auto-connect until configured
       enabled: true       // Adapter is enabled but won't connect automatically
     };
-    
+
     // Try to load settings from settings store
     try {
       const savedSettings = adapterSettingsStore.getSettings('obs-adapter');
@@ -96,24 +95,14 @@ export async function bootstrap(config: {
     } catch (error) {
       console.warn('Could not load OBS adapter settings, using defaults');
     }
-    
+
     const obsAdapter = new ObsAdapter(obsConfig);
     adapterManager.registerAdapter(obsAdapter);
-    
+
     // Log connection parameters for debugging
     console.log('OBS adapter initial config:', obsAdapter.config);
   }
 
-  // Start WebSocket server if enabled
-  if (config.startWebSocketServer) {
-    console.log(`Starting WebSocket server on port ${config.webSocketPort || 8080}`)
-    const wsServer = WebSocketServer.getInstance({
-      port: config.webSocketPort || 8080,
-      path: config.webSocketPath || '/events'
-    })
-
-    wsServer.start()
-  }
 
   // Return the initialized services
   return {
@@ -121,7 +110,7 @@ export async function bootstrap(config: {
     configStore,
     adapterSettingsStore,
     userDataStore,
-    
+
     // Core services
     eventBus,
     adapterManager,
@@ -140,7 +129,6 @@ export async function shutdown() {
   // Get instances of core services
   const eventBus = EventBus.getInstance()
   const adapterManager = AdapterManager.getInstance()
-  const wsServer = WebSocketServer.getInstance()
 
   // Publish application shutdown event
   eventBus.publish(
@@ -150,15 +138,11 @@ export async function shutdown() {
     })
   )
 
-  // Stop WebSocket server
-  wsServer.stop()
-
   // Disconnect all adapters
   await adapterManager.disconnectAll()
 
   // Clean up services
   adapterManager.destroy()
-  wsServer.destroy()
 
   console.log('Core services shut down successfully')
 }

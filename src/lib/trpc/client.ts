@@ -1,5 +1,5 @@
 import { createTRPCProxyClient, TRPCClientError } from '@trpc/client';
-import type { AppRouter } from './server/router';
+import type { AppRouter } from '../../../electron/trpc/router';
 
 // Create tRPC client with a custom IPC-based link
 export const trpcClient = createTRPCProxyClient<AppRouter>({

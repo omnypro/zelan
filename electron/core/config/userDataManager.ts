@@ -1,16 +1,5 @@
-import { isRenderer } from '../../utils';
+import Store from 'electron-store';
 import { z } from 'zod';
-
-// Only import electron-store in the main process
-let Store: any;
-if (!isRenderer()) {
-  // Use dynamic import for ES modules compatibility
-  import('electron-store').then(module => {
-    Store = module.default;
-  }).catch(err => {
-    console.error('Failed to import electron-store:', err);
-  });
-}
 
 /**
  * Schema for user interface preferences
@@ -55,54 +44,41 @@ export type UserData = z.infer<typeof UserDataSchema>;
 /**
  * Manager for user data and preferences
  * Handles storing and retrieving user-specific settings
+ * Main process only
  */
 export class UserDataManager {
   private static instance: UserDataManager;
   private store: Store<UserData>;
   
   private constructor() {
-    if (isRenderer()) {
-      console.warn('UserDataManager instantiated in renderer process');
-      return;
-    }
-    
-    // Initialize with empty store
-    this.store = {} as any;
-    
-    // Import dynamically and initialize
-    import('electron-store').then(StoreModule => {
-      const Store = StoreModule.default;
-      this.store = new Store({
-        name: 'user-data',
-        defaults: {
-          ui: {
-            dashboardLayout: {},
-            sidebarCollapsed: false,
-            expandedSections: [],
-            recentViews: [],
-            fontSize: 'medium',
-          },
-          notifications: {
-            enabled: true,
-            sound: true,
-            desktop: true,
-            mutedEvents: [],
-            mutedSources: [],
-          },
-          customData: {},
-          recentSearches: [],
-          sessionCount: 0,
+    this.store = new Store({
+      name: 'user-data',
+      defaults: {
+        ui: {
+          dashboardLayout: {},
+          sidebarCollapsed: false,
+          expandedSections: [],
+          recentViews: [],
+          fontSize: 'medium',
         },
-      });
-      
-      // Increment session count on initialization
-      this.incrementSessionCount();
-      
-      // Update last login timestamp
-      this.updateLastLogin();
-    }).catch(err => {
-      console.error('Failed to load electron-store:', err);
+        notifications: {
+          enabled: true,
+          sound: true,
+          desktop: true,
+          mutedEvents: [],
+          mutedSources: [],
+        },
+        customData: {},
+        recentSearches: [],
+        sessionCount: 0,
+      },
     });
+    
+    // Increment session count on initialization
+    this.incrementSessionCount();
+    
+    // Update last login timestamp
+    this.updateLastLogin();
   }
   
   /**
@@ -119,10 +95,6 @@ export class UserDataManager {
    * Get all user data
    */
   public getData(): UserData {
-    if (isRenderer()) {
-      console.warn('UserDataManager.getData should not be called in renderer process');
-      return {} as UserData;
-    }
     return this.store.store;
   }
   
@@ -130,10 +102,6 @@ export class UserDataManager {
    * Get UI preferences
    */
   public getUiPreferences(): UiPreferences {
-    if (isRenderer()) {
-      console.warn('UserDataManager.getUiPreferences should not be called in renderer process');
-      return {} as UiPreferences;
-    }
     return this.store.get('ui');
   }
   
@@ -141,11 +109,6 @@ export class UserDataManager {
    * Update all user data at once
    */
   public updateData(data: Partial<UserData>): void {
-    if (isRenderer()) {
-      console.warn('UserDataManager.updateData should not be called in renderer process');
-      return;
-    }
-    
     // Update each top-level section that exists in the data
     if (data.ui) {
       const currentUi = this.getUiPreferences();

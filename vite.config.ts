@@ -23,5 +23,11 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     }
+  },
+  define: {
+    // Provide empty shims for Node builtins
+    'process.env': {},
+    'process.platform': JSON.stringify(''),
+    'process.version': JSON.stringify('')
   }
 })

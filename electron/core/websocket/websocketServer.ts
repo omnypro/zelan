@@ -1,7 +1,8 @@
 import { WebSocket, WebSocketServer as WSServer } from 'ws'
-import { EventBus, BaseEvent } from '../events'
+import { EventBus, BaseEvent } from '../../../src/lib/core/events'
 import { BehaviorSubject, Observable, Subject, Subscription, takeUntil, timer } from 'rxjs'
 import { z } from 'zod'
+import { ConfigManager } from '../config/configManager'
 
 /**
  * Schema for WebSocket server configuration
@@ -27,6 +28,7 @@ export type WebSocketMessage = z.infer<typeof WebSocketMessageSchema>
 
 /**
  * WebSocketServer provides a real-time events API for external clients
+ * Main process only
  */
 export class WebSocketServer {
   private static instance: WebSocketServer
@@ -42,7 +44,6 @@ export class WebSocketServer {
   private constructor(config: Partial<WebSocketServerConfig> = {}) {
     // Try to load WebSocket config from app settings if available
     try {
-      const { ConfigManager } = require('../config/configManager');
       const configManager = ConfigManager.getInstance();
       const storedConfig = configManager.getWebSocketConfig();
       
@@ -225,7 +226,7 @@ export class WebSocketServer {
    */
   private handleMessage(socket: WebSocket, data: string): void {
     try {
-      const message = JSON.parse(data)
+      const message = JSON.parse(data.toString())
 
       // Handle ping message
       if (message.type === 'ping') {
