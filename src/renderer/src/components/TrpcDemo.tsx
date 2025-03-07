@@ -19,8 +19,8 @@ export function TrpcDemo() {
   // Use tRPC hooks for config
   const [theme, setTheme] = useTrpcConfig<'light' | 'dark' | 'system'>('settings.theme', 'system');
   
-  // Use tRPC hooks for events
-  const events = useTrpcEvents();
+  // Use enhanced tRPC hooks for events with status information
+  const { events, isConnected, error: eventsError, clearEvents } = useTrpcEvents();
   
   // Use tRPC hooks for adapters
   const adapters = useTrpcAdapters();
@@ -151,13 +151,30 @@ export function TrpcDemo() {
             </button>
           </div>
           
-          <div className="mb-2 text-sm">Recent Events:</div>
+          <div className="flex justify-between items-center mb-2">
+            <div className="text-sm">Recent Events:</div>
+            <div className="flex items-center gap-2">
+              <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} 
+                title={isConnected ? 'Connected' : 'Disconnected'} />
+              <button 
+                onClick={clearEvents}
+                className="px-2 py-1 text-xs bg-slate-500 text-white rounded-md"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          
           <div className="max-h-40 overflow-y-auto bg-background p-2 rounded-md">
-            {!events || events.length === 0 ? (
+            {eventsError ? (
+              <div className="text-sm text-red-500 p-2">
+                Error: {eventsError.message}
+              </div>
+            ) : !events || events.length === 0 ? (
               <div className="text-sm text-muted-foreground p-2">No events yet</div>
             ) : (
               <ul className="space-y-1">
-                {(Array.isArray(events) ? events : [events]).slice(0, 10).map((event: any, index) => (
+                {events.map((event: any, index) => (
                   <li key={index} className="text-xs border-b border-muted-foreground/20 pb-1">
                     <div><span className="font-mono">{event?.type || 'Unknown Type'}</span></div>
                     <div className="text-muted-foreground">

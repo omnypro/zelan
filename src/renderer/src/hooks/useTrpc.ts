@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { AppRouter } from '../../../shared/trpc';
 import { inferRouterOutputs, inferRouterInputs } from '@trpc/server';
 import { useObservable } from './useObservable';
@@ -164,45 +164,103 @@ export function useTrpcFullConfig() {
 /**
  * Hook to subscribe to events via tRPC
  */
-export function useTrpcEvents<T = any>() {
+/**
+ * Result type for events hook with additional data
+ */
+export interface EventsResult<T> {
+  events: T[];
+  isConnected: boolean;
+  error: Error | null;
+  clearEvents: () => void;
+}
+
+/**
+ * Enhanced hook to subscribe to events via tRPC with better state management
+ */
+export function useTrpcEvents<T = any>(options: { 
+  limit?: number;
+  filter?: (event: T) => boolean;
+} = {}): EventsResult<T> {
+  // Default options
+  const { limit = 20, filter } = options;
+  
+  // State for events and connection status
   const [events, setEvents] = useState<T[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  
+  // Reference to events for callback closures
+  const eventsRef = useRef<T[]>([]);
+  
+  // Clear events function
+  const clearEvents = useCallback(() => {
+    setEvents([]);
+    eventsRef.current = [];
+  }, []);
   
   useEffect(() => {
-    if (!window.trpc || !window.trpc.events || !window.trpc.events.onEvent) {
-      console.error('tRPC client or events.onEvent not available');
+    // Clear error on mount
+    setError(null);
+    
+    if (!window.trpc?.events?.onEvent) {
+      setError(new Error('tRPC client or events.onEvent not available'));
+      setIsConnected(false);
       return;
     }
     
     try {
+      // Try to subscribe to events
       const subscription = window.trpc.events.onEvent.subscribe();
       
-      if (!subscription || typeof subscription.subscribe !== 'function') {
-        console.error('Invalid subscription object returned for events');
+      if (!subscription?.subscribe) {
+        setError(new Error('Invalid subscription object returned'));
+        setIsConnected(false);
         return () => {};
       }
       
+      // Set connected status to true when subscription succeeds
+      setIsConnected(true);
+      
       const unsubscribe = subscription.subscribe({
         next: (event) => {
-          console.log('Received event:', event);
-          setEvents(prev => [event as T, ...prev].slice(0, 20));
+          // Filter events if a filter function is provided
+          if (filter && !filter(event as T)) {
+            return;
+          }
+          
+          // Update events atomically
+          const newEvents = [event as T, ...eventsRef.current].slice(0, limit);
+          eventsRef.current = newEvents;
+          setEvents(newEvents);
         },
-        error: (err) => console.error('Error in events subscription:', err)
+        error: (err) => {
+          console.error('Error in events subscription:', err);
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsConnected(false);
+        },
+        complete: () => {
+          setIsConnected(false);
+        }
       });
       
+      // Return cleanup function
       return () => {
         try {
           unsubscribe.unsubscribe();
+          setIsConnected(false);
         } catch (err) {
           console.error('Error unsubscribing from events:', err);
         }
       };
     } catch (err) {
       console.error('Failed to subscribe to events:', err);
+      setError(err instanceof Error ? err : new Error(String(err)));
+      setIsConnected(false);
       return () => {};
     }
-  }, []);
+  }, [filter, limit]);
   
-  return events;
+  return { events, isConnected, error, clearEvents };
 }
 
 /**

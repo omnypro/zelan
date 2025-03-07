@@ -5,6 +5,12 @@ import { getConfigStore } from '../../shared/core/config';
 import { MainEventBus } from '../services/eventBus';
 import { AdapterManager } from '../services/adapters';
 import { filter } from 'rxjs/operators';
+import { Subject } from 'rxjs';
+import { 
+  createSubscriptionHandler, 
+  toSerializableError, 
+  createSerializableAdapter 
+} from '../../shared/utils/rx-trpc';
 
 /**
  * Context for tRPC procedures
@@ -101,31 +107,34 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
           const subChannelName = `${TRPC_CHANNEL}:${id}`;
           
           if (procedureName === 'onConfigChange') {
-            const subscription = ctx.configStore.changes$().subscribe({
-              next: (data) => {
+            // Create a destroyer subject for cleanup
+            const destroy$ = new Subject<void>();
+            
+            // Use our subscription helper for cleaner code
+            const subscription = createSubscriptionHandler(
+              ctx.configStore.changes$(),
+              // Data handler
+              (data) => {
                 if (!event.sender.isDestroyed()) {
-                  event.sender.send(subChannelName, {
-                    id, data, type: 'data'
-                  });
+                  event.sender.send(subChannelName, { id, data, type: 'data' });
                 }
               },
-              error: (err) => {
+              // Error handler
+              (err) => {
                 if (!event.sender.isDestroyed()) {
                   event.sender.send(subChannelName, {
                     id,
-                    error: {
-                      message: err.message,
-                      code: 'SUBSCRIPTION_ERROR',
-                      stack: err.stack,
-                    },
+                    error: toSerializableError(err),
                     type: 'error'
                   });
                 }
               }
-            });
+            );
             
             // Set up cleanup
             ipcMain.once(`${TRPC_CHANNEL}:${id}:stop`, () => {
+              destroy$.next();
+              destroy$.complete();
               subscription.unsubscribe();
             });
             
@@ -206,30 +215,16 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
         if (type === 'query') {
           if (procedureName === 'getAll') {
             const adapters = ctx.adapterManager.getAllAdapters();
-            // Create a plain serializable object for each adapter
-            const result = adapters.map(adapter => ({
-              id: adapter.id,
-              name: adapter.name,
-              type: adapter.type,
-              status: adapter.status,
-              enabled: adapter.enabled,
-              // Other serializable properties as needed
-            }));
+            // Use our helper to create serializable adapter objects
+            const result = adapters.map(adapter => createSerializableAdapter(adapter));
             return { id, result, type: 'data' };
           } else if (procedureName === 'getById') {
             const adapter = ctx.adapterManager.getAdapter(input);
             if (!adapter) {
               return { id, result: null, type: 'data' };
             }
-            // Create a plain serializable object for the adapter
-            const result = {
-              id: adapter.id,
-              name: adapter.name,
-              type: adapter.type,
-              status: adapter.status,
-              enabled: adapter.enabled,
-              // Other serializable properties as needed
-            };
+            // Use our helper for consistent serialization
+            const result = createSerializableAdapter(adapter);
             return { id, result, type: 'data' };
           } else if (procedureName === 'getTypes') {
             const types = ctx.adapterManager.getAvailableAdapterTypes();
@@ -240,15 +235,8 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
         } else if (type === 'mutation') {
           if (procedureName === 'create') {
             const adapter = await ctx.adapterManager.createAdapter(input);
-            // Create a plain serializable object for the adapter
-            const result = {
-              id: adapter.id,
-              name: adapter.name,
-              type: adapter.type,
-              status: adapter.status,
-              enabled: adapter.enabled,
-              // Other serializable properties as needed
-            };
+            // Use our helper for consistent serialization
+            const result = createSerializableAdapter(adapter);
             return { id, result, type: 'data' };
           } else if (procedureName === 'start') {
             await ctx.adapterManager.startAdapter(input);
@@ -268,16 +256,11 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
       
       throw new Error(`Unhandled request: ${type} ${path}`);
     } catch (error) {
-      // Handle errors
-      const err = error as Error;
-      console.error(`Error handling tRPC request: ${type} ${path}`, err);
+      // Handle errors using our standardized error format
+      console.error(`Error handling tRPC request: ${type} ${path}`, error);
       return {
         id,
-        error: {
-          message: err.message,
-          code: 'INTERNAL_SERVER_ERROR',
-          stack: err.stack,
-        },
+        error: toSerializableError(error),
         type: 'error'
       };
     }

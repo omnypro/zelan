@@ -8,7 +8,7 @@ import { Observable } from 'rxjs';
  * @param initialValue Optional initial value
  * @returns The current value of the observable
  */
-export function useObservable<T>(observable$: any, initialValue?: T): T {
+export function useObservable<T>(observable$: Observable<T> | null | undefined, initialValue?: T): T {
   const [value, setValue] = useState<T>(initialValue as T);
 
   useEffect(() => {
@@ -46,7 +46,7 @@ export interface ObservableStatus<T> {
  * @returns Object with value, loading, and error state
  */
 export function useObservableWithStatus<T>(
-  observable$: any,
+  observable$: Observable<T> | null | undefined,
   initialValue?: T
 ): ObservableStatus<T> {
   const [state, setState] = useState<ObservableStatus<T>>({
