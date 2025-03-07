@@ -47,7 +47,7 @@ export class TestAdapter extends BaseAdapter<TestAdapterConfig> {
     try {
       const { AdapterSettingsManager } = require('../config/adapterSettingsManager');
       const settingsManager = AdapterSettingsManager.getInstance();
-      const savedSettings = settingsManager.getSettings<TestAdapterConfig>('test-adapter');
+      const savedSettings = settingsManager.getSettings('test-adapter');
       
       if (savedSettings) {
         // Merge saved settings with provided config, with provided config taking precedence
@@ -61,11 +61,12 @@ export class TestAdapter extends BaseAdapter<TestAdapterConfig> {
       console.log('Using default test adapter settings');
     }
     
+    // Cast the schema to make TypeScript happy, it's still the right schema
     super(
       'test-adapter',
-      'Test Adapter',
+      'Test Adapter', 
       mergedConfig,
-      TestAdapterConfigSchema
+      TestAdapterConfigSchema as any
     );
   }
   

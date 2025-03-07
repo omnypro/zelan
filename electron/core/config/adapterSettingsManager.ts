@@ -70,10 +70,10 @@ export const AdapterSettingsStoreSchema = z.record(z.string(), z.union([
  */
 export class AdapterSettingsManager {
   private static instance: AdapterSettingsManager;
-  private store: Store<z.infer<typeof AdapterSettingsStoreSchema>>;
+  private store: Store<Record<string, AdapterSettings>>;
   
   private constructor() {
-    this.store = new Store({
+    this.store = new Store<Record<string, AdapterSettings>>({
       name: 'adapter-settings',
       // Default settings for built-in adapters
       defaults: {

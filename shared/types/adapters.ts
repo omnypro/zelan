@@ -18,7 +18,7 @@ export const AdapterConfigSchema = z.object({
   enabled: z.boolean().default(true),
   name: z.string().optional(),
   autoConnect: z.boolean().default(true),
-}).required();
+});
 
 export type AdapterConfig = z.infer<typeof AdapterConfigSchema>;
 
@@ -28,11 +28,11 @@ export type AdapterConfig = z.infer<typeof AdapterConfigSchema>;
 export const ObsAdapterConfigSchema = AdapterConfigSchema.extend({
   host: z.string().default('localhost'),
   port: z.number().default(4455),
-  password: z.string().optional(),
+  password: z.string().default(''),
   secure: z.boolean().default(false),
   reconnectInterval: z.number().min(1000).default(5000),
   statusCheckInterval: z.number().min(1000).default(10000),
-}).required();
+});
 
 export type ObsAdapterConfig = z.infer<typeof ObsAdapterConfigSchema>;
 
@@ -42,7 +42,7 @@ export type ObsAdapterConfig = z.infer<typeof ObsAdapterConfigSchema>;
 export const TestAdapterConfigSchema = AdapterConfigSchema.extend({
   interval: z.number().min(100).default(5000), // Interval between test events in ms
   generateErrors: z.boolean().default(false), // Whether to randomly generate error events
-}).required();
+});
 
 export type TestAdapterConfig = z.infer<typeof TestAdapterConfigSchema>;
 

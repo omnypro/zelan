@@ -49,39 +49,39 @@ export type UserData = z.infer<typeof UserDataSchema>;
 export class UserDataStore {
   private static instance: UserDataStore;
   private store: Store<UserData>;
-  
+
   private constructor() {
-    this.store = new Store({
+    this.store = new Store<UserData>({
       name: 'user-data',
-      defaults: {
+      defaults: UserDataSchema.parse({
         ui: {
           dashboardLayout: {},
           sidebarCollapsed: false,
           expandedSections: [],
           recentViews: [],
           fontSize: 'medium',
-          theme: 'system',
+          theme: 'system'
         },
         notifications: {
           enabled: true,
           sound: true,
           desktop: true,
           mutedEvents: [],
-          mutedSources: [],
+          mutedSources: []
         },
         customData: {},
         recentSearches: [],
-        sessionCount: 0,
-      },
-    });
-    
+        sessionCount: 0
+      })
+    })
+
     // Increment session count on initialization
     this.incrementSessionCount();
-    
+
     // Update last login timestamp
     this.updateLastLogin();
   }
-  
+
   /**
    * Get singleton instance of UserDataStore
    */
@@ -91,7 +91,7 @@ export class UserDataStore {
     }
     return UserDataStore.instance;
   }
-  
+
   /**
    * Get all user data
    */
@@ -108,26 +108,26 @@ export class UserDataStore {
       const currentUi = this.getUiPreferences();
       this.updateUiPreferences({ ...currentUi, ...data.ui });
     }
-    
+
     if (data.notifications) {
       const currentNotifications = this.getNotificationPreferences();
       this.updateNotificationPreferences({ ...currentNotifications, ...data.notifications });
     }
-    
+
     if (data.customData) {
       for (const [key, value] of Object.entries(data.customData)) {
         this.setCustomData(key, value);
       }
     }
   }
-  
+
   /**
    * Get UI preferences
    */
   public getUiPreferences(): UiPreferences {
     return this.store.get('ui');
   }
-  
+
   /**
    * Update UI preferences
    */
@@ -138,14 +138,14 @@ export class UserDataStore {
       ...preferences,
     });
   }
-  
+
   /**
    * Get notification preferences
    */
   public getNotificationPreferences(): NotificationPreferences {
     return this.store.get('notifications');
   }
-  
+
   /**
    * Update notification preferences
    */
@@ -156,7 +156,7 @@ export class UserDataStore {
       ...preferences,
     });
   }
-  
+
   /**
    * Get custom data by key
    */
@@ -169,7 +169,7 @@ export class UserDataStore {
       return null;
     }
   }
-  
+
   /**
    * Set custom data by key
    */
@@ -181,7 +181,7 @@ export class UserDataStore {
       throw new Error(`Failed to set custom data: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  
+
   /**
    * Delete custom data by key
    */
@@ -192,7 +192,7 @@ export class UserDataStore {
       console.error(`Error deleting custom data for key ${key}:`, error);
     }
   }
-  
+
   /**
    * Add a search term to recent searches
    */
@@ -200,51 +200,51 @@ export class UserDataStore {
     try {
       // Get current recent searches
       const recentSearches = this.store.get('recentSearches');
-      
+
       // Remove the search term if it already exists
       const filteredSearches = recentSearches.filter(s => s !== search);
-      
+
       // Add the search term to the beginning of the array
       filteredSearches.unshift(search);
-      
+
       // Limit to 10 recent searches
       const limitedSearches = filteredSearches.slice(0, 10);
-      
+
       // Save updated recent searches
       this.store.set('recentSearches', limitedSearches);
     } catch (error) {
       console.error('Error adding recent search:', error);
     }
   }
-  
+
   /**
    * Get recent searches
    */
   public getRecentSearches(): string[] {
     return this.store.get('recentSearches');
   }
-  
+
   /**
    * Clear recent searches
    */
   public clearRecentSearches(): void {
     this.store.set('recentSearches', []);
   }
-  
+
   /**
    * Update last login timestamp
    */
   private updateLastLogin(): void {
     this.store.set('lastLogin', Date.now());
   }
-  
+
   /**
    * Get last login timestamp
    */
   public getLastLogin(): number | null {
     return this.store.get('lastLogin') || null;
   }
-  
+
   /**
    * Increment session count
    */
@@ -252,28 +252,28 @@ export class UserDataStore {
     const currentCount = this.store.get('sessionCount');
     this.store.set('sessionCount', currentCount + 1);
   }
-  
+
   /**
    * Get session count
    */
   public getSessionCount(): number {
     return this.store.get('sessionCount');
   }
-  
+
   /**
    * Save dashboard layout
    */
   public saveDashboardLayout(layout: Record<string, unknown>): void {
     this.updateUiPreferences({ dashboardLayout: layout });
   }
-  
+
   /**
    * Get dashboard layout
    */
   public getDashboardLayout(): Record<string, unknown> {
     return this.getUiPreferences().dashboardLayout;
   }
-  
+
   /**
    * Add a view to recent views
    */
@@ -281,23 +281,23 @@ export class UserDataStore {
     try {
       const ui = this.getUiPreferences();
       const recentViews = ui.recentViews;
-      
+
       // Remove the view if it already exists
       const filteredViews = recentViews.filter(v => v !== viewId);
-      
+
       // Add the view to the beginning of the array
       filteredViews.unshift(viewId);
-      
+
       // Limit to 5 recent views
       const limitedViews = filteredViews.slice(0, 5);
-      
+
       // Save updated recent views
       this.updateUiPreferences({ recentViews: limitedViews });
     } catch (error) {
       console.error('Error adding recent view:', error);
     }
   }
-  
+
   /**
    * Toggle sidebar collapsed state
    */
@@ -307,7 +307,7 @@ export class UserDataStore {
     this.updateUiPreferences({ sidebarCollapsed: newState });
     return newState;
   }
-  
+
   /**
    * Reset all user data to defaults
    */

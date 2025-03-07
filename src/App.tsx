@@ -31,7 +31,7 @@ function App() {
     setMessage('Running in Electron!')
 
     // Define message handler
-    const messageHandler = (messageText: string) => {
+    const messageHandler = (_event: any, messageText: string) => {
       setMessage(`Message from main process: ${messageText}`)
     }
 

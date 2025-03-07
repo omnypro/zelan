@@ -212,7 +212,10 @@ export const appRouter = router({
         try {
           const { TokenStore } = await import('../../store')
           const tokenStore = TokenStore.getInstance()
-          tokenStore.saveToken(input.serviceId, input.token)
+          tokenStore.saveToken(input.serviceId, {
+            ...input.token,
+            scopes: input.token.scope ? input.token.scope.split(' ') : []
+          })
           return { success: true }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error)

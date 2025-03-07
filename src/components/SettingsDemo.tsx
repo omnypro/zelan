@@ -165,7 +165,7 @@ export function SettingsDemo() {
         )}
       </div>
       
-      <style jsx>{`
+      <style>{`
         .settings-demo {
           padding: 20px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;

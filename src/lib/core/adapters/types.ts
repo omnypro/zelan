@@ -1,6 +1,5 @@
-import { BehaviorSubject, Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 import { z } from 'zod';
-import { BaseEvent } from '../events';
 
 /**
  * Adapter connection states
@@ -22,6 +21,30 @@ export const AdapterConfigSchema = z.object({
 });
 
 export type AdapterConfig = z.infer<typeof AdapterConfigSchema>;
+
+/**
+ * OBS adapter configuration schema
+ */
+export const ObsAdapterConfigSchema = AdapterConfigSchema.extend({
+  host: z.string().default('localhost'),
+  port: z.number().default(4455),
+  password: z.string().optional(),
+  secure: z.boolean().default(false),
+  reconnectInterval: z.number().min(1000).default(5000),
+  statusCheckInterval: z.number().min(1000).default(10000),
+});
+
+export type ObsAdapterConfig = z.infer<typeof ObsAdapterConfigSchema>;
+
+/**
+ * Test adapter configuration schema
+ */
+export const TestAdapterConfigSchema = AdapterConfigSchema.extend({
+  interval: z.number().min(100).default(2000),
+  generateErrors: z.boolean().default(false),
+});
+
+export type TestAdapterConfig = z.infer<typeof TestAdapterConfigSchema>;
 
 /**
  * Base service adapter interface that all adapters must implement

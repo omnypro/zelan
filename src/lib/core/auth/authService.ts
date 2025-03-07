@@ -3,7 +3,6 @@ import { TokenManager } from './tokenManager';
 import { Token } from '@shared/types';
 import { EventBus, EventType, createEvent } from '../events';
 import { AuthEventSchema, AuthState } from '@shared/types';
-import { z } from 'zod';
 
 // Authentication state now imported from @shared/types
 
@@ -310,8 +309,10 @@ export class AuthService {
         {
           type: EventType.AUTH_TOKEN_REFRESHED,
           source: 'auth-service',
-          serviceId,
-          state: AuthState.AUTHENTICATED,
+          data: {
+            serviceId,
+            state: AuthState.AUTHENTICATED
+          }
         }
       ));
       
@@ -332,9 +333,11 @@ export class AuthService {
         {
           type: EventType.AUTH_TOKEN_EXPIRED,
           source: 'auth-service',
-          serviceId,
-          state: AuthState.ERROR,
-          error: errorMessage,
+          data: {
+            serviceId,
+            state: AuthState.ERROR,
+            error: errorMessage
+          }
         }
       ));
       

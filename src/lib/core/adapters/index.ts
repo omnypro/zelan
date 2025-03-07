@@ -5,24 +5,20 @@ export type {
   ServiceAdapter 
 } from '@shared/types';
 
+// Export base adapter and adapter manager
+export { BaseAdapter } from './baseAdapter';
+export { AdapterManager } from './adapterManager';
+
 // Re-export adapter events and other types
 export type { 
   AdapterEvent
-} from '~/core/adapters/baseAdapter';
+} from './baseAdapter';
 
 // Types for OBS adapter
-export type {
-  ObsAdapterConfig,
-  ObsSceneChangedEvent,
-  ObsStreamingStatusEvent,
-  ObsSourceVisibilityEvent
-} from '~/core/adapters/obsAdapter';
+export type { ObsAdapterConfig } from '@shared/types';
 
 // Types for Test adapter
-export type {
-  TestAdapterConfig,
-  TestEvent
-} from '~/core/adapters/testAdapter';
+export type { TestAdapterConfig } from '@shared/types';
 
-// Re-export enums
-export { ObsEventType } from '~/core/adapters/obsAdapter';
+// Re-export event types
+export { EventType } from '@shared/types';

@@ -3,7 +3,7 @@ import { interval, Subscription, takeUntil, filter } from 'rxjs';
 import OBSWebSocket from 'obs-websocket-js';
 import { BaseAdapter } from './baseAdapter';
 import { EventBus, EventType, createEvent, BaseEventSchema } from '../events';
-import { AdapterConfig, AdapterState } from './types';
+import { AdapterState, ObsAdapterConfig, ObsAdapterConfigSchema } from './types';
 
 /**
  * OBS event schemas for specific OBS events
@@ -33,22 +33,7 @@ export type ObsSceneChangedEvent = z.infer<typeof ObsSceneChangedEventSchema>;
 export type ObsStreamingStatusEvent = z.infer<typeof ObsStreamingStatusEventSchema>;
 export type ObsSourceVisibilityEvent = z.infer<typeof ObsSourceVisibilityEventSchema>;
 
-/**
- * OBS adapter configuration schema
- */
-export const ObsAdapterConfigSchema = z.object({
-  enabled: z.boolean().default(true),
-  name: z.string().optional(),
-  autoConnect: z.boolean().default(true),
-  host: z.string().default('localhost'), 
-  port: z.number().default(4455),
-  password: z.string().optional(),
-  secure: z.boolean().default(false),
-  reconnectInterval: z.number().min(1000).default(5000),
-  statusCheckInterval: z.number().min(1000).default(10000),
-});
-
-export type ObsAdapterConfig = z.infer<typeof ObsAdapterConfigSchema>;
+// Using ObsAdapterConfigSchema from types.ts
 
 /**
  * Defines all the OBS event types that we care about
@@ -86,11 +71,12 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
     // The bootstrap.ts file will pass in the correct initial settings
     let mergedConfig = config;
     
+    // Cast the schema to make TypeScript happy, it's still the right schema
     super(
       'obs-adapter',
       'OBS Studio',
       mergedConfig,
-      ObsAdapterConfigSchema
+      ObsAdapterConfigSchema as any
     );
   }
   
@@ -401,12 +387,14 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
     const eventBus = EventBus.getInstance();
     
     const event = createEvent(
-      ObsSceneChangedEventSchema,
+      BaseEventSchema,
       {
-        type: ObsEventType.SCENE_CHANGED,
+        type: EventType.OBS_SCENE_CHANGED,
         source: this.adapterId,
-        sceneName,
-        previousSceneName
+        data: {
+          sceneName,
+          previousSceneName
+        }
       }
     );
     
@@ -494,16 +482,18 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
     const eventBus = EventBus.getInstance();
     
     const event = createEvent(
-      ObsStreamingStatusEventSchema,
+      BaseEventSchema,
       {
-        type: 'obs.streaming.status',
+        type: EventType.OBS_STREAMING_STATUS,
         source: this.adapterId,
-        streaming,
-        recording,
-        replayBufferActive,
-        bytesPerSec: bytesPerSec || 0,
-        kbitsPerSec: bytesPerSec ? Math.round(bytesPerSec / 125) : 0, // 1000 bits / 8 = 125 bytes
-        duration: duration || 0
+        data: {
+          streaming,
+          recording,
+          replayBufferActive,
+          bytesPerSec: bytesPerSec || 0,
+          kbitsPerSec: bytesPerSec ? Math.round(bytesPerSec / 125) : 0, // 1000 bits / 8 = 125 bytes
+          duration: duration || 0
+        }
       }
     );
     
@@ -526,14 +516,17 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
         const sceneItem = data.sceneItems.find(item => item.sceneItemId === sceneItemId);
         if (sceneItem) {
           const event = createEvent(
-            ObsSourceVisibilityEventSchema,
+            BaseEventSchema,
             {
-              type: visible ? ObsEventType.SOURCE_ACTIVATED : ObsEventType.SOURCE_DEACTIVATED,
+              type: EventType.OBS_SOURCE_VISIBILITY,
               source: this.adapterId,
-              sourceName: sceneItem.sourceName,
-              visible,
-              sceneItemId,
-              sceneName
+              data: {
+                sourceName: sceneItem.sourceName,
+                visible,
+                sceneItemId,
+                sceneName,
+                action: visible ? 'activated' : 'deactivated'
+              }
             }
           );
           

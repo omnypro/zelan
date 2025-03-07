@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { initializeMainProcess, shutdownMainProcess } from '~/core/bootstrap'
-import type { AppRouter } from '~/trpc/server/router'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 

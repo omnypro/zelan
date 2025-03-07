@@ -92,12 +92,14 @@ export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> imple
       
       // Publish connection event
       this.eventBus.publish(createEvent(
-        AdapterEventSchema,
+        BaseEventSchema,
         {
           type: EventType.ADAPTER_CONNECTED,
           source: this.adapterId,
           adapterId: this.adapterId,
-          state: AdapterState.CONNECTED,
+          data: {
+            state: AdapterState.CONNECTED
+          }
         }
       ));
     } catch (error) {
@@ -111,13 +113,15 @@ export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> imple
       
       // Publish error event
       this.eventBus.publish(createEvent(
-        AdapterEventSchema,
+        BaseEventSchema,
         {
           type: EventType.ADAPTER_ERROR,
           source: this.adapterId,
           adapterId: this.adapterId,
-          state: AdapterState.ERROR,
-          error: errorMessage,
+          data: {
+            state: AdapterState.ERROR,
+            error: errorMessage
+          }
         }
       ));
       
@@ -143,12 +147,14 @@ export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> imple
       
       // Publish disconnection event
       this.eventBus.publish(createEvent(
-        AdapterEventSchema,
+        BaseEventSchema,
         {
           type: EventType.ADAPTER_DISCONNECTED,
           source: this.adapterId,
           adapterId: this.adapterId,
-          state: AdapterState.DISCONNECTED,
+          data: {
+            state: AdapterState.DISCONNECTED
+          }
         }
       ));
     } catch (error) {
@@ -162,13 +168,15 @@ export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> imple
       
       // Publish error event
       this.eventBus.publish(createEvent(
-        AdapterEventSchema,
+        BaseEventSchema,
         {
           type: EventType.ADAPTER_ERROR,
           source: this.adapterId,
           adapterId: this.adapterId,
-          state: AdapterState.ERROR,
-          error: errorMessage,
+          data: {
+            state: AdapterState.ERROR,
+            error: errorMessage
+          }
         }
       ));
       

@@ -1,7 +1,7 @@
 import { EventBus, EventType, createEvent, BaseEventSchema, EventCache } from './events'
 import { AdapterManager } from './adapters'
 import { AuthService } from './auth'
-import { client } from '../../trpc/client'
+import { client } from '../trpc/client'
 
 /**
  * Bootstrap the renderer process components

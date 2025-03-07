@@ -1,7 +1,6 @@
 import { interval, Subscription, takeUntil } from 'rxjs';
 import { BaseAdapter } from './baseAdapter';
 import { EventBus, createEvent } from '~/core/events';
-import { AdapterSettingsStore } from '~/store';
 import {
   TestAdapterConfig,
   TestAdapterConfigSchema,
@@ -46,26 +45,8 @@ export class TestAdapter extends BaseAdapter<TestAdapterConfig> {
    * Create a new test adapter instance
    */
   constructor(config: Partial<TestAdapterConfig> = {}) {
-    // Try to get settings from AdapterSettingsStore
-    let mergedConfig = config;
-    
-    try {
-      const adapterSettingsStore = AdapterSettingsStore.getInstance();
-      const savedSettings = adapterSettingsStore.getSettings('test-adapter');
-      
-      if (savedSettings) {
-        // Merge saved settings with provided config, with provided config taking precedence
-        mergedConfig = {
-          ...savedSettings,
-          ...config
-        };
-        console.log('Test adapter loaded settings from AdapterSettingsStore');
-      }
-    } catch (error) {
-      console.warn('Could not load Test adapter settings:', error);
-    }
-    
-    super('test-adapter', 'Test Adapter', TestAdapterConfigSchema, mergedConfig);
+    // Use provided config directly
+    super('test-adapter', 'Test Adapter', TestAdapterConfigSchema, config);
   }
   
   /**

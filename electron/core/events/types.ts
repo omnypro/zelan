@@ -1,5 +1,5 @@
 // Export createEvent utility without re-exporting types
-import { BaseEvent, BaseEventSchema } from '@shared/types';
+import { BaseEvent } from '@shared/types';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 

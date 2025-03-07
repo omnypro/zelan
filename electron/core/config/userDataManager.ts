@@ -51,7 +51,7 @@ export class UserDataManager {
   private store: Store<UserData>;
   
   private constructor() {
-    this.store = new Store({
+    this.store = new Store<UserData>({
       name: 'user-data',
       defaults: {
         ui: {

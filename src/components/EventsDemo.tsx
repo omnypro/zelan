@@ -42,7 +42,7 @@ export function EventsDemo() {
           message: 'Test event from EventsDemo component',
           timestamp: new Date().toISOString()
         }
-      })
+      } as any)
 
       if (success) {
         // Refresh events list
@@ -82,7 +82,7 @@ export function EventsDemo() {
         <div className="form-group">
           <label>
             Event Type:
-            <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
+            <select value={eventType} onChange={(e) => setEventType(e.target.value as EventType)}>
               {Object.values(EventType).map((type) => (
                 <option key={type} value={type}>
                   {type}
@@ -173,7 +173,7 @@ ws.onmessage = (event) => {
         </pre>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .events-demo {
           padding: 20px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,

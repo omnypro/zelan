@@ -44,7 +44,7 @@ export class ConfigStore {
   private store: Store<AppConfig>;
   
   private constructor() {
-    this.store = new Store({
+    this.store = new Store<AppConfig>({
       name: 'app-config',
       defaults: {
         app: {

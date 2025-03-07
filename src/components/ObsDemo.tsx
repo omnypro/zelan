@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAdapter } from '@/lib/hooks'
 import { useEvents } from '@/lib/hooks'
-import { useAdapterSettings } from '@/lib/hooks'
 import { ObsEventType } from '@/lib/core/adapters/obsAdapter'
 
 /**
@@ -27,19 +26,16 @@ export function ObsDemo() {
     updateSettings
   } = useAdapter('obs-adapter')
   
-  // Get OBS adapter settings from the store
-  const obsSettings = useAdapterSettings('obs-adapter')
+  // Get OBS adapter settings from the store (unused for now)
+  // const obsSettings = useAdapterSettings('obs-adapter')
   
   // Get events for this adapter
   const {
     events,
     isLoading: eventsLoading,
     error: eventsError,
-    fetchRecentEvents
-  } = useEvents({
-    source: 'obs-adapter',
-    count: 20
-  })
+    fetchRecentEvents: fetchEvents
+  } = useEvents()
   
   // Process events to update UI state
   useEffect(() => {
@@ -47,14 +43,14 @@ export function ObsDemo() {
     
     // Find the most recent scene change event
     const sceneChangeEvent = events.find(event => event.type === ObsEventType.SCENE_CHANGED)
-    if (sceneChangeEvent && 'sceneName' in sceneChangeEvent) {
-      setCurrentScene(sceneChangeEvent.sceneName as string)
+    if (sceneChangeEvent && sceneChangeEvent.data && 'sceneName' in sceneChangeEvent.data) {
+      setCurrentScene(sceneChangeEvent.data.sceneName as string)
     }
     
     // Find the most recent streaming status event
     const streamStatusEvent = events.find(event => event.type === 'obs.streaming.status')
-    if (streamStatusEvent) {
-      const streamData = streamStatusEvent
+    if (streamStatusEvent && streamStatusEvent.data) {
+      const streamData = streamStatusEvent.data
       setStreamStatus({
         streaming: streamData.streaming as boolean || false,
         recording: streamData.recording as boolean || false,
@@ -87,14 +83,22 @@ export function ObsDemo() {
   }, [settings, status])
   
   // Update connection settings - only update runtime config
+  const updateConfig = async (config: any) => {
+    try {
+      // Just update the runtime config
+      await updateSettings(config);
+    } catch (error) {
+      console.error('Failed to update OBS settings:', error);
+    }
+  }
+  
   const handleUpdateConfig = async () => {
-    // Just update the runtime config
     await updateConfig({
       host: obsHost,
       port: obsPort,
       password: obsPassword || undefined,
       secure: obsSecure
-    })
+    });
     
     // Don't try to persist settings
   }
@@ -243,7 +247,7 @@ export function ObsDemo() {
         {eventsError && <p className="error">Error: {eventsError}</p>}
         
         <div className="button-group">
-          <button onClick={() => fetchRecentEvents()}>
+          <button onClick={() => fetchEvents()}>
             Refresh Events
           </button>
         </div>
@@ -259,12 +263,16 @@ export function ObsDemo() {
                 <div className="event-type">{event.type}</div>
                 <div className="event-time">{new Date(event.timestamp).toLocaleTimeString()}</div>
                 <div className="event-data">
-                  {event.type === ObsEventType.SCENE_CHANGED && 'sceneName' in event ? (
-                    <>Scene: {event.sceneName}</>
-                  ) : event.type === 'obs.streaming.status' ? (
-                    <>Streaming: {event.streaming ? 'Yes' : 'No'}, Recording: {event.recording ? 'Yes' : 'No'}</>
+                  {event.type === ObsEventType.SCENE_CHANGED && event.data && 'sceneName' in event.data ? (
+                    <>Scene: {event.data.sceneName}</>
+                  ) : event.type === 'obs.streaming.status' && event.data ? (
+                    <>Streaming: {event.data.streaming ? 'Yes' : 'No'}, Recording: {event.data.recording ? 'Yes' : 'No'}</>
                   ) : event.type === ObsEventType.SOURCE_ACTIVATED || event.type === ObsEventType.SOURCE_DEACTIVATED ? (
-                    <>Source: {event.sourceName} - {event.visible ? 'Visible' : 'Hidden'}</>
+                    event.data && 'sourceName' in event.data && 'visible' in event.data ? (
+                      <>Source: {event.data.sourceName} - {event.data.visible ? 'Visible' : 'Hidden'}</>
+                    ) : (
+                      <>Source state changed</>
+                    )
                   ) : (
                     <>Event received</>
                   )}
@@ -289,7 +297,7 @@ export function ObsDemo() {
         </ol>
       </div>
       
-      <style jsx>{`
+      <style>{`
         .obs-demo {
           padding: 20px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,

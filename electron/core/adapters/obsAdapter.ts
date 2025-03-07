@@ -2,7 +2,6 @@ import { interval, Subscription, takeUntil, filter } from 'rxjs';
 import OBSWebSocket from 'obs-websocket-js';
 import { BaseAdapter } from './baseAdapter';
 import { EventBus, createEvent } from '~/core/events';
-import { AdapterSettingsStore } from '~/store';
 import { 
   ObsAdapterConfig, 
   ObsAdapterConfigSchema, 
@@ -28,26 +27,8 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
    * Create a new OBS adapter instance
    */
   constructor(config: Partial<ObsAdapterConfig> = {}) {
-    // Try to get settings from AdapterSettingsStore
-    let mergedConfig = config;
-    
-    try {
-      const adapterSettingsStore = AdapterSettingsStore.getInstance();
-      const savedSettings = adapterSettingsStore.getSettings('obs-adapter');
-      
-      if (savedSettings) {
-        // Merge saved settings with provided config, with provided config taking precedence
-        mergedConfig = {
-          ...savedSettings,
-          ...config
-        };
-        console.log('OBS adapter loaded settings from AdapterSettingsStore');
-      }
-    } catch (error) {
-      console.warn('Could not load OBS adapter settings:', error);
-    }
-    
-    super('obs-adapter', 'OBS Studio', ObsAdapterConfigSchema, mergedConfig);
+    // Use provided config directly
+    super('obs-adapter', 'OBS Studio', ObsAdapterConfigSchema, config);
   }
   
   /**

@@ -166,7 +166,7 @@ export function useConfig() {
       }
       
       // Fallback to direct status check
-      const wsStatus = await trpc.client.websocket.getStatus.query();
+      await trpc.client.websocket.getStatus.query();
       return {
         port: 9090, // Default port
         pingInterval: 30000,
