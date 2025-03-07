@@ -1,23 +1,5 @@
 import Store from 'electron-store';
-import { z } from 'zod';
-
-/**
- * Schema for auth tokens with validation
- */
-export const TokenSchema = z.object({
-  accessToken: z.string(),
-  refreshToken: z.string().optional(),
-  expiresAt: z.number(),
-  scopes: z.array(z.string()).default([]),
-  tokenType: z.string().default('bearer'),
-});
-
-export type Token = z.infer<typeof TokenSchema>;
-
-/**
- * Schema for token store
- */
-export const TokenStoreSchema = z.record(z.string(), TokenSchema);
+import { TokenSchema, TokenStoreSchema, Token } from '@shared/types';
 
 /**
  * Manager for authentication tokens
@@ -25,7 +7,7 @@ export const TokenStoreSchema = z.record(z.string(), TokenSchema);
  */
 export class TokenStore {
   private static instance: TokenStore;
-  private store: Store<z.infer<typeof TokenStoreSchema>>;
+  private store: Store<typeof TokenStoreSchema._type>;
   
   private constructor() {
     this.store = new Store({

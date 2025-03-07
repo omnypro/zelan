@@ -24,9 +24,10 @@
     "baseUrl": ".",
     "paths": {
       "~/*": ["./electron/*"],
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@shared/*": ["./shared/*"]
     }
   },
-  "include": ["src", "electron"],
+  "include": ["src", "electron", "shared"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

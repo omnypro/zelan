@@ -1,44 +1,49 @@
 import { interval, Subscription, takeUntil } from 'rxjs';
-import { z } from 'zod';
 import { BaseAdapter } from './baseAdapter';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '~/core/events';
-import { AdapterConfig } from './types';
+import { EventBus, createEvent } from '~/core/events';
 import { AdapterSettingsStore } from '~/store';
+import {
+  TestAdapterConfig,
+  TestAdapterConfigSchema,
+  BaseEventSchema
+} from '@shared/types';
 
 /**
- * Test event schemas for generating sample events
+ * Test events to simulate
  */
-export const TestEventSchema = BaseEventSchema.extend({
-  testId: z.string(),
-  value: z.number(),
-  message: z.string(),
-});
-
-export type TestEvent = z.infer<typeof TestEventSchema>;
+const TEST_EVENTS = [
+  { 
+    type: 'test.event.1', 
+    data: { message: 'This is test event 1' }
+  },
+  { 
+    type: 'test.event.2', 
+    data: { message: 'This is test event 2' }
+  },
+  { 
+    type: 'test.event.3', 
+    data: { message: 'This is test event 3', value: 42 }
+  },
+  { 
+    type: 'test.event.4', 
+    data: { message: 'This is test event 4', value: 'hello world' }
+  },
+  { 
+    type: 'test.event.5', 
+    data: { message: 'This is test event 5', array: [1, 2, 3] }
+  },
+];
 
 /**
- * Test adapter configuration schema
- */
-export const TestAdapterConfigSchema = z.object({
-  enabled: z.boolean().default(true),
-  name: z.string().optional(),
-  autoConnect: z.boolean().default(true),
-  interval: z.number().min(100).default(2000),
-  generateErrors: z.boolean().default(false),
-});
-
-export type TestAdapterConfig = z.infer<typeof TestAdapterConfigSchema>;
-
-/**
- * TestAdapter is a development adapter that generates test events
- * This is useful for testing the event system without actual services
+ * Test adapter implementation that generates sample events
+ * for testing and development
  */
 export class TestAdapter extends BaseAdapter<TestAdapterConfig> {
-  private eventSubscription: Subscription | null = null;
-  private eventCount = 0;
+  private eventTimer: Subscription | null = null;
+  private eventCounter = 0;
   
   /**
-   * Create a new test adapter
+   * Create a new test adapter instance
    */
   constructor(config: Partial<TestAdapterConfig> = {}) {
     // Try to get settings from AdapterSettingsStore
@@ -57,128 +62,98 @@ export class TestAdapter extends BaseAdapter<TestAdapterConfig> {
         console.log('Test adapter loaded settings from AdapterSettingsStore');
       }
     } catch (error) {
-      console.log('Using default test adapter settings');
+      console.warn('Could not load Test adapter settings:', error);
     }
     
-    super(
-      'test-adapter',
-      'Test Adapter',
-      mergedConfig,
-      TestAdapterConfigSchema
-    );
+    super('test-adapter', 'Test Adapter', TestAdapterConfigSchema, mergedConfig);
   }
   
   /**
-   * Connect and start generating events
+   * Implementation of connect
    */
   protected async connectImpl(): Promise<void> {
-    // Start generating events
-    this.startEventGeneration();
-    
-    // Simulate connection delay
+    // Simulate a connection delay
     await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Start generating events
+    this.startEventTimer();
   }
   
   /**
-   * Disconnect and stop generating events
+   * Implementation of disconnect
    */
   protected async disconnectImpl(): Promise<void> {
     // Stop generating events
-    this.stopEventGeneration();
-    
-    // Simulate disconnection delay
-    await new Promise(resolve => setTimeout(resolve, 300));
+    this.stopEventTimer();
   }
   
   /**
-   * Clean up resources
+   * Start generating events
    */
-  protected destroyImpl(): void {
-    this.stopEventGeneration();
-  }
-  
-  /**
-   * Start generating test events at the configured interval
-   */
-  private startEventGeneration(): void {
-    // Stop any existing event generation
-    this.stopEventGeneration();
+  private startEventTimer(): void {
+    // Stop any existing timer
+    this.stopEventTimer();
     
-    // Create new subscription
-    this.eventSubscription = interval(this.config.interval)
-      .pipe(takeUntil(this.destroyed$))
+    // Start new timer
+    const { interval: eventInterval } = this.config;
+    
+    this.eventTimer = interval(eventInterval)
+      .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
-        // Generate a test event
-        this.generateTestEvent();
-        
-        // Optionally generate an error
-        if (this.config.generateErrors && this.eventCount % 10 === 0) {
-          this.generateErrorEvent();
-        }
-        
-        this.eventCount++;
+        this.generateEvent();
       });
   }
   
   /**
-   * Stop generating test events
+   * Stop generating events
    */
-  private stopEventGeneration(): void {
-    if (this.eventSubscription) {
-      this.eventSubscription.unsubscribe();
-      this.eventSubscription = null;
+  private stopEventTimer(): void {
+    if (this.eventTimer) {
+      this.eventTimer.unsubscribe();
+      this.eventTimer = null;
     }
   }
   
   /**
-   * Handle configuration changes
+   * Generate a random test event
    */
-  protected override handleConfigChange(): void {
-    // Update event generation if connected and interval changed
-    if (this.isConnected() && this.eventSubscription) {
-      this.startEventGeneration();
+  private generateEvent(): void {
+    const eventBus = EventBus.getInstance();
+    this.eventCounter++;
+    
+    // Randomly generate an error event if enabled
+    if (this.config.generateErrors && Math.random() < 0.1) {
+      this.generateErrorEvent();
+      return;
     }
     
-    // Call the parent implementation for connect/disconnect handling
-    super.handleConfigChange();
-  }
-  
-  /**
-   * Generate a test event
-   */
-  private generateTestEvent(): void {
-    // Get eventBus from parent BaseAdapter class
-    const eventBus = EventBus.getInstance();
+    // Select a random event type
+    const eventIndex = Math.floor(Math.random() * TEST_EVENTS.length);
+    const eventTemplate = TEST_EVENTS[eventIndex];
     
-    const testEvent = createEvent(
-      TestEventSchema,
-      {
-        type: 'test.event',
-        source: this.adapterId,
-        testId: `test-${this.eventCount}`,
-        value: Math.floor(Math.random() * 100),
-        message: `Test event ${this.eventCount}`,
-      }
-    );
-    
-    eventBus.publish(testEvent);
-  }
-  
-  /**
-   * Generate an error event
-   */
-  private generateErrorEvent(): void {
-    // Get eventBus from parent BaseAdapter class
-    const eventBus = EventBus.getInstance();
-    
-    const errorEvent = createEvent(
+    // Publish the event
+    eventBus.publish(createEvent(
       BaseEventSchema,
       {
-        type: 'test.error',
-        source: this.adapterId,
+        type: eventTemplate.type,
+        source: 'test-adapter',
+        adapterId: this.adapterId,
+        data: {
+          ...eventTemplate.data,
+          counter: this.eventCounter,
+          timestamp: Date.now(),
+        }
       }
-    );
+    ));
+  }
+  
+  /**
+   * Generate a random error event
+   */
+  private generateErrorEvent(): void {
+    console.log('Test adapter generating error event');
     
-    eventBus.publish(errorEvent);
+    const error = new Error(`Test error #${this.eventCounter}`);
+    this.publishErrorEvent(error);
   }
 }

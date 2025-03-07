@@ -1,69 +1,15 @@
-import { z } from 'zod';
 import { interval, Subscription, takeUntil, filter } from 'rxjs';
 import OBSWebSocket from 'obs-websocket-js';
 import { BaseAdapter } from './baseAdapter';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '~/core/events';
-import { AdapterConfig, AdapterState } from './types';
+import { EventBus, createEvent } from '~/core/events';
 import { AdapterSettingsStore } from '~/store';
-
-/**
- * OBS event schemas for specific OBS events
- */
-export const ObsSceneChangedEventSchema = BaseEventSchema.extend({
-  sceneName: z.string(),
-  previousSceneName: z.string().optional(),
-});
-
-export const ObsStreamingStatusEventSchema = BaseEventSchema.extend({
-  streaming: z.boolean(),
-  recording: z.boolean(),
-  replayBufferActive: z.boolean().optional(),
-  bytesPerSec: z.number().optional(),
-  kbitsPerSec: z.number().optional(),
-  duration: z.number().optional(),
-});
-
-export const ObsSourceVisibilityEventSchema = BaseEventSchema.extend({
-  sourceName: z.string(),
-  visible: z.boolean(),
-  sceneItemId: z.number().optional(),
-  sceneName: z.string().optional(),
-});
-
-export type ObsSceneChangedEvent = z.infer<typeof ObsSceneChangedEventSchema>;
-export type ObsStreamingStatusEvent = z.infer<typeof ObsStreamingStatusEventSchema>;
-export type ObsSourceVisibilityEvent = z.infer<typeof ObsSourceVisibilityEventSchema>;
-
-/**
- * OBS adapter configuration schema
- */
-export const ObsAdapterConfigSchema = z.object({
-  enabled: z.boolean().default(true),
-  name: z.string().optional(),
-  autoConnect: z.boolean().default(true),
-  host: z.string().default('localhost'), 
-  port: z.number().default(4455),
-  password: z.string().optional(),
-  secure: z.boolean().default(false),
-  reconnectInterval: z.number().min(1000).default(5000),
-  statusCheckInterval: z.number().min(1000).default(10000),
-});
-
-export type ObsAdapterConfig = z.infer<typeof ObsAdapterConfigSchema>;
-
-/**
- * Defines all the OBS event types that we care about
- */
-export enum ObsEventType {
-  SCENE_CHANGED = 'obs.scene.changed',
-  STREAMING_STARTED = 'obs.streaming.started',
-  STREAMING_STOPPED = 'obs.streaming.stopped',
-  RECORDING_STARTED = 'obs.recording.started',
-  RECORDING_STOPPED = 'obs.recording.stopped',
-  SOURCE_ACTIVATED = 'obs.source.activated',
-  SOURCE_DEACTIVATED = 'obs.source.deactivated',
-  CONNECTION_STATUS = 'obs.connection.status',
-}
+import { 
+  ObsAdapterConfig, 
+  ObsAdapterConfigSchema, 
+  AdapterState, 
+  EventType, 
+  BaseEventSchema
+} from '@shared/types';
 
 /**
  * OBS adapter implementation to connect to OBS Studio
@@ -98,254 +44,181 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
         console.log('OBS adapter loaded settings from AdapterSettingsStore');
       }
     } catch (error) {
-      console.log('Using default OBS adapter settings');
+      console.warn('Could not load OBS adapter settings:', error);
     }
     
-    super(
-      'obs-adapter',
-      'OBS Studio',
-      mergedConfig,
-      ObsAdapterConfigSchema
-    );
+    super('obs-adapter', 'OBS Studio', ObsAdapterConfigSchema, mergedConfig);
   }
   
   /**
-   * Connect to OBS WebSocket server
+   * Implementation of connect
    */
   protected async connectImpl(): Promise<void> {
-    try {
-      // Stop any existing reconnect timer
-      this.stopReconnectTimer();
-      
-      // Connect to OBS
-      const { host, port, password, secure } = this.config;
-      const protocol = secure ? 'wss' : 'ws';
-      const url = `${protocol}://${host}:${port}`;
-      const connectionParams: { address: string; password?: string } = {
-        address: url
-      };
-      
-      if (password) {
-        connectionParams.password = password;
-      }
-      
-      console.log(`Connecting to OBS at ${connectionParams.address}`);
-      await this.obsClient.connect(connectionParams.address, connectionParams.password);
-      console.log('Connected to OBS Studio');
-      
-      // Get current scene
-      const sceneData = await this.obsClient.call('GetCurrentProgramScene');
-      this.currentScene = sceneData.currentProgramSceneName;
-      
-      // Get current streaming status
-      const streamStatus = await this.obsClient.call('GetStreamStatus');
-      this.streamingStatus.streaming = streamStatus.outputActive;
-      
-      // Get current recording status
-      const recordStatus = await this.obsClient.call('GetRecordStatus');
-      this.streamingStatus.recording = recordStatus.outputActive;
-      
-      // Register for events
-      this.registerEventHandlers();
-      
-      // Start status check timer
-      this.startStatusCheckTimer();
-      
-      // Publish connection status event
-      this.publishConnectionStatusEvent(true);
-    } catch (error) {
-      console.error('Failed to connect to OBS:', error);
-      this.startReconnectTimer();
-      throw error;
-    }
+    // Connect to OBS
+    const { host, port, password, secure } = this.config;
+    const protocol = secure ? 'wss' : 'ws';
+    const connectString = `${protocol}://${host}:${port}`;
+    
+    console.log(`Connecting to OBS at ${connectString}`);
+    
+    await this.obsClient.connect(connectString, password);
+    
+    // Register event handlers
+    this.registerEventHandlers();
+    
+    // Get initial state
+    await this.getInitialState();
+    
+    // Start status check timer
+    this.startStatusCheckTimer();
   }
   
   /**
-   * Disconnect from OBS WebSocket server
+   * Implementation of disconnect
    */
   protected async disconnectImpl(): Promise<void> {
-    try {
-      // Stop timers
-      this.stopStatusCheckTimer();
-      this.stopReconnectTimer();
-      
-      // Check if we're actually connected before trying to disconnect
-      if (this.obsClient && this.obsClient.identified) {
-        // Disconnect from OBS
-        await this.obsClient.disconnect();
-      }
-      
-      // Always update state and publish event, even if disconnect throws
-      this.updateState(AdapterState.DISCONNECTED);
-      
-      // Publish connection status event
-      this.publishConnectionStatusEvent(false);
-      console.log('Disconnected from OBS Studio');
-    } catch (error) {
-      console.error('Error disconnecting from OBS:', error);
-      // Still mark as disconnected even if there was an error
-      this.updateState(AdapterState.DISCONNECTED);
-      this.publishConnectionStatusEvent(false, error as Error);
-      // Don't throw, just log the error
-    }
-  }
-  
-  /**
-   * Clean up resources
-   */
-  protected destroyImpl(): void {
+    // Stop timers
     this.stopStatusCheckTimer();
     this.stopReconnectTimer();
     
-    // Ensure OBS client is disconnected
+    // Disconnect from OBS
+    await this.obsClient.disconnect();
+  }
+  
+  /**
+   * Get the current connection status
+   */
+  public async getConnectionStatus(): Promise<boolean> {
     try {
-      // Only try to disconnect if we have a client and it's identified
-      if (this.obsClient && this.obsClient.identified) {
-        this.obsClient.disconnect();
-      }
-    } catch (e) {
-      // Ignore errors during destroy
-      console.log('Non-critical error during OBS adapter cleanup:', e);
-    }
-    
-    // Attempt to remove all event listeners
-    try {
-      if (this.obsClient) {
-        this.obsClient.removeAllListeners();
-      }
-    } catch (e) {
-      // Ignore errors
+      // Check if OBS client is connected
+      return this.obsClient.identified;
+    } catch (error) {
+      console.error('Error getting OBS connection status:', error);
+      return false;
     }
   }
   
   /**
-   * Register event handlers for OBS events
+   * Get the current scene
+   */
+  public async getCurrentScene(): Promise<string | null> {
+    if (!this.isConnected()) {
+      return null;
+    }
+    
+    try {
+      const { currentProgramSceneName } = await this.obsClient.call('GetCurrentProgramScene');
+      this.currentScene = currentProgramSceneName;
+      return currentProgramSceneName;
+    } catch (error) {
+      console.error('Error getting current scene:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Get the current streaming status
+   */
+  public async getStreamingStatus(): Promise<{ streaming: boolean; recording: boolean; }> {
+    if (!this.isConnected()) {
+      return { streaming: false, recording: false };
+    }
+    
+    try {
+      const streamingStatus = await this.obsClient.call('GetStreamStatus');
+      const recordingStatus = await this.obsClient.call('GetRecordStatus');
+      
+      this.streamingStatus = {
+        streaming: streamingStatus.outputActive,
+        recording: recordingStatus.outputActive,
+      };
+      
+      return this.streamingStatus;
+    } catch (error) {
+      console.error('Error getting streaming status:', error);
+      return { streaming: false, recording: false };
+    }
+  }
+  
+  /**
+   * Register OBS event handlers
    */
   private registerEventHandlers(): void {
-    // Program scene changed event
+    // Scene changed
     this.obsClient.on('CurrentProgramSceneChanged', (data) => {
-      const prevScene = this.currentScene;
+      const previousScene = this.currentScene;
       this.currentScene = data.sceneName;
       
-      this.publishSceneChangedEvent(data.sceneName, prevScene || undefined);
+      this.publishSceneChangedEvent(data.sceneName, previousScene);
     });
     
-    // Stream status changed
+    // Streaming started
     this.obsClient.on('StreamStateChanged', (data) => {
+      const nowStreaming = data.outputActive;
       const wasStreaming = this.streamingStatus.streaming;
-      this.streamingStatus.streaming = data.outputActive;
       
-      if (wasStreaming !== data.outputActive) {
-        if (data.outputActive) {
-          this.publishStreamingStartedEvent();
-        } else {
-          this.publishStreamingStoppedEvent();
-        }
+      // Update status
+      this.streamingStatus.streaming = nowStreaming;
+      
+      // Publish event on state change
+      if (nowStreaming !== wasStreaming) {
+        this.publishStreamingStatusEvent(nowStreaming);
       }
     });
     
-    // Recording status changed
+    // Recording state changed
     this.obsClient.on('RecordStateChanged', (data) => {
-      const wasRecording = this.streamingStatus.recording;
+      // Update status
       this.streamingStatus.recording = data.outputActive;
-      
-      if (wasRecording !== data.outputActive) {
-        if (data.outputActive) {
-          this.publishRecordingStartedEvent();
-        } else {
-          this.publishRecordingStoppedEvent();
-        }
-      }
     });
     
-    // Scene item visibility (source) changed
+    // Source visibility changed
     this.obsClient.on('SceneItemEnableStateChanged', (data) => {
-      this.publishSourceVisibilityEvent(
-        data.sceneName,
-        data.sceneItemId,
-        data.sceneItemEnabled
-      );
-    });
-    
-    // Handle disconnection
-    this.obsClient.on('ConnectionClosed', () => {
-      if (this.isConnected()) {
-        console.warn('OBS WebSocket connection closed unexpectedly, attempting to reconnect...');
-        this.updateState(AdapterState.DISCONNECTED);
-        this.publishConnectionStatusEvent(false);
-        this.startReconnectTimer();
-      }
-    });
-    
-    // Handle error
-    this.obsClient.on('ConnectionError', (error) => {
-      console.error('OBS WebSocket connection error:', error);
-      this.publishConnectionStatusEvent(false, error);
+      this.publishSourceVisibilityEvent(data.sceneName, data.sceneItemId, data.sceneItemEnabled);
     });
   }
   
   /**
-   * Start periodic status check
+   * Get initial OBS state
+   */
+  private async getInitialState(): Promise<void> {
+    await this.getCurrentScene();
+    await this.getStreamingStatus();
+  }
+  
+  /**
+   * Start the status check timer
    */
   private startStatusCheckTimer(): void {
-    // Clear any existing timer
+    // Stop existing timer
     this.stopStatusCheckTimer();
     
-    // Create new timer
-    this.statusCheckTimer = interval(this.config.statusCheckInterval)
+    // Start new timer
+    const statusCheckInterval = this.config.statusCheckInterval;
+    
+    this.statusCheckTimer = interval(statusCheckInterval)
       .pipe(
-        takeUntil(this.destroyed$),
+        takeUntil(this.destroy$),
         filter(() => this.isConnected())
       )
       .subscribe(async () => {
         try {
-          // Check if OBS is still connected
-          if (!this.obsClient.identified) {
-            throw new Error('OBS WebSocket not identified');
-          }
+          const connected = await this.getConnectionStatus();
           
-          // Get stream status
-          const streamStatus = await this.obsClient.call('GetStreamStatus');
-          
-          // Get recording status
-          const recordStatus = await this.obsClient.call('GetRecordStatus');
-          
-          // Update local state
-          this.streamingStatus.streaming = streamStatus.outputActive;
-          this.streamingStatus.recording = recordStatus.outputActive;
-          
-          // Publish status event with detailed information
-          this.publishStreamingStatusEvent(
-            streamStatus.outputActive,
-            recordStatus.outputActive,
-            false,
-            streamStatus.outputBytes,
-            streamStatus.outputDuration
-          );
-        } catch (error) {
-          console.error('Error during OBS status check:', error);
-          
-          // If we can't connect, start reconnect process
-          if (this.isConnected()) {
-            console.warn('OBS status check failed, disconnecting...');
-            this.updateState(AdapterState.DISCONNECTED);
-            this.publishConnectionStatusEvent(false);
-            
-            // Ensure we're actually disconnected from OBS
-            try {
-              this.obsClient.disconnect();
-            } catch (disconnectError) {
-              // Ignore any errors during forced disconnect
-            }
-            
+          if (!connected && this.isConnected()) {
+            console.log('Status check detected OBS disconnection');
+            this.setState(AdapterState.DISCONNECTED);
+            this.publishDisconnectedEvent();
             this.startReconnectTimer();
           }
+        } catch (error) {
+          console.error('Error checking OBS status:', error);
         }
       });
   }
   
   /**
-   * Stop status check timer
+   * Stop the status check timer
    */
   private stopStatusCheckTimer(): void {
     if (this.statusCheckTimer) {
@@ -355,28 +228,33 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
   }
   
   /**
-   * Start reconnect timer
+   * Start the reconnect timer
    */
   private startReconnectTimer(): void {
-    // Clear any existing timer
+    // Stop existing timer
     this.stopReconnectTimer();
     
-    // Create new timer
-    this.reconnectTimer = interval(this.config.reconnectInterval)
+    // Only start reconnect timer if autoConnect is enabled
+    if (!this.config.autoConnect) {
+      return;
+    }
+    
+    // Start new timer
+    const reconnectInterval = this.config.reconnectInterval;
+    
+    this.reconnectTimer = interval(reconnectInterval)
       .pipe(
-        takeUntil(this.destroyed$),
-        filter(() => !this.isConnected() && this.config.enabled)
+        takeUntil(this.destroy$),
+        filter(() => !this.isConnected())
       )
-      .subscribe(() => {
+      .subscribe(async () => {
         console.log('Attempting to reconnect to OBS...');
-        this.connect().catch((err) => {
-          console.log('OBS reconnect failed:', err.message);
-        });
+        await this.connect();
       });
   }
   
   /**
-   * Stop reconnect timer
+   * Stop the reconnect timer
    */
   private stopReconnectTimer(): void {
     if (this.reconnectTimer) {
@@ -386,195 +264,63 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
   }
   
   /**
-   * Handle configuration changes
-   */
-  protected override handleConfigChange(): void {
-    // If connection params changed and we're connected, reconnect
-    if (this.isConnected()) {
-      this.disconnect()
-        .then(() => {
-          if (this.config.enabled) {
-            return this.connect();
-          }
-        })
-        .catch(console.error);
-    } else {
-      // Call the parent implementation for connect/disconnect handling
-      super.handleConfigChange();
-    }
-  }
-  
-  // Event publication methods
-  
-  /**
    * Publish scene changed event
    */
-  private publishSceneChangedEvent(sceneName: string, previousSceneName?: string): void {
+  private publishSceneChangedEvent(sceneName: string, previousSceneName: string | null): void {
     const eventBus = EventBus.getInstance();
     
-    const event = createEvent(
-      ObsSceneChangedEventSchema,
-      {
-        type: ObsEventType.SCENE_CHANGED,
-        source: this.adapterId,
-        sceneName,
-        previousSceneName
-      }
-    );
-    
-    eventBus.publish(event);
-  }
-  
-  /**
-   * Publish streaming started event
-   */
-  private publishStreamingStartedEvent(): void {
-    const eventBus = EventBus.getInstance();
-    
-    const event = createEvent(
+    eventBus.publish(createEvent(
       BaseEventSchema,
       {
-        type: ObsEventType.STREAMING_STARTED,
-        source: this.adapterId
-      }
-    );
-    
-    eventBus.publish(event);
-  }
-  
-  /**
-   * Publish streaming stopped event
-   */
-  private publishStreamingStoppedEvent(): void {
-    const eventBus = EventBus.getInstance();
-    
-    const event = createEvent(
-      BaseEventSchema,
-      {
-        type: ObsEventType.STREAMING_STOPPED,
-        source: this.adapterId
-      }
-    );
-    
-    eventBus.publish(event);
-  }
-  
-  /**
-   * Publish recording started event
-   */
-  private publishRecordingStartedEvent(): void {
-    const eventBus = EventBus.getInstance();
-    
-    const event = createEvent(
-      BaseEventSchema,
-      {
-        type: ObsEventType.RECORDING_STARTED,
-        source: this.adapterId
-      }
-    );
-    
-    eventBus.publish(event);
-  }
-  
-  /**
-   * Publish recording stopped event
-   */
-  private publishRecordingStoppedEvent(): void {
-    const eventBus = EventBus.getInstance();
-    
-    const event = createEvent(
-      BaseEventSchema,
-      {
-        type: ObsEventType.RECORDING_STOPPED,
-        source: this.adapterId
-      }
-    );
-    
-    eventBus.publish(event);
-  }
-  
-  /**
-   * Publish detailed streaming status event
-   */
-  private publishStreamingStatusEvent(
-    streaming: boolean,
-    recording: boolean,
-    replayBufferActive?: boolean,
-    bytesPerSec?: number,
-    duration?: number
-  ): void {
-    const eventBus = EventBus.getInstance();
-    
-    const event = createEvent(
-      ObsStreamingStatusEventSchema,
-      {
-        type: 'obs.streaming.status',
-        source: this.adapterId,
-        streaming,
-        recording,
-        replayBufferActive,
-        bytesPerSec: bytesPerSec || 0,
-        kbitsPerSec: bytesPerSec ? Math.round(bytesPerSec / 125) : 0, // 1000 bits / 8 = 125 bytes
-        duration: duration || 0
-      }
-    );
-    
-    eventBus.publish(event);
-  }
-  
-  /**
-   * Publish source visibility changed event
-   */
-  private publishSourceVisibilityEvent(
-    sceneName: string,
-    sceneItemId: number,
-    visible: boolean
-  ): void {
-    const eventBus = EventBus.getInstance();
-    
-    // We need to get the source name from the sceneItemId
-    this.obsClient.call('GetSceneItemList', { sceneName })
-      .then(data => {
-        const sceneItem = data.sceneItems.find(item => item.sceneItemId === sceneItemId);
-        if (sceneItem) {
-          const event = createEvent(
-            ObsSourceVisibilityEventSchema,
-            {
-              type: visible ? ObsEventType.SOURCE_ACTIVATED : ObsEventType.SOURCE_DEACTIVATED,
-              source: this.adapterId,
-              sourceName: sceneItem.sourceName,
-              visible,
-              sceneItemId,
-              sceneName
-            }
-          );
-          
-          eventBus.publish(event);
-        }
-      })
-      .catch(err => {
-        console.error('Failed to get source name for visibility event:', err);
-      });
-  }
-  
-  /**
-   * Publish connection status event
-   */
-  private publishConnectionStatusEvent(connected: boolean, error?: Error): void {
-    const eventBus = EventBus.getInstance();
-    
-    const event = createEvent(
-      BaseEventSchema,
-      {
-        type: ObsEventType.CONNECTION_STATUS,
-        source: this.adapterId,
+        type: EventType.OBS_SCENE_CHANGED,
+        source: 'obs-adapter',
+        adapterId: this.adapterId,
         data: {
-          connected,
-          error: error ? error.message : undefined
+          sceneName,
+          previousSceneName
         }
       }
-    );
+    ));
+  }
+  
+  /**
+   * Publish streaming status event
+   */
+  private publishStreamingStatusEvent(streaming: boolean): void {
+    const eventBus = EventBus.getInstance();
     
-    eventBus.publish(event);
+    eventBus.publish(createEvent(
+      BaseEventSchema,
+      {
+        type: EventType.OBS_STREAMING_STATUS,
+        source: 'obs-adapter',
+        adapterId: this.adapterId,
+        data: {
+          streaming,
+          recording: this.streamingStatus.recording
+        }
+      }
+    ));
+  }
+  
+  /**
+   * Publish source visibility event
+   */
+  private publishSourceVisibilityEvent(sceneName: string, sceneItemId: number, visible: boolean): void {
+    const eventBus = EventBus.getInstance();
+    
+    eventBus.publish(createEvent(
+      BaseEventSchema,
+      {
+        type: EventType.OBS_SOURCE_VISIBILITY,
+        source: 'obs-adapter',
+        adapterId: this.adapterId,
+        data: {
+          sceneName,
+          sceneItemId,
+          visible
+        }
+      }
+    ));
   }
 }

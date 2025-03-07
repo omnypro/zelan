@@ -1,26 +1,20 @@
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { z } from 'zod';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '~/core/events';
-import { AdapterConfig, AdapterConfigSchema, AdapterState, ServiceAdapter } from './types';
-
-/**
- * Adapter event schema
- */
-export const AdapterEventSchema = BaseEventSchema.extend({
-  adapterId: z.string(),
-  state: z.nativeEnum(AdapterState),
-  error: z.string().optional(),
-});
-
-export type AdapterEvent = z.infer<typeof AdapterEventSchema>;
+import { EventBus, createEvent } from '~/core/events';
+import { 
+  AdapterConfig, 
+  AdapterState, 
+  ServiceAdapter, 
+  EventType,
+  BaseEventSchema
+} from '@shared/types';
 
 /**
  * Base adapter implementation that handles common adapter functionality
  */
 export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> implements ServiceAdapter<T> {
-  private eventBus: EventBus = EventBus.getInstance();
   private stateSubject: BehaviorSubject<AdapterState>;
-  private destroy$ = new Subject<void>();
+  protected destroy$ = new Subject<void>();
   private configValue: T;
   private configSchema: z.ZodType<T>;
   
@@ -30,11 +24,11 @@ export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> imple
   constructor(
     public readonly adapterId: string,
     public readonly displayName: string,
-    config: Partial<T>,
-    configSchema?: z.ZodType<T>
+    configSchema: z.ZodType<T>,
+    config: Partial<T>
   ) {
-    // Use provided schema or default to AdapterConfigSchema
-    this.configSchema = (configSchema || AdapterConfigSchema) as z.ZodType<T>;
+    // Use provided schema
+    this.configSchema = configSchema;
     
     // Initialize state
     this.stateSubject = new BehaviorSubject<AdapterState>(AdapterState.DISCONNECTED);
@@ -73,202 +67,167 @@ export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> imple
   
   /**
    * Connect to the service
+   * This is the public API that wraps the concrete implementation
    */
   public async connect(): Promise<void> {
-    // Only connect if disconnected and enabled
-    if (this.state !== AdapterState.DISCONNECTED || !this.config.enabled) {
+    if (this.isConnected()) {
+      console.log(`${this.adapterId} is already connected`);
       return;
     }
     
-    // Update state to connecting
-    this.updateState(AdapterState.CONNECTING);
+    this.setState(AdapterState.CONNECTING);
     
     try {
-      // Call the concrete implementation
       await this.connectImpl();
-      
-      // Update state to connected
-      this.updateState(AdapterState.CONNECTED);
-      
-      // Publish connection event
-      this.eventBus.publish(createEvent(
-        AdapterEventSchema,
-        {
-          type: EventType.ADAPTER_CONNECTED,
-          source: this.adapterId,
-          adapterId: this.adapterId,
-          state: AdapterState.CONNECTED,
-        }
-      ));
+      this.setState(AdapterState.CONNECTED);
+      this.publishConnectedEvent();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      // Update state to error
-      this.updateState(AdapterState.ERROR);
-      
-      // Then back to disconnected after a delay
-      setTimeout(() => this.updateState(AdapterState.DISCONNECTED), 1000);
-      
-      // Publish error event
-      this.eventBus.publish(createEvent(
-        AdapterEventSchema,
-        {
-          type: EventType.ADAPTER_ERROR,
-          source: this.adapterId,
-          adapterId: this.adapterId,
-          state: AdapterState.ERROR,
-          error: errorMessage,
-        }
-      ));
-      
-      throw new Error(`Failed to connect to ${this.displayName}: ${errorMessage}`);
+      console.error(`Error connecting ${this.adapterId}:`, error);
+      this.setState(AdapterState.ERROR);
+      this.publishErrorEvent(error);
     }
   }
   
   /**
+   * Implementation specific connect logic
+   */
+  protected abstract connectImpl(): Promise<void>;
+  
+  /**
    * Disconnect from the service
+   * This is the public API that wraps the concrete implementation
    */
   public async disconnect(): Promise<void> {
-    // Only disconnect if connected
-    if (this.state !== AdapterState.CONNECTED) {
+    if (!this.isConnected()) {
+      console.log(`${this.adapterId} is already disconnected`);
       return;
     }
     
     try {
-      // Call the concrete implementation
       await this.disconnectImpl();
-      
-      // Update state to disconnected
-      this.updateState(AdapterState.DISCONNECTED);
-      
-      // Publish disconnection event
-      this.eventBus.publish(createEvent(
-        AdapterEventSchema,
-        {
-          type: EventType.ADAPTER_DISCONNECTED,
-          source: this.adapterId,
-          adapterId: this.adapterId,
-          state: AdapterState.DISCONNECTED,
-        }
-      ));
+      this.setState(AdapterState.DISCONNECTED);
+      this.publishDisconnectedEvent();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      // Update state to error
-      this.updateState(AdapterState.ERROR);
-      
-      // Then back to disconnected after a delay
-      setTimeout(() => this.updateState(AdapterState.DISCONNECTED), 1000);
-      
-      // Publish error event
-      this.eventBus.publish(createEvent(
-        AdapterEventSchema,
-        {
-          type: EventType.ADAPTER_ERROR,
-          source: this.adapterId,
-          adapterId: this.adapterId,
-          state: AdapterState.ERROR,
-          error: errorMessage,
-        }
-      ));
-      
-      throw new Error(`Failed to disconnect from ${this.displayName}: ${errorMessage}`);
+      console.error(`Error disconnecting ${this.adapterId}:`, error);
+      this.setState(AdapterState.ERROR);
+      this.publishErrorEvent(error);
     }
   }
+  
+  /**
+   * Implementation specific disconnect logic
+   */
+  protected abstract disconnectImpl(): Promise<void>;
   
   /**
    * Update adapter configuration
    */
-  public updateConfig(config: Partial<T>): void {
+  public updateConfig(configUpdate: Partial<T>): void {
     try {
-      // Merge with current config
-      const newConfig = {
+      // Merge with existing config
+      const updatedConfig = {
         ...this.configValue,
-        ...config,
+        ...configUpdate,
       };
       
-      // Validate new config
-      this.configValue = this.configSchema.parse(newConfig);
+      // Validate
+      this.configValue = this.configSchema.parse(updatedConfig);
       
-      // Reconnect if necessary
-      this.handleConfigChange();
+      console.log(`${this.adapterId} config updated:`, this.configValue);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`Invalid configuration for adapter ${this.adapterId}:`, errorMessage);
-      throw new Error(`Invalid configuration: ${errorMessage}`);
+      console.error(`Error updating ${this.adapterId} config:`, error);
+      throw new Error(`Failed to update ${this.adapterId} config: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   
   /**
-   * Check if adapter is currently connected
+   * Check if adapter is connected
    */
   public isConnected(): boolean {
     return this.state === AdapterState.CONNECTED;
   }
   
   /**
-   * Destroy the adapter and clean up resources
+   * Clean up adapter resources
    */
   public destroy(): void {
     // Disconnect if connected
     if (this.isConnected()) {
       this.disconnect().catch(err => {
-        console.error(`Error disconnecting adapter ${this.adapterId}:`, err);
+        console.error(`Error disconnecting ${this.adapterId} during destroy:`, err);
       });
     }
     
-    // Complete destroy subject
+    // Complete destroy$ subject to notify subscribers
     this.destroy$.next();
     this.destroy$.complete();
-    
-    // Call concrete implementation
-    this.destroyImpl();
   }
   
   /**
-   * Update the adapter state
+   * Set adapter state
    */
-  protected updateState(state: AdapterState): void {
-    this.stateSubject.next(state);
-  }
-  
-  /**
-   * Handle configuration changes
-   */
-  protected handleConfigChange(): void {
-    // Default implementation - concrete adapters can override
-    if (this.isConnected() && !this.config.enabled) {
-      // Disconnect if disabled
-      this.disconnect().catch(err => {
-        console.error(`Error disconnecting adapter ${this.adapterId}:`, err);
-      });
-    } else if (!this.isConnected() && this.config.enabled && this.config.autoConnect) {
-      // Connect if enabled and auto-connect
-      this.connect().catch(err => {
-        console.error(`Error connecting adapter ${this.adapterId}:`, err);
-      });
+  protected setState(state: AdapterState): void {
+    if (this.state !== state) {
+      this.stateSubject.next(state);
     }
   }
   
   /**
-   * Get the destroy observable
+   * Publish connected event
    */
-  protected get destroyed$(): Observable<void> {
-    return this.destroy$.asObservable();
+  protected publishConnectedEvent(): void {
+    const eventBus = EventBus.getInstance();
+    
+    eventBus.publish(createEvent(
+      BaseEventSchema,
+      {
+        type: EventType.ADAPTER_CONNECTED,
+        source: this.adapterId,
+        adapterId: this.adapterId,
+        data: {
+          displayName: this.displayName
+        }
+      }
+    ));
   }
   
   /**
-   * Concrete implementation of connect
+   * Publish disconnected event
    */
-  protected abstract connectImpl(): Promise<void>;
+  protected publishDisconnectedEvent(): void {
+    const eventBus = EventBus.getInstance();
+    
+    eventBus.publish(createEvent(
+      BaseEventSchema,
+      {
+        type: EventType.ADAPTER_DISCONNECTED,
+        source: this.adapterId,
+        adapterId: this.adapterId,
+        data: {
+          displayName: this.displayName
+        }
+      }
+    ));
+  }
   
   /**
-   * Concrete implementation of disconnect
+   * Publish error event
    */
-  protected abstract disconnectImpl(): Promise<void>;
-  
-  /**
-   * Concrete implementation of destroy
-   */
-  protected abstract destroyImpl(): void;
+  protected publishErrorEvent(error: unknown): void {
+    const eventBus = EventBus.getInstance();
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    eventBus.publish(createEvent(
+      BaseEventSchema,
+      {
+        type: EventType.ADAPTER_ERROR,
+        source: this.adapterId,
+        adapterId: this.adapterId,
+        data: {
+          error: errorMessage,
+          displayName: this.displayName
+        }
+      }
+    ));
+  }
 }

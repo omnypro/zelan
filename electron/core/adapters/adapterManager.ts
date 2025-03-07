@@ -1,6 +1,5 @@
 import { BehaviorSubject, Observable, map } from 'rxjs';
-import { AdapterConfig, AdapterState, ServiceAdapter } from './types';
-import { EventBus, EventType, createEvent } from '~/core/events';
+import { ServiceAdapter } from './types';
 
 /**
  * AdapterManager manages the lifecycle of all adapters in the system
@@ -9,7 +8,6 @@ export class AdapterManager {
   private static instance: AdapterManager;
   private adapters: Map<string, ServiceAdapter> = new Map();
   private adaptersSubject: BehaviorSubject<Map<string, ServiceAdapter>> = new BehaviorSubject(new Map());
-  private eventBus: EventBus = EventBus.getInstance();
   
   private constructor() {
     // Initialize

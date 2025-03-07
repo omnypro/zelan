@@ -1,13 +1,23 @@
-// Re-export from electron implementation
-export type { Token } from '~/core/auth';
-export { 
-  TokenSchema,
-  AuthState,
-  AuthProvider,
-  AuthService,
+// This file is now deprecated - import from @shared/types instead
+import { TokenManager } from './tokenManager';
+import { 
+  AuthState, 
+  AuthProvider, 
+  AuthEventSchema, 
   AuthEvent,
-  AuthEventSchema
-} from '~/core/auth';
+  TokenSchema,
+  Token
+} from '@shared/types';
 
-// Still need the tokenManager from renderer for UI
-export * from './tokenManager';
+// Re-export for backward compatibility
+export { TokenManager };
+export { 
+  AuthState, 
+  AuthProvider, 
+  AuthEventSchema,
+  TokenSchema
+};
+export type { 
+  AuthEvent,
+  Token
+};

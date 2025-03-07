@@ -1,4 +1,5 @@
-import { TokenStore, TokenSchema, Token } from '~/store/tokenStore';
+import { TokenStore } from '~/store/tokenStore';
+import { TokenSchema, Token } from '@shared/types';
 
 /**
  * TokenManager handles secure storage and retrieval of authentication tokens

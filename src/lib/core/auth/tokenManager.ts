@@ -1,5 +1,4 @@
-// Import TokenSchema and Token types from electron implementation for consistency
-import { TokenSchema, Token } from '~/core/auth';
+import { TokenSchema, Token } from '@shared/types';
 
 /**
  * TokenManager handles secure storage and retrieval of authentication tokens
