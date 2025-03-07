@@ -3,11 +3,12 @@ import Versions from './components/Versions'
 import EventsDemo from './components/EventsDemo'
 import AdapterStatus from './components/AdapterStatus'
 import Settings from './components/Settings'
+import { TrpcDemo } from './components/TrpcDemo'
 import electronLogo from './assets/electron.svg'
 import './assets/main.css'
 
 function App(): JSX.Element {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'settings'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'settings' | 'trpc'>('dashboard')
 
   const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
 
@@ -61,6 +62,18 @@ function App(): JSX.Element {
                 Settings
               </button>
             </li>
+            <li>
+              <button
+                className={`w-full text-left px-4 py-2 ${
+                  activeTab === 'trpc' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setActiveTab('trpc')}
+              >
+                tRPC Demo
+              </button>
+            </li>
           </ul>
           
           <div className="mt-auto p-4 text-xs text-gray-400">
@@ -103,6 +116,8 @@ function App(): JSX.Element {
           {activeTab === 'events' && <EventsDemo />}
           
           {activeTab === 'settings' && <Settings />}
+          
+          {activeTab === 'trpc' && <TrpcDemo />}
         </main>
       </div>
     </div>

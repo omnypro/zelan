@@ -1,6 +1,8 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import { Observable } from 'rxjs'
 import { AppConfig, ConfigChangeEvent } from '../shared/core/config'
+import type { AppRouter } from '../shared/trpc'
+import type { inferRouterProxyClient } from '@trpc/client'
 
 /**
  * Event API for the renderer process
@@ -94,5 +96,6 @@ declare global {
   interface Window {
     electron: ElectronAPI
     api: API
+    trpc: inferRouterProxyClient<AppRouter>
   }
 }

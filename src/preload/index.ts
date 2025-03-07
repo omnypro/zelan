@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { Observable, fromEvent } from 'rxjs'
 import { map, filter, share } from 'rxjs/operators'
 import { AppConfig, ConfigChangeEvent } from '../shared/core/config'
+import { trpcClient } from './trpc'
 
 // IPC channels
 const EVENT_CHANNEL = 'zelan:event'
@@ -204,6 +205,8 @@ if (process.contextIsolated) {
       events: eventAPI,
       config: configAPI
     })
+    console.log('Exposing tRPC client to main world:', !!trpcClient)
+    contextBridge.exposeInMainWorld('trpc', trpcClient)
   } catch (error) {
     console.error(error)
   }
@@ -215,4 +218,6 @@ if (process.contextIsolated) {
     events: eventAPI,
     config: configAPI
   }
+  // @ts-ignore (define in dts)
+  window.trpc = trpcClient
 }

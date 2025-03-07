@@ -10,6 +10,7 @@ import { AdapterRegistry } from '../shared/adapters';
 import { TestAdapterFactory } from './adapters';
 import { createConfigStore, getConfigStore } from '../shared/core/config';
 import { SystemStartupEvent } from '../shared/core/events';
+import { setupTRPCServer } from './trpc';
 
 // Global references
 let mainWindow: BrowserWindow | null = null;
@@ -225,8 +226,24 @@ app.whenReady().then(async () => {
     // Initialize services
     await initializeServices();
     
-    // Setup config IPC handlers
+    // Setup config IPC handlers (legacy)
     setupConfigIpc();
+    
+    // Setup tRPC server
+    if (mainEventBus && adapterManager) {
+      console.log('Setting up tRPC server...');
+      try {
+        setupTRPCServer(mainEventBus, adapterManager);
+        console.log('tRPC server setup completed successfully');
+      } catch (error) {
+        console.error('Error setting up tRPC server:', error);
+      }
+    } else {
+      console.error('Cannot set up tRPC server: missing dependencies', {
+        mainEventBus: !!mainEventBus,
+        adapterManager: !!adapterManager
+      });
+    }
     
     // IPC test
     ipcMain.on('ping', () => console.log('pong'))
