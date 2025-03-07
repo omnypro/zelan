@@ -27,6 +27,7 @@
     "@tailwindcss/postcss": "^4.0.12",
     "electron-updater": "^6.3.9",
     "postcss": "^8.5.3",
+    "rxjs": "^7.8.2",
     "tailwindcss": "^4.0.12"
   },
   "devDependencies": {
