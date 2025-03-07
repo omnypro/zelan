@@ -2,8 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { initializeMainProcess, shutdownMainProcess } from '~/core/bootstrap'
-import { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
-import type { AppRouter } from '~/trpc/router'
+import type { AppRouter } from '~/trpc/server/router'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -20,12 +19,6 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 
 let win: BrowserWindow | null
 let coreInitialized = false
-
-// Define types for tRPC router - these will be used in the future
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-type RouterInput = inferRouterInputs<AppRouter>
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-type RouterOutput = inferRouterOutputs<AppRouter>
 
 // Initialize the core services
 async function initializeCore() {
@@ -217,7 +210,8 @@ const handlers = {
 
   // Auth handlers
   getAuthState: async (serviceId: string) => {
-    const { AuthService, AuthState } = await import('~/core/auth')
+    const { AuthService } = await import('~/core/auth')
+    const { AuthState } = await import('@shared/types/auth')
     const authService = AuthService.getInstance()
 
     return {

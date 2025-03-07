@@ -4,7 +4,7 @@ import type { AdapterStatus, OperationResult, WebSocketStatus, AuthState, Events
 // --------- Expose tRPC bridge to the Renderer process ---------
 contextBridge.exposeInMainWorld('trpcBridge', {
   // Generic tRPC request handler
-  request: async (path: string, type: 'query' | 'mutation', input: unknown) => {
+  request: async (path: string, type: 'query' | 'mutation', input: unknown): Promise<unknown> => {
     return ipcRenderer.invoke('trpc', { path, type, input })
   }
 })

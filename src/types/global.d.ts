@@ -45,6 +45,6 @@ interface Window {
   
   // tRPC bridge
   trpcBridge?: {
-    request: (path: string, type: 'query' | 'mutation' | 'subscription', input: unknown) => Promise<any>;
+    request: (path: string, type: 'query' | 'mutation', input: unknown) => Promise<unknown>;
   };
 }
