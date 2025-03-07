@@ -9,7 +9,7 @@ type AdapterSettings = Record<string, unknown>;
  * Uses tRPC to communicate with the main process
  */
 export function useAdapterSettings(adapterId: string) {
-  const { client, isAvailable } = useTrpc();
+  const { client } = useTrpc();
   const [settings, setSettings] = useState<AdapterSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -1,5 +1,5 @@
 import { BehaviorSubject, Observable, map } from 'rxjs';
-import { ServiceAdapter } from './types';
+import { ServiceAdapter } from '@shared/types';
 
 /**
  * AdapterManager manages the lifecycle of all adapters in the system
@@ -87,7 +87,7 @@ export class AdapterManager {
   public async connectAll(): Promise<void> {
     const connectPromises = this.getAllAdapters()
       .filter(adapter => adapter.config.enabled)
-      .map(adapter => adapter.connect().catch(err => {
+      .map(adapter => adapter.connect().catch((err: unknown) => {
         console.error(`Error connecting adapter ${adapter.adapterId}:`, err);
       }));
     
@@ -99,7 +99,7 @@ export class AdapterManager {
    */
   public async disconnectAll(): Promise<void> {
     const disconnectPromises = this.getAllAdapters()
-      .map(adapter => adapter.disconnect().catch(err => {
+      .map(adapter => adapter.disconnect().catch((err: unknown) => {
         console.error(`Error disconnecting adapter ${adapter.adapterId}:`, err);
       }));
     

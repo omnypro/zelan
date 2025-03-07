@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Base event schema that all events must follow
@@ -56,4 +57,20 @@ export enum ObsEventType {
   SOURCE_ACTIVATED = 'obs.source.activated',
   SOURCE_DEACTIVATED = 'obs.source.deactivated',
   CONNECTION_STATUS = 'obs.connection.status',
+}
+
+/**
+ * Creates a typed, validated event
+ */
+export function createEvent<T extends z.ZodType>(
+  schema: T,
+  data: Partial<BaseEvent> & { type: string; source: string }
+): z.infer<T> & BaseEvent {
+  const event = {
+    id: uuidv4(), // Using uuid instead of random string 
+    timestamp: Date.now(),
+    ...data,
+  };
+  
+  return schema.parse(event) as z.infer<T> & BaseEvent;
 }

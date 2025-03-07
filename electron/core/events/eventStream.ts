@@ -1,5 +1,5 @@
 import { Observable, Subject, takeUntil, filter, share, map } from 'rxjs';
-import { BaseEvent } from './types';
+import { BaseEvent } from '@shared/types';
 import { EventBus } from './eventBus';
 
 /**
@@ -67,8 +67,8 @@ export class EventStream<T extends BaseEvent> {
   /**
    * Apply a custom transformation pipeline
    */
-  public pipe<R>(operators: any[]): Observable<R> {
-    return this.stream$.pipe.apply(this.stream$, operators);
+  public pipe<R>(op1: any, ...operations: any[]): Observable<R> {
+    return this.stream$.pipe(op1, ...operations) as Observable<R>;
   }
   
   /**

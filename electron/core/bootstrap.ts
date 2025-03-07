@@ -4,7 +4,8 @@ import { UserDataManager } from './config/userDataManager';
 import { WebSocketServer } from './websocket';
 import { TokenManager, AuthService } from './auth';
 import { ConfigStore, AdapterSettingsStore, UserDataStore, TokenStore } from '~/store';
-import { EventBus, EventType, createEvent, BaseEventSchema, EventCache } from './events';
+import { EventBus, EventCache } from './events';
+import { EventType, BaseEventSchema, createEvent } from '@shared/types';
 import { AdapterManager, TestAdapter, ObsAdapter } from './adapters';
 
 /**

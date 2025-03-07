@@ -1,8 +1,7 @@
 import { interval, Subscription, takeUntil } from 'rxjs';
 import { z } from 'zod';
 import { BaseAdapter } from './baseAdapter';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '../events';
-import { AdapterConfig } from './types';
+import { EventBus, createEvent, BaseEventSchema } from '../events';
 
 /**
  * Test event schemas for generating sample events
@@ -157,9 +156,11 @@ export class TestAdapter extends BaseAdapter<TestAdapterConfig> {
       {
         type: 'test.event',
         source: this.adapterId,
-        testId: `test-${this.eventCount}`,
-        value: Math.floor(Math.random() * 100),
-        message: `Test event ${this.eventCount}`,
+        data: {
+          testId: `test-${this.eventCount}`,
+          value: Math.floor(Math.random() * 100),
+          message: `Test event ${this.eventCount}`
+        }
       }
     );
     

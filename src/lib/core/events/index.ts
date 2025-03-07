@@ -1,18 +1,14 @@
-// Re-export event types from electron implementation
+// Import event types from shared
 export type {
   BaseEvent
-} from '~/core/events/types';
+} from '@shared/types';
 
-// Re-export event enums and utils from electron implementation
+// Import event types, enums, schemas, and utilities from shared types
 export { 
   EventType,
+  BaseEventSchema,
   createEvent
-} from '~/core/events/types';
-
-// Re-export schemas from electron implementation
-export {
-  BaseEventSchema
-} from '~/core/events/types';
+} from '@shared/types';
 
 // Still need the event stream component from renderer
 export * from './eventStream';

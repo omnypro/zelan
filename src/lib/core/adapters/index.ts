@@ -1,9 +1,9 @@
-// Re-export adapter types from electron implementation for renderer usage
+// Import adapter types from shared types
 export type { 
   AdapterConfig, 
   AdapterState, 
   ServiceAdapter 
-} from '~/core/adapters/types';
+} from '@shared/types';
 
 // Re-export adapter events and other types
 export type { 

@@ -137,7 +137,8 @@ export function useElectronAPI() {
     return window.zelan.config.updateUserData(data);
   }, [isElectron]);
 
-  return {
+  // Create standard return object
+  const api = {
     isElectron,
     adapters: {
       getStatus: getAdapterStatus,
@@ -171,4 +172,7 @@ export function useElectronAPI() {
       updateUserData,
     },
   };
+
+  // Return the API
+  return api;
 }

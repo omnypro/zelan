@@ -1,19 +1,11 @@
 import { BehaviorSubject, Observable, timer, Subscription } from 'rxjs';
-import { TokenManager, Token } from './tokenManager';
-import { EventBus, EventType, createEvent, BaseEventSchema } from '../events';
+import { TokenManager } from './tokenManager';
+import { Token } from '@shared/types';
+import { EventBus, EventType, createEvent } from '../events';
+import { AuthEventSchema, AuthState } from '@shared/types';
 import { z } from 'zod';
 
-/**
- * Authentication state enum
- */
-export enum AuthState {
-  UNKNOWN = 'unknown',
-  UNAUTHENTICATED = 'unauthenticated',
-  AUTHENTICATING = 'authenticating',
-  AUTHENTICATED = 'authenticated',
-  REFRESHING = 'refreshing',
-  ERROR = 'error',
-}
+// Authentication state now imported from @shared/types
 
 /**
  * Auth provider interface that all service-specific auth providers must implement
@@ -25,16 +17,7 @@ export interface AuthProvider {
   revokeToken(token: Token): Promise<void>;
 }
 
-/**
- * Auth event schema built on top of the base event
- */
-export const AuthEventSchema = BaseEventSchema.extend({
-  serviceId: z.string(),
-  state: z.nativeEnum(AuthState),
-  error: z.string().optional(),
-});
-
-export type AuthEvent = z.infer<typeof AuthEventSchema>;
+// Auth event schema now imported from @shared/types
 
 /**
  * AuthService manages the authentication state and lifecycle
@@ -103,8 +86,10 @@ export class AuthService {
         {
           type: EventType.AUTH_STARTED,
           source: 'auth-service',
-          serviceId,
-          state: AuthState.AUTHENTICATING,
+          data: {
+            serviceId,
+            state: AuthState.AUTHENTICATING
+          }
         }
       ));
       
@@ -124,9 +109,11 @@ export class AuthService {
         {
           type: EventType.AUTH_FAILED,
           source: 'auth-service',
-          serviceId,
-          state: AuthState.ERROR,
-          error: errorMessage,
+          data: {
+            serviceId,
+            state: AuthState.ERROR,
+            error: errorMessage
+          }
         }
       ));
       
@@ -152,8 +139,10 @@ export class AuthService {
         {
           type: EventType.AUTH_COMPLETED,
           source: 'auth-service',
-          serviceId,
-          state: AuthState.AUTHENTICATED,
+          data: {
+            serviceId,
+            state: AuthState.AUTHENTICATED
+          }
         }
       ));
       
@@ -173,9 +162,11 @@ export class AuthService {
         {
           type: EventType.AUTH_FAILED,
           source: 'auth-service',
-          serviceId,
-          state: AuthState.ERROR,
-          error: errorMessage,
+          data: {
+            serviceId,
+            state: AuthState.ERROR,
+            error: errorMessage
+          }
         }
       ));
     }

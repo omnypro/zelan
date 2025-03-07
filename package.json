@@ -31,12 +31,14 @@
     "tailwindcss": "^4.0.9",
     "tailwindcss-animate": "^1.0.7",
     "utf-8-validate": "^6.0.5",
+    "uuid": "^11.1.0",
     "ws": "^8.15.0"
   },
   "devDependencies": {
     "@tanstack/store": "^0.7.0",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
+    "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^7.1.1",
     "@typescript-eslint/parser": "^7.1.1",

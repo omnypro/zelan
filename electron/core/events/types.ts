@@ -1,18 +1,7 @@
-// This file is now deprecated - import from @shared/types instead
-import { 
-  BaseEventSchema, 
-  BaseEvent, 
-  EventType 
-} from '@shared/types';
+// Export createEvent utility without re-exporting types
+import { BaseEvent, BaseEventSchema } from '@shared/types';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
-
-// Re-export for backward compatibility
-export { 
-  BaseEventSchema, 
-  BaseEvent, 
-  EventType 
-};
 
 /**
  * Creates a typed, validated event

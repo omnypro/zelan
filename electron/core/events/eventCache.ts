@@ -1,4 +1,4 @@
-import { BaseEvent } from './types'
+import { BaseEvent } from '@shared/types'
 import { EventBus } from './eventBus'
 import { ConfigManager } from '~/core/config/configManager'
 

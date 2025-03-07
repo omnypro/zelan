@@ -1,5 +1,5 @@
 import { Subject, Observable, filter, share } from 'rxjs';
-import { BaseEvent, BaseEventSchema } from './types';
+import { BaseEvent, BaseEventSchema } from '@shared/types';
 
 /**
  * EventBus - Central messaging system for the main process
