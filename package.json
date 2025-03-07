@@ -1,7 +1,7 @@
 {
-  "name": "my-new-app",
-  "productName": "my-new-app",
-  "version": "1.0.0",
+  "name": "zelan",
+  "productName": "Zelan",
+  "version": "0.1.0",
   "description": "My Electron application description",
   "main": ".vite/build/main.js",
   "scripts": {
@@ -9,7 +9,9 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "eslint --ext .ts,.tsx ."
+    "lint": "eslint --ext .ts,.tsx .",
+    "format": "prettier --check .",
+    "format:write": "prettier --write ."    
   },
   "keywords": [],
   "author": {
@@ -27,16 +29,31 @@
     "@electron-forge/plugin-fuses": "^7.7.0",
     "@electron-forge/plugin-vite": "^7.7.0",
     "@electron/fuses": "^1.8.0",
-    "@typescript-eslint/eslint-plugin": "^5.62.0",
-    "@typescript-eslint/parser": "^5.62.0",
+    "@tailwindcss/postcss": "^4.0.6",
+    "@types/electron-squirrel-startup": "^1.0.2",
+    "@types/eslint-config-prettier": "^6.11.3",
+    "@types/node": "^22.13.5",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.3",
     "electron": "35.0.0",
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.31.0",
+    "prettier": "^3.5.0",
+    "prettier-plugin-tailwindcss": "^0.6.11",
+    "tailwindcss": "^4.0.0",
     "ts-node": "^10.9.2",
     "typescript": "~4.5.4",
     "vite": "^5.4.14"
   },
   "dependencies": {
-    "electron-squirrel-startup": "^1.0.1"
+    "@tanstack/react-query": "^5.66.0",
+    "@tanstack/react-router": "^1.99.0",
+    "@tanstack/router-devtools": "^1.99.0",    
+    "electron-squirrel-startup": "^1.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.0.1",
+    "tailwindcss-animate": "^1.0.7",
+    "zod": "^3.24.2"    
   }
 }
