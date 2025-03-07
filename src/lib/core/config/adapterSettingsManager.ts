@@ -1,5 +1,16 @@
-import Store from 'electron-store';
+import { isRenderer } from '../../utils';
 import { z } from 'zod';
+
+// Only import electron-store in the main process
+let Store: any;
+if (!isRenderer()) {
+  // Use dynamic import for ES modules compatibility
+  import('electron-store').then(module => {
+    Store = module.default;
+  }).catch(err => {
+    console.error('Failed to import electron-store:', err);
+  });
+}
 
 /**
  * Base schema for all adapter settings
@@ -72,39 +83,53 @@ export class AdapterSettingsManager {
   private store: Store<z.infer<typeof AdapterSettingsStoreSchema>>;
   
   private constructor() {
-    this.store = new Store({
-      name: 'adapter-settings',
-      // Default settings for built-in adapters
-      defaults: {
-        'twitch-adapter': {
-          enabled: false,
-          autoConnect: false,
-          name: 'Twitch',
-          id: 'twitch-adapter',
-          channel: '',
-          clientId: '',
-          redirectUri: 'http://localhost',
-          scopes: ['channel:read:subscriptions', 'channel:read:redemptions'],
+    if (isRenderer()) {
+      console.warn('AdapterSettingsManager instantiated in renderer process');
+      return;
+    }
+    
+    // Initialize with empty store
+    this.store = {} as any;
+    
+    // Import dynamically and initialize
+    import('electron-store').then(StoreModule => {
+      const Store = StoreModule.default;
+      this.store = new Store({
+        name: 'adapter-settings',
+        // Default settings for built-in adapters
+        defaults: {
+          'twitch-adapter': {
+            enabled: false,
+            autoConnect: false,
+            name: 'Twitch',
+            id: 'twitch-adapter',
+            channel: '',
+            clientId: '',
+            redirectUri: 'http://localhost',
+            scopes: ['channel:read:subscriptions', 'channel:read:redemptions'],
+          },
+          'obs-adapter': {
+            enabled: false,
+            autoConnect: false,
+            name: 'OBS Studio',
+            id: 'obs-adapter',
+            host: 'localhost',
+            port: 4455,
+            secure: false,
+          },
+          'test-adapter': {
+            enabled: true,
+            autoConnect: false,
+            name: 'Test Adapter',
+            id: 'test-adapter',
+            interval: 2000,
+            generateErrors: false,
+          },
         },
-        'obs-adapter': {
-          enabled: false,
-          autoConnect: false,
-          name: 'OBS Studio',
-          id: 'obs-adapter',
-          host: 'localhost',
-          port: 4455,
-          secure: false,
-        },
-        'test-adapter': {
-          enabled: true,
-          autoConnect: false,
-          name: 'Test Adapter',
-          id: 'test-adapter',
-          interval: 2000,
-          generateErrors: false,
-        },
-      },
-    }) as Store<z.infer<typeof AdapterSettingsStoreSchema>>;
+      });
+    }).catch(err => {
+      console.error('Failed to load electron-store:', err);
+    });
   }
   
   /**

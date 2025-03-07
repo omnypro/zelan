@@ -1,197 +1,194 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTrpc } from './useTrpc';
 
-// We'll create this procedure in the tRPC router later
+// Preferences types
 interface UiPreferences {
-  theme?: 'light' | 'dark' | 'system';
-  sidebarCollapsed?: boolean;
+  theme: 'light' | 'dark' | 'system';
+  sidebarCollapsed: boolean;
   fontSize?: 'small' | 'medium' | 'large';
 }
 
 interface NotificationPreferences {
-  enabled?: boolean;
+  enabled: boolean;
   sound?: boolean;
   desktop?: boolean;
 }
 
-/**
- * Hook for managing user preferences
- */
-export function useUserPreferences() {
-  const trpc = useTrpc();
-  const [uiPreferences, setUiPreferences] = useState<UiPreferences>({
+interface UserPreferences {
+  ui: UiPreferences;
+  notifications: NotificationPreferences;
+}
+
+// Default preferences
+const defaultPreferences: UserPreferences = {
+  ui: {
     theme: 'system',
     sidebarCollapsed: false,
     fontSize: 'medium'
-  });
-  
-  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>({
+  },
+  notifications: {
     enabled: true,
     sound: true,
     desktop: true
-  });
-  
-  const [isLoading, setIsLoading] = useState(false);
+  }
+};
+
+/**
+ * Hook for managing user preferences
+ * Uses tRPC to communicate with the main process
+ */
+export function useUserPreferences() {
+  const { client } = useTrpc();
+  const [ui, setUi] = useState<UiPreferences>(defaultPreferences.ui);
+  const [notifications, setNotifications] = useState<NotificationPreferences>(defaultPreferences.notifications);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  /**
-   * Fetch user preferences from storage
-   */
+  const isMounted = useRef(true);
+
+  // Fetch preferences from backend
   const fetchPreferences = useCallback(async () => {
-    if (!trpc.client) {
-      console.error('TRPC client not available');
-      setError('TRPC client not available');
-      return null;
-    }
+    if (!client) return null;
     
     setIsLoading(true);
     setError(null);
     
     try {
-      // This will be implemented in the tRPC router later
-      // For now, we're just returning dummy data
+      const response = await client.config.getUserData.query();
       
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      const preferences = {
-        ui: {
-          theme: 'system' as const,
-          sidebarCollapsed: false,
-          fontSize: 'medium' as const
-        },
-        notifications: {
-          enabled: true,
-          sound: true,
-          desktop: true
+      if (isMounted.current) {
+        if (response.success) {
+          const data = response.data as Record<string, unknown>;
+          const userPrefs: UserPreferences = { ...defaultPreferences };
+          
+          // Extract UI preferences
+          if (data.ui && typeof data.ui === 'object') {
+            const ui = data.ui as Record<string, unknown>;
+            userPrefs.ui = {
+              ...userPrefs.ui,
+              theme: (ui.theme as 'light' | 'dark' | 'system') || userPrefs.ui.theme,
+              sidebarCollapsed: Boolean(ui.sidebarCollapsed),
+              fontSize: (ui.fontSize as 'small' | 'medium' | 'large') || userPrefs.ui.fontSize
+            };
+          }
+          
+          // Extract notification preferences
+          if (data.notifications && typeof data.notifications === 'object') {
+            const notifications = data.notifications as Record<string, unknown>;
+            userPrefs.notifications = {
+              ...userPrefs.notifications,
+              enabled: Boolean(notifications.enabled),
+              sound: Boolean(notifications.sound),
+              desktop: Boolean(notifications.desktop)
+            };
+          }
+          
+          setUi(userPrefs.ui);
+          setNotifications(userPrefs.notifications);
+          
+          return userPrefs;
+        } else {
+          setError(response.error || 'Failed to fetch preferences');
+          return null;
         }
-      };
-      
-      setUiPreferences(preferences.ui);
-      setNotificationPreferences(preferences.notifications);
-      
-      return preferences;
+      }
     } catch (error) {
-      console.error('Error fetching user preferences:', error);
-      const message = error instanceof Error ? error.message : 'Failed to fetch user preferences';
-      setError(message);
+      if (isMounted.current) {
+        console.error('Error fetching preferences:', error);
+        setError(error instanceof Error ? error.message : 'Failed to fetch preferences');
+      }
       return null;
     } finally {
-      setIsLoading(false);
+      if (isMounted.current) {
+        setIsLoading(false);
+      }
     }
-  }, [trpc.client]);
-  
-  /**
-   * Update UI preferences
-   */
-  const updateUiPreferences = useCallback(async (preferences: Partial<UiPreferences>) => {
-    if (!trpc.client) {
-      console.error('TRPC client not available');
-      setError('TRPC client not available');
-      return false;
-    }
+  }, [client]);
+
+  // Update UI preferences
+  const updateUiPreferences = useCallback(async (newPreferences: Partial<UiPreferences>) => {
+    if (!client) return false;
     
-    setIsLoading(true);
-    setError(null);
+    // Optimistic update
+    const updatedUi = { ...ui, ...newPreferences };
+    setUi(updatedUi);
     
     try {
-      // This will be implemented in the tRPC router later
-      // For now, we're just updating the local state
+      const result = await client.config.updateUserData.mutate({
+        ui: newPreferences
+      });
       
-      setUiPreferences(prev => ({
-        ...prev,
-        ...preferences
-      }));
+      if (!result.success) {
+        fetchPreferences(); // Revert on error
+      }
       
-      return true;
+      return result.success;
     } catch (error) {
       console.error('Error updating UI preferences:', error);
-      const message = error instanceof Error ? error.message : 'Failed to update UI preferences';
-      setError(message);
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [trpc.client]);
-  
-  /**
-   * Update notification preferences
-   */
-  const updateNotificationPreferences = useCallback(async (preferences: Partial<NotificationPreferences>) => {
-    if (!trpc.client) {
-      console.error('TRPC client not available');
-      setError('TRPC client not available');
+      fetchPreferences(); // Revert on error
       return false;
     }
+  }, [client, ui, fetchPreferences]);
+
+  // Update notification preferences
+  const updateNotificationPreferences = useCallback(async (newPreferences: Partial<NotificationPreferences>) => {
+    if (!client) return false;
     
-    setIsLoading(true);
-    setError(null);
+    // Optimistic update
+    const updatedNotifications = { ...notifications, ...newPreferences };
+    setNotifications(updatedNotifications);
     
     try {
-      // This will be implemented in the tRPC router later
-      // For now, we're just updating the local state
+      const result = await client.config.updateUserData.mutate({
+        notifications: newPreferences
+      });
       
-      setNotificationPreferences(prev => ({
-        ...prev,
-        ...preferences
-      }));
+      if (!result.success) {
+        fetchPreferences(); // Revert on error
+      }
       
-      return true;
+      return result.success;
     } catch (error) {
       console.error('Error updating notification preferences:', error);
-      const message = error instanceof Error ? error.message : 'Failed to update notification preferences';
-      setError(message);
+      fetchPreferences(); // Revert on error
       return false;
-    } finally {
-      setIsLoading(false);
     }
-  }, [trpc.client]);
-  
-  /**
-   * Set theme preference
-   */
+  }, [client, notifications, fetchPreferences]);
+
+  // Helper methods
   const setTheme = useCallback((theme: 'light' | 'dark' | 'system') => {
     return updateUiPreferences({ theme });
   }, [updateUiPreferences]);
-  
-  /**
-   * Toggle sidebar collapsed state
-   */
+
   const toggleSidebar = useCallback(() => {
-    return updateUiPreferences({ sidebarCollapsed: !uiPreferences.sidebarCollapsed });
-  }, [updateUiPreferences, uiPreferences.sidebarCollapsed]);
-  
-  /**
-   * Set font size
-   */
-  const setFontSize = useCallback((fontSize: 'small' | 'medium' | 'large') => {
-    return updateUiPreferences({ fontSize });
-  }, [updateUiPreferences]);
-  
-  /**
-   * Toggle notifications
-   */
+    return updateUiPreferences({ sidebarCollapsed: !ui.sidebarCollapsed });
+  }, [ui.sidebarCollapsed, updateUiPreferences]);
+
   const toggleNotifications = useCallback(() => {
-    return updateNotificationPreferences({ enabled: !notificationPreferences.enabled });
-  }, [updateNotificationPreferences, notificationPreferences.enabled]);
-  
-  // Fetch preferences on mount
+    return updateNotificationPreferences({ enabled: !notifications.enabled });
+  }, [notifications.enabled, updateNotificationPreferences]);
+
+  // Fetch on mount
   useEffect(() => {
-    if (trpc.client) {
+    isMounted.current = true;
+    
+    if (client) {
       fetchPreferences();
     }
-  }, [trpc.client, fetchPreferences]);
-  
+    
+    return () => {
+      isMounted.current = false;
+    };
+  }, [client, fetchPreferences]);
+
   return {
-    ui: uiPreferences,
-    notifications: notificationPreferences,
+    ui,
+    notifications,
     isLoading,
     error,
     updateUiPreferences,
     updateNotificationPreferences,
     setTheme,
     toggleSidebar,
-    setFontSize,
     toggleNotifications
   };
 }

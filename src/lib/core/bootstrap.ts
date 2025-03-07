@@ -3,7 +3,7 @@ import { AdapterManager } from './adapters'
 import { TestAdapter, ObsAdapter } from './adapters'
 import { WebSocketServer } from './websocket'
 import { AuthService } from './auth'
-import { ConfigManager, AdapterSettingsManager, UserDataManager } from './config'
+import { ConfigStore, AdapterSettingsStore, UserDataStore } from '../../../electron/store'
 
 /**
  * Bootstrap the application core
@@ -18,9 +18,9 @@ export async function bootstrap(config: {
   initTrpc?: boolean
 }) {
   // Initialize configuration and persistence layer first
-  const configManager = ConfigManager.getInstance()
-  const adapterSettingsManager = AdapterSettingsManager.getInstance()
-  const userDataManager = UserDataManager.getInstance()
+  const configStore = ConfigStore.getInstance()
+  const adapterSettingsStore = AdapterSettingsStore.getInstance()
+  const userDataStore = UserDataStore.getInstance()
   console.log('Configuration and persistence layer initialized')
   
   // Get instances of core services
@@ -44,28 +44,64 @@ export async function bootstrap(config: {
   // Add test adapter if enabled
   if (config.enableTestAdapter) {
     console.log('Enabling test adapter')
-    const testAdapter = new TestAdapter({
+    
+    let testConfig = {
       interval: 2000,
       generateErrors: false
-    })
-
-    adapterManager.registerAdapter(testAdapter)
+    };
+    
+    // Try to load settings
+    try {
+      const savedSettings = adapterSettingsStore.getSettings('test-adapter');
+      if (savedSettings) {
+        console.log('Using saved test adapter settings');
+        testConfig = {
+          ...testConfig,
+          ...savedSettings,
+        };
+      } else {
+        console.log('Using default test adapter settings');
+      }
+    } catch (error) {
+      console.warn('Could not load test adapter settings, using defaults');
+    }
+    
+    const testAdapter = new TestAdapter(testConfig);
+    adapterManager.registerAdapter(testAdapter);
   }
   
   // Add OBS adapter if enabled
   if (config.enableObsAdapter) {
     console.log('Enabling OBS adapter')
-    const obsAdapter = new ObsAdapter({
-      address: 'localhost',
+    
+    // Try to get saved settings first
+    let obsConfig = {
+      host: 'localhost',
       port: 4455,
       autoConnect: false, // Don't auto-connect until configured
       enabled: true       // Adapter is enabled but won't connect automatically
-    })
+    };
     
-    adapterManager.registerAdapter(obsAdapter)
+    // Try to load settings from settings store
+    try {
+      const savedSettings = adapterSettingsStore.getSettings('obs-adapter');
+      if (savedSettings) {
+        console.log('Using saved OBS adapter settings');
+        // Keep some defaults to ensure adapter works
+        obsConfig = {
+          ...obsConfig,
+          ...savedSettings,
+        };
+      }
+    } catch (error) {
+      console.warn('Could not load OBS adapter settings, using defaults');
+    }
+    
+    const obsAdapter = new ObsAdapter(obsConfig);
+    adapterManager.registerAdapter(obsAdapter);
     
     // Log connection parameters for debugging
-    console.log('OBS adapter initial config:', obsAdapter.config)
+    console.log('OBS adapter initial config:', obsAdapter.config);
   }
 
   // Start WebSocket server if enabled
@@ -82,9 +118,9 @@ export async function bootstrap(config: {
   // Return the initialized services
   return {
     // Configuration
-    configManager,
-    adapterSettingsManager,
-    userDataManager,
+    configStore,
+    adapterSettingsStore,
+    userDataStore,
     
     // Core services
     eventBus,

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { useAdapter } from '../lib/hooks/useAdapter'
-import { useEvents } from '../lib/hooks/useEvents'
+import { useAdapter } from '../lib/hooks'
+import { useEvents } from '../lib/hooks'
+import { useAdapterSettings } from '../lib/hooks'
 import { ObsEventType } from '../lib/core/adapters/obsAdapter'
 
 /**
@@ -15,15 +16,19 @@ export function ObsDemo() {
     kbitsPerSec: 0
   })
   
-  // Get adapter status and controls
+  // Get adapter status, settings, and controls
   const {
     status,
+    settings,
     isLoading: adapterLoading,
     error: adapterError,
     connect,
     disconnect,
-    updateConfig
+    updateSettings
   } = useAdapter('obs-adapter')
+  
+  // Get OBS adapter settings from the store
+  const obsSettings = useAdapterSettings('obs-adapter')
   
   // Get events for this adapter
   const {
@@ -60,26 +65,38 @@ export function ObsDemo() {
   }, [events])
   
   // Handle address/port config update
-  const [obsAddress, setObsAddress] = useState('localhost')
+  const [obsHost, setObsHost] = useState('localhost')
   const [obsPort, setObsPort] = useState(4455)
   const [obsPassword, setObsPassword] = useState('')
+  const [obsSecure, setObsSecure] = useState(false)
   
-  // Load config values when status is available
+  // Load config values when settings are available
   useEffect(() => {
-    if (status && status.config) {
-      setObsAddress(status.config.address || 'localhost')
+    if (settings) {
+      setObsHost(settings.host as string || 'localhost')
+      setObsPort(settings.port as number || 4455)
+      setObsPassword(settings.password as string || '')
+      setObsSecure(settings.secure as boolean || false)
+    } else if (status && status.config) {
+      // Fallback to runtime config if persisted settings not available
+      setObsHost(status.config.host || status.config.address || 'localhost')
       setObsPort(status.config.port || 4455)
       setObsPassword(status.config.password || '')
+      setObsSecure(status.config.secure || false)
     }
-  }, [status])
+  }, [settings, status])
   
-  // Update connection settings
-  const handleUpdateConfig = () => {
-    updateConfig({
-      address: obsAddress,
+  // Update connection settings - only update runtime config
+  const handleUpdateConfig = async () => {
+    // Just update the runtime config
+    await updateConfig({
+      host: obsHost,
       port: obsPort,
-      password: obsPassword || undefined
+      password: obsPassword || undefined,
+      secure: obsSecure
     })
+    
+    // Don't try to persist settings
   }
   
   // Format duration as MM:SS
@@ -109,11 +126,11 @@ export function ObsDemo() {
             <div className="connection-form">
               <div className="form-group">
                 <label>
-                  Address:
+                  Host:
                   <input
                     type="text"
-                    value={obsAddress}
-                    onChange={(e) => setObsAddress(e.target.value)}
+                    value={obsHost}
+                    onChange={(e) => setObsHost(e.target.value)}
                     placeholder="localhost"
                   />
                 </label>
@@ -140,6 +157,17 @@ export function ObsDemo() {
                     onChange={(e) => setObsPassword(e.target.value)}
                     placeholder="Optional"
                   />
+                </label>
+              </div>
+              
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={obsSecure}
+                    onChange={(e) => setObsSecure(e.target.checked)}
+                  />
+                  Use secure connection (wss://)
                 </label>
               </div>
               
@@ -321,6 +349,16 @@ export function ObsDemo() {
         label {
           display: block;
           margin-bottom: 5px;
+        }
+        
+        label.checkbox-label {
+          display: flex;
+          align-items: center;
+        }
+        
+        label.checkbox-label input {
+          width: auto;
+          margin-right: 8px;
         }
         
         input {

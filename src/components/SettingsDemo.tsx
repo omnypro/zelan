@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useAdapterSettings } from '../lib/hooks/useAdapterSettings';
-import { useUserPreferences } from '../lib/hooks/useUserPreferences';
+import { useAdapterSettings, useUserPreferences } from '../lib/hooks';
 
 /**
  * SettingsDemo - A component to demonstrate the persistence layer
  */
 export function SettingsDemo() {
-  // Get adapter settings
+  // Get adapter settings from the tanstack store
   const {
     settings: testAdapterSettings,
     isLoading: adapterLoading,
@@ -28,14 +27,12 @@ export function SettingsDemo() {
   } = useUserPreferences();
   
   // Local state for form input
-  const [interval, setInterval] = useState<number>(2000);
-  const [generateErrors, setGenerateErrors] = useState<boolean>(false);
-  
-  // Update local state when settings are loaded
+  const [intervalInput, setIntervalInput] = useState<string>("2000");
+
+  // Update local state when settings change
   useEffect(() => {
-    if (testAdapterSettings) {
-      setInterval(testAdapterSettings.interval as number || 2000);
-      setGenerateErrors(testAdapterSettings.generateErrors as boolean || false);
+    if (testAdapterSettings?.interval) {
+      setIntervalInput(String(testAdapterSettings.interval));
     }
   }, [testAdapterSettings]);
   
@@ -43,11 +40,19 @@ export function SettingsDemo() {
   const handleSaveAdapterSettings = async () => {
     if (!testAdapterSettings) return;
     
-    await updateSettings({
-      ...testAdapterSettings,
-      interval,
-      generateErrors
-    });
+    // Parse interval
+    const interval = parseInt(intervalInput);
+    if (isNaN(interval)) return;
+    
+    // Get current interval
+    const currentInterval = testAdapterSettings.interval as number || 2000;
+    
+    // Only update if changed
+    if (currentInterval !== interval) {
+      await updateSettings({
+        interval
+      });
+    }
   };
   
   return (
@@ -90,8 +95,8 @@ export function SettingsDemo() {
                   type="number"
                   min="100"
                   max="10000"
-                  value={interval}
-                  onChange={(e) => setInterval(parseInt(e.target.value))}
+                  value={intervalInput}
+                  onChange={(e) => setIntervalInput(e.target.value)}
                 />
               </label>
             </div>
@@ -100,8 +105,8 @@ export function SettingsDemo() {
               <label>
                 <input
                   type="checkbox"
-                  checked={generateErrors}
-                  onChange={(e) => setGenerateErrors(e.target.checked)}
+                  checked={testAdapterSettings?.generateErrors as boolean || false}
+                  onChange={(e) => updateSettings({ generateErrors: e.target.checked })}
                 />
                 Generate Error Events
               </label>

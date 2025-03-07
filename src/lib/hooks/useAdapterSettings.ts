@@ -1,32 +1,25 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTrpc } from './useTrpc';
 
-interface AdapterConfig {
-  [key: string]: unknown;
-}
+// Settings type
+type AdapterSettings = Record<string, unknown>;
 
 /**
- * Hook for managing adapter settings
+ * Hook for working with adapter settings
+ * Uses tRPC to communicate with the main process
  */
 export function useAdapterSettings(adapterId: string) {
-  const trpc = useTrpc();
-  const [settings, setSettings] = useState<AdapterConfig | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const { client, isAvailable } = useTrpc();
+  const [settings, setSettings] = useState<AdapterSettings | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  /**
-   * Fetch the current adapter settings
-   */
+  const isMounted = useRef(true);
+
+  // Fetch settings from backend
   const fetchSettings = useCallback(async () => {
-    if (!trpc.client) {
-      console.error('TRPC client not available');
-      setError('TRPC client not available');
-      return null;
-    }
-    
-    if (!adapterId) {
-      console.error('No adapter ID provided');
-      setError('No adapter ID provided');
+    if (!client) {
+      setIsLoading(false);
+      setError('tRPC client not available');
       return null;
     }
     
@@ -34,114 +27,97 @@ export function useAdapterSettings(adapterId: string) {
     setError(null);
     
     try {
-      const adapterStatus = await trpc.client.adapter.getStatus.query(adapterId);
+      const response = await client.config.getAdapterSettings.query(adapterId);
       
-      if (adapterStatus.status === 'not-found') {
-        setError(`Adapter ${adapterId} not found`);
-        return null;
+      if (isMounted.current) {
+        if (response.success) {
+          setSettings(response.data as AdapterSettings);
+          return response.data;
+        } else {
+          setError(response.error || 'Failed to fetch settings');
+          return null;
+        }
       }
-      
-      // Get config from adapter status
-      const config = adapterStatus.config || {};
-      setSettings(config);
-      return config;
     } catch (error) {
-      console.error(`Error fetching adapter settings for ${adapterId}:`, error);
-      const message = error instanceof Error ? error.message : 'Failed to fetch adapter settings';
-      setError(message);
+      if (isMounted.current) {
+        console.error(`Error fetching settings for ${adapterId}:`, error);
+        setError(error instanceof Error ? error.message : 'Failed to fetch settings');
+      }
       return null;
     } finally {
-      setIsLoading(false);
+      if (isMounted.current) {
+        setIsLoading(false);
+      }
     }
-  }, [trpc.client, adapterId]);
-  
-  /**
-   * Update the adapter settings
-   */
-  const updateSettings = useCallback(async (newSettings: AdapterConfig) => {
-    if (!trpc.client) {
-      console.error('TRPC client not available');
-      setError('TRPC client not available');
-      return false;
-    }
+  }, [client, adapterId]);
+
+  // Update settings
+  const updateSettings = useCallback(async (newSettings: Partial<AdapterSettings>) => {
+    if (!client) return false;
     
-    if (!adapterId) {
-      console.error('No adapter ID provided');
-      setError('No adapter ID provided');
-      return false;
+    // Optimistic update
+    if (settings) {
+      setSettings({ ...settings, ...newSettings });
     }
-    
-    setIsLoading(true);
-    setError(null);
     
     try {
-      const result = await trpc.client.adapter.updateConfig.mutate({
+      const result = await client.config.updateAdapterSettings.mutate({
         adapterId,
-        config: newSettings
+        settings: newSettings
       });
       
-      if (result.success) {
-        // Refresh settings after update
-        await fetchSettings();
-        return true;
-      } else {
-        setError(result.error || 'Failed to update adapter settings');
-        return false;
+      // If update failed, refresh settings
+      if (!result.success) {
+        fetchSettings();
       }
+      
+      return result.success;
     } catch (error) {
-      console.error(`Error updating adapter settings for ${adapterId}:`, error);
-      const message = error instanceof Error ? error.message : 'Failed to update adapter settings';
-      setError(message);
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [trpc.client, adapterId, fetchSettings]);
-  
-  /**
-   * Enable or disable the adapter
-   */
-  const setEnabled = useCallback(async (enabled: boolean) => {
-    if (!settings) {
-      console.error('No settings available');
+      console.error(`Error updating settings for ${adapterId}:`, error);
+      
+      // Revert on error by fetching fresh data
+      fetchSettings();
       return false;
     }
-    
-    return await updateSettings({
-      ...settings,
+  }, [client, adapterId, settings, fetchSettings]);
+
+  // Convenience methods
+  const setEnabled = useCallback((enabled: boolean) => {
+    if (!client) return Promise.resolve(false);
+    return client.config.setAdapterEnabled.mutate({
+      adapterId,
       enabled
-    });
-  }, [settings, updateSettings]);
-  
-  /**
-   * Set auto-connect for the adapter
-   */
-  const setAutoConnect = useCallback(async (autoConnect: boolean) => {
-    if (!settings) {
-      console.error('No settings available');
-      return false;
-    }
-    
-    return await updateSettings({
-      ...settings,
+    }).then(result => result.success);
+  }, [client, adapterId]);
+
+  const setAutoConnect = useCallback((autoConnect: boolean) => {
+    if (!client) return Promise.resolve(false);
+    return client.config.setAdapterAutoConnect.mutate({
+      adapterId,
       autoConnect
-    });
-  }, [settings, updateSettings]);
-  
-  // Fetch adapter settings on mount and when adapter ID changes
+    }).then(result => result.success);
+  }, [client, adapterId]);
+
+  // Fetch on mount
   useEffect(() => {
-    if (trpc.client && adapterId) {
+    isMounted.current = true;
+    
+    if (client) {
       fetchSettings();
     }
-  }, [trpc.client, adapterId, fetchSettings]);
-  
+    
+    return () => {
+      isMounted.current = false;
+    };
+  }, [adapterId, client, fetchSettings]);
+
   return {
     settings,
     isLoading,
     error,
-    fetchSettings,
     updateSettings,
     setEnabled,
-    setAutoConnect
+    setAutoConnect,
+    fetchSettings
   };
 }

@@ -15,7 +15,7 @@ export interface AdapterStatus {
   config: Record<string, any>;
 }
 
-export interface AdapterResult {
+export interface OperationResult {
   success: boolean;
   error?: string;
 }
@@ -25,48 +25,56 @@ export interface WebSocketStatus {
   clientCount: number;
 }
 
-export interface WebSocketResult {
-  success: boolean;
-  error?: string;
-}
-
 export interface AuthState {
   state: string;
   isAuthenticated: boolean;
-}
-
-export interface AuthResult {
-  success: boolean;
-  error?: string;
 }
 
 export interface EventsResult {
   events: any[];
 }
 
+export interface ConfigResponse {
+  success: boolean;
+  data?: Record<string, any>;
+  error?: string;
+}
+
 export interface ZelanApi {
   adapters: {
     getStatus: (adapterId: string) => Promise<AdapterStatus>;
-    connect: (adapterId: string) => Promise<AdapterResult>;
-    disconnect: (adapterId: string) => Promise<AdapterResult>;
-    updateConfig: (adapterId: string, config: any) => Promise<AdapterResult>;
+    connect: (adapterId: string) => Promise<OperationResult>;
+    disconnect: (adapterId: string) => Promise<OperationResult>;
+    updateConfig: (adapterId: string, config: any) => Promise<OperationResult>;
   };
   
   websocket: {
     getStatus: () => Promise<WebSocketStatus>;
-    start: () => Promise<WebSocketResult>;
-    stop: () => Promise<WebSocketResult>;
-    updateConfig: (config: any) => Promise<WebSocketResult>;
+    start: () => Promise<OperationResult>;
+    stop: () => Promise<OperationResult>;
+    updateConfig: (config: any) => Promise<OperationResult>;
   };
   
   auth: {
     getState: (serviceId: string) => Promise<AuthState>;
-    authenticate: (serviceId: string) => Promise<AuthResult>;
-    logout: (serviceId: string) => Promise<AuthResult>;
+    authenticate: (serviceId: string) => Promise<OperationResult>;
+    logout: (serviceId: string) => Promise<OperationResult>;
   };
   
   events: {
     getRecentEvents: (count?: number) => Promise<EventsResult>;
+  };
+  
+  config: {
+    getAdapterSettings: (adapterId: string) => Promise<ConfigResponse>;
+    updateAdapterSettings: (adapterId: string, settings: Record<string, any>) => Promise<OperationResult>;
+    getAllAdapterSettings: () => Promise<ConfigResponse>;
+    setAdapterEnabled: (adapterId: string, enabled: boolean) => Promise<OperationResult>;
+    setAdapterAutoConnect: (adapterId: string, autoConnect: boolean) => Promise<OperationResult>;
+    getAppConfig: () => Promise<ConfigResponse>;
+    updateAppConfig: (config: Record<string, any>) => Promise<OperationResult>;
+    getUserData: () => Promise<ConfigResponse>;
+    updateUserData: (data: Record<string, any>) => Promise<OperationResult>;
   };
 }
 

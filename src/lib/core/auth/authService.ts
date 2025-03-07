@@ -64,23 +64,24 @@ export class AuthService {
   /**
    * Register an auth provider
    */
-  public registerProvider(provider: AuthProvider): void {
+  public async registerProvider(provider: AuthProvider): Promise<void> {
     if (this.providers.has(provider.serviceId)) {
       throw new Error(`Provider for ${provider.serviceId} already registered`);
     }
     
     this.providers.set(provider.serviceId, provider);
+    
+    // Check token validity and set initial state
+    const isValid = await this.tokenManager.hasValidToken(provider.serviceId);
     this.authStates.set(
       provider.serviceId, 
       new BehaviorSubject<AuthState>(
-        this.tokenManager.hasValidToken(provider.serviceId) 
-          ? AuthState.AUTHENTICATED 
-          : AuthState.UNAUTHENTICATED
+        isValid ? AuthState.AUTHENTICATED : AuthState.UNAUTHENTICATED
       )
     );
     
     // Set up refresh timer if we have a valid token
-    const token = this.tokenManager.getToken(provider.serviceId);
+    const token = await this.tokenManager.getToken(provider.serviceId);
     if (token && token.refreshToken) {
       this.scheduleTokenRefresh(provider.serviceId, token);
     }
@@ -137,10 +138,10 @@ export class AuthService {
    * Completes the authentication process with a token
    * This is typically called by the auth provider
    */
-  public completeAuthentication(serviceId: string, token: Token): void {
+  public async completeAuthentication(serviceId: string, token: Token): Promise<void> {
     try {
       // Save the token
-      this.tokenManager.saveToken(serviceId, token);
+      await this.tokenManager.saveToken(serviceId, token);
       
       // Update state to authenticated
       this.updateAuthState(serviceId, AuthState.AUTHENTICATED);
@@ -201,8 +202,8 @@ export class AuthService {
   /**
    * Get the token for a service
    */
-  public getToken(serviceId: string): Token | null {
-    return this.tokenManager.getToken(serviceId);
+  public async getToken(serviceId: string): Promise<Token | null> {
+    return await this.tokenManager.getToken(serviceId);
   }
   
   /**
@@ -210,7 +211,7 @@ export class AuthService {
    */
   public async logout(serviceId: string): Promise<void> {
     try {
-      const token = this.tokenManager.getToken(serviceId);
+      const token = await this.tokenManager.getToken(serviceId);
       const provider = this.getProvider(serviceId);
       
       // Cancel any scheduled refresh
@@ -222,7 +223,7 @@ export class AuthService {
       }
       
       // Delete the token
-      this.tokenManager.deleteToken(serviceId);
+      await this.tokenManager.deleteToken(serviceId);
       
       // Update state to unauthenticated
       this.updateAuthState(serviceId, AuthState.UNAUTHENTICATED);
@@ -230,7 +231,7 @@ export class AuthService {
       console.error(`Error logging out of ${serviceId}:`, error);
       
       // Still delete the token and update state
-      this.tokenManager.deleteToken(serviceId);
+      await this.tokenManager.deleteToken(serviceId);
       this.updateAuthState(serviceId, AuthState.UNAUTHENTICATED);
     }
   }
@@ -291,7 +292,7 @@ export class AuthService {
    */
   private async refreshToken(serviceId: string): Promise<void> {
     const provider = this.getProvider(serviceId);
-    const token = this.tokenManager.getToken(serviceId);
+    const token = await this.tokenManager.getToken(serviceId);
     
     if (!token || !token.refreshToken) {
       // No token or refresh token
@@ -307,7 +308,7 @@ export class AuthService {
       const newToken = await provider.refreshToken(token.refreshToken);
       
       // Save the new token
-      this.tokenManager.saveToken(serviceId, newToken);
+      await this.tokenManager.saveToken(serviceId, newToken);
       
       // Update state to authenticated
       this.updateAuthState(serviceId, AuthState.AUTHENTICATED);
@@ -330,7 +331,9 @@ export class AuthService {
       
       // Update state to error, then unauthenticated
       this.updateAuthState(serviceId, AuthState.ERROR);
-      setTimeout(() => this.updateAuthState(serviceId, AuthState.UNAUTHENTICATED), 1000);
+      // Use a Promise with await instead of setTimeout for consistent async pattern
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      this.updateAuthState(serviceId, AuthState.UNAUTHENTICATED);
       
       // Publish token expired event
       this.eventBus.publish(createEvent(
@@ -345,7 +348,7 @@ export class AuthService {
       ));
       
       // Delete the invalid token
-      this.tokenManager.deleteToken(serviceId);
+      await this.tokenManager.deleteToken(serviceId);
     }
   }
 }

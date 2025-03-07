@@ -190,14 +190,9 @@ export abstract class BaseAdapter<T extends AdapterConfig = AdapterConfig> imple
       // Validate new config
       this.configValue = this.configSchema.parse(newConfig);
       
-      // Try to save to the persistence layer
-      try {
-        const { AdapterSettingsManager } = require('../config/adapterSettingsManager');
-        const settingsManager = AdapterSettingsManager.getInstance();
-        settingsManager.updateSettings(this.adapterId, config);
-      } catch (saveError) {
-        console.warn(`Could not save adapter settings: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
-      }
+      // We no longer try to directly save to persistence layer
+      // This is now handled via the tRPC procedures in the main process
+      // The adapter settings persistence is handled by useAdapterSettings hook
       
       // Reconnect if necessary
       this.handleConfigChange();

@@ -17,6 +17,16 @@ export const OperationResultSchema = z.object({
 export type OperationResult = z.infer<typeof OperationResultSchema>
 
 /**
+ * Configuration related types
+ */
+export const ConfigResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.record(z.any()),
+  error: z.string().optional()
+})
+export type ConfigResponse = z.infer<typeof ConfigResponseSchema>
+
+/**
  * WebSocket related types
  */
 export const WebSocketStatusSchema = z.object({

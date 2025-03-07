@@ -5,3 +5,8 @@ export * from './useAdapter';
 export * from './useWebSocketServer';
 export * from './useElectronAPI';
 export * from './useTrpc';
+export * from './useEvents';
+export * from './useAdapterSettings';
+export * from './useConfig';
+export * from './useUserPreferences';
+export * from './useWebSocketServerTrpc';

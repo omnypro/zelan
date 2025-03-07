@@ -40,9 +40,10 @@ export const ObsAdapterConfigSchema = z.object({
   enabled: z.boolean().default(true),
   name: z.string().optional(),
   autoConnect: z.boolean().default(true),
-  address: z.string().default('localhost'), 
+  host: z.string().default('localhost'), 
   port: z.number().default(4455),
   password: z.string().optional(),
+  secure: z.boolean().default(false),
   reconnectInterval: z.number().min(1000).default(5000),
   statusCheckInterval: z.number().min(1000).default(10000),
 });
@@ -80,38 +81,10 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
    * Create a new OBS adapter instance
    */
   constructor(config: Partial<ObsAdapterConfig> = {}) {
-    // Try to get settings from AdapterSettingsManager
+    // We no longer try to directly load from AdapterSettingsManager
+    // This is now handled via the bootstrap process and tRPC
+    // The bootstrap.ts file will pass in the correct initial settings
     let mergedConfig = config;
-    
-    try {
-      const { AdapterSettingsManager } = require('../config/adapterSettingsManager');
-      const settingsManager = AdapterSettingsManager.getInstance();
-      const savedSettings = settingsManager.getSettings('obs-adapter');
-      
-      if (savedSettings) {
-        // Map the host field from settings to address field for the adapter
-        const mappedSettings: Partial<ObsAdapterConfig> = {
-          ...savedSettings,
-          // Map 'host' to 'address' if it exists
-          address: savedSettings.host || savedSettings.address || 'localhost',
-        };
-        
-        // Remove host if it exists to avoid confusing the adapter
-        if ('host' in mappedSettings) {
-          delete mappedSettings.host;
-        }
-        
-        // Merge mapped settings with provided config, with provided config taking precedence
-        mergedConfig = {
-          ...mappedSettings,
-          ...config
-        };
-        
-        console.log('OBS adapter loaded settings from AdapterSettingsManager');
-      }
-    } catch (error) {
-      console.log('Using default OBS adapter settings');
-    }
     
     super(
       'obs-adapter',
@@ -130,9 +103,11 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
       this.stopReconnectTimer();
       
       // Connect to OBS
-      const { address, port, password } = this.config;
+      const { host, port, password, secure } = this.config;
+      const protocol = secure ? 'wss' : 'ws';
+      const url = `${protocol}://${host}:${port}`;
       const connectionParams: { address: string; password?: string } = {
-        address: `ws://${address}:${port}`
+        address: url
       };
       
       if (password) {
@@ -399,25 +374,8 @@ export class ObsAdapter extends BaseAdapter<ObsAdapterConfig> {
    * Handle configuration changes
    */
   protected override handleConfigChange(): void {
-    // Save updated config to AdapterSettingsManager
-    try {
-      const { AdapterSettingsManager } = require('../config/adapterSettingsManager');
-      const settingsManager = AdapterSettingsManager.getInstance();
-      
-      // Map address to host for storing in settings manager
-      const settingsToSave = {
-        ...this.config,
-        host: this.config.address, // Map address back to host for storage
-      };
-      
-      // Remove address to avoid duplicate storage
-      delete settingsToSave.address;
-      
-      settingsManager.updateSettings('obs-adapter', settingsToSave);
-      console.log('OBS adapter settings saved to AdapterSettingsManager');
-    } catch (error) {
-      console.error('Failed to save OBS adapter settings:', error);
-    }
+    // We no longer try to directly save to AdapterSettingsManager
+    // This is now handled via the tRPC procedures in the main process
     
     // If connection params changed and we're connected, reconnect
     if (this.isConnected()) {

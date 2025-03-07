@@ -1,5 +1,16 @@
-import Store from 'electron-store';
+import { isRenderer } from '../../utils';
 import { z } from 'zod';
+
+// Only import electron-store in the main process
+let Store: any;
+if (!isRenderer()) {
+  // Use dynamic import for ES modules compatibility
+  import('electron-store').then(module => {
+    Store = module.default;
+  }).catch(err => {
+    console.error('Failed to import electron-store:', err);
+  });
+}
 
 /**
  * Schema for global application configuration
@@ -44,32 +55,46 @@ export class ConfigManager {
   private store: Store<AppConfig>;
   
   private constructor() {
-    this.store = new Store({
-      name: 'app-config',
-      defaults: {
-        app: {
-          firstRun: true,
-          theme: 'system',
-          logLevel: 'info',
-          startOnLogin: false,
-          minimizeToTray: true,
-        },
-        websocket: {
-          enabled: true,
-          port: 9090,
-          path: '/events',
-          pingInterval: 30000,
-          cors: {
+    if (isRenderer()) {
+      console.warn('ConfigManager instantiated in renderer process');
+      return;
+    }
+    
+    // Initialize with empty store
+    this.store = {} as any;
+    
+    // Import dynamically and initialize
+    import('electron-store').then(StoreModule => {
+      const Store = StoreModule.default;
+      this.store = new Store({
+        name: 'app-config',
+        defaults: {
+          app: {
+            firstRun: true,
+            theme: 'system',
+            logLevel: 'info',
+            startOnLogin: false,
+            minimizeToTray: true,
+          },
+          websocket: {
             enabled: true,
-            origins: ['*'],
+            port: 9090,
+            path: '/events',
+            pingInterval: 30000,
+            cors: {
+              enabled: true,
+              origins: ['*'],
+            },
+          },
+          events: {
+            maxCachedEvents: 1000,
+            logToConsole: false,
           },
         },
-        events: {
-          maxCachedEvents: 1000,
-          logToConsole: false,
-        },
-      },
-    }) as Store<AppConfig>;
+      });
+    }).catch(err => {
+      console.error('Failed to load electron-store:', err);
+    });
   }
   
   /**
@@ -86,6 +111,10 @@ export class ConfigManager {
    * Get the entire configuration
    */
   public getConfig(): AppConfig {
+    if (isRenderer()) {
+      console.warn('ConfigManager.getConfig should not be called in renderer process');
+      return {} as AppConfig;
+    }
     return this.store.store;
   }
   
@@ -93,6 +122,10 @@ export class ConfigManager {
    * Set a configuration value at the specified path
    */
   public set<T>(key: string, value: T): void {
+    if (isRenderer()) {
+      console.warn('ConfigManager.set should not be called in renderer process');
+      return;
+    }
     this.store.set(key, value);
   }
   
@@ -100,6 +133,10 @@ export class ConfigManager {
    * Get a configuration value at the specified path
    */
   public get<T>(key: string): T {
+    if (isRenderer()) {
+      console.warn('ConfigManager.get should not be called in renderer process');
+      return {} as T;
+    }
     return this.store.get(key) as T;
   }
   
@@ -107,6 +144,10 @@ export class ConfigManager {
    * Check if a configuration key exists
    */
   public has(key: string): boolean {
+    if (isRenderer()) {
+      console.warn('ConfigManager.has should not be called in renderer process');
+      return false;
+    }
     return this.store.has(key);
   }
   
@@ -114,6 +155,10 @@ export class ConfigManager {
    * Delete a configuration value
    */
   public delete(key: string): void {
+    if (isRenderer()) {
+      console.warn('ConfigManager.delete should not be called in renderer process');
+      return;
+    }
     this.store.delete(key);
   }
   
@@ -121,7 +166,37 @@ export class ConfigManager {
    * Reset configuration to defaults
    */
   public reset(): void {
+    if (isRenderer()) {
+      console.warn('ConfigManager.reset should not be called in renderer process');
+      return;
+    }
     this.store.clear();
+  }
+  
+  /**
+   * Update the application configuration
+   */
+  public updateConfig(config: Partial<AppConfig>): void {
+    if (isRenderer()) {
+      console.warn('ConfigManager.updateConfig should not be called in renderer process');
+      return;
+    }
+    
+    // Update each top-level section that exists in the config
+    if (config.app) {
+      const currentApp = this.get<AppConfig['app']>('app');
+      this.set('app', { ...currentApp, ...config.app });
+    }
+    
+    if (config.websocket) {
+      const currentWebsocket = this.get<AppConfig['websocket']>('websocket');
+      this.set('websocket', { ...currentWebsocket, ...config.websocket });
+    }
+    
+    if (config.events) {
+      const currentEvents = this.get<AppConfig['events']>('events');
+      this.set('events', { ...currentEvents, ...config.events });
+    }
   }
   
   /**

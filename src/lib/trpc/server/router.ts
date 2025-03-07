@@ -8,7 +8,8 @@ import {
   EventsResponseSchema,
   WebSocketConfigSchema,
   EventFilterSchema,
-  BaseEventSchema
+  BaseEventSchema,
+  ConfigResponseSchema
 } from '../shared/types'
 
 // Initialize tRPC backend
@@ -20,6 +21,249 @@ const router = t.router
 
 // Define the router
 export const appRouter = router({
+  // Config procedures
+  config: router({
+    // Get adapter settings
+    getAdapterSettings: procedure
+      .input(z.string())
+      .output(ConfigResponseSchema)
+      .query(async ({ input }) => {
+        const { AdapterSettingsStore } = await import('../../../../electron/store')
+        const settingsStore = AdapterSettingsStore.getInstance()
+        const settings = settingsStore.getSettings(input)
+        
+        return {
+          success: !!settings,
+          data: settings || {},
+          error: settings ? undefined : 'Settings not found'
+        }
+      }),
+      
+    // Update adapter settings
+    updateAdapterSettings: procedure
+      .input(z.object({
+        adapterId: z.string(),
+        settings: z.record(z.any())
+      }))
+      .output(OperationResultSchema)
+      .mutation(async ({ input }) => {
+        try {
+          const { AdapterSettingsStore } = await import('../../../../electron/store')
+          const settingsStore = AdapterSettingsStore.getInstance()
+          settingsStore.updateSettings(input.adapterId, input.settings)
+          
+          // Update adapter runtime config if connected
+          const { AdapterManager } = await import('../../core/adapters')
+          const adapterManager = AdapterManager.getInstance()
+          const adapter = adapterManager.getAdapter(input.adapterId)
+          
+          if (adapter) {
+            adapter.updateConfig(input.settings)
+          }
+          
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      }),
+    
+    // Get all adapter settings
+    getAllAdapterSettings: procedure
+      .output(ConfigResponseSchema)
+      .query(async () => {
+        const { AdapterSettingsStore } = await import('../../../../electron/store')
+        const settingsStore = AdapterSettingsStore.getInstance()
+        const settings = settingsStore.getAllSettings()
+        
+        return {
+          success: true,
+          data: settings
+        }
+      }),
+    
+    // Enable/disable adapter
+    setAdapterEnabled: procedure
+      .input(z.object({
+        adapterId: z.string(),
+        enabled: z.boolean()
+      }))
+      .output(OperationResultSchema)
+      .mutation(async ({ input }) => {
+        try {
+          const { AdapterSettingsStore } = await import('../../../../electron/store')
+          const settingsStore = AdapterSettingsStore.getInstance()
+          settingsStore.setAdapterEnabled(input.adapterId, input.enabled)
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      }),
+    
+    // Set adapter auto-connect
+    setAdapterAutoConnect: procedure
+      .input(z.object({
+        adapterId: z.string(),
+        autoConnect: z.boolean()
+      }))
+      .output(OperationResultSchema)
+      .mutation(async ({ input }) => {
+        try {
+          const { AdapterSettingsStore } = await import('../../../../electron/store')
+          const settingsStore = AdapterSettingsStore.getInstance()
+          settingsStore.setAdapterAutoConnect(input.adapterId, input.autoConnect)
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      }),
+      
+    // Get global app config
+    getAppConfig: procedure
+      .output(ConfigResponseSchema)
+      .query(async () => {
+        const { ConfigStore } = await import('../../../../electron/store')
+        const configStore = ConfigStore.getInstance()
+        const config = configStore.getConfig()
+        
+        return {
+          success: true,
+          data: config
+        }
+      }),
+      
+    // Update global app config
+    updateAppConfig: procedure
+      .input(z.record(z.any()))
+      .output(OperationResultSchema)
+      .mutation(async ({ input }) => {
+        try {
+          const { ConfigStore } = await import('../../../../electron/store')
+          const configStore = ConfigStore.getInstance()
+          configStore.updateConfig(input)
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      }),
+      
+    // Get user data/preferences
+    getUserData: procedure
+      .output(ConfigResponseSchema)
+      .query(async () => {
+        const { UserDataStore } = await import('../../../../electron/store')
+        const userDataStore = UserDataStore.getInstance()
+        const userData = userDataStore.getData()
+        
+        return {
+          success: true,
+          data: userData
+        }
+      }),
+      
+    // Update user data/preferences
+    updateUserData: procedure
+      .input(z.record(z.any()))
+      .output(OperationResultSchema)
+      .mutation(async ({ input }) => {
+        try {
+          const { UserDataStore } = await import('../../../../electron/store')
+          const userDataStore = UserDataStore.getInstance()
+          userDataStore.updateData(input)
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      }),
+      
+    // Token management procedures
+    getToken: procedure
+      .input(z.string())
+      .output(ConfigResponseSchema)
+      .query(async ({ input }) => {
+        const { TokenStore } = await import('../../../../electron/store')
+        const tokenStore = TokenStore.getInstance()
+        const token = tokenStore.getToken(input)
+        
+        return {
+          success: !!token,
+          data: token || {},
+          error: token ? undefined : 'Token not found'
+        }
+      }),
+      
+    saveToken: procedure
+      .input(z.object({
+        serviceId: z.string(),
+        token: z.object({
+          accessToken: z.string(),
+          refreshToken: z.string().optional(),
+          expiresAt: z.number(),
+          scope: z.string().optional(),
+          tokenType: z.string().default('Bearer'),
+        })
+      }))
+      .output(OperationResultSchema)
+      .mutation(async ({ input }) => {
+        try {
+          const { TokenStore } = await import('../../../../electron/store')
+          const tokenStore = TokenStore.getInstance()
+          tokenStore.saveToken(input.serviceId, input.token)
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      }),
+      
+    deleteToken: procedure
+      .input(z.string())
+      .output(OperationResultSchema)
+      .mutation(async ({ input }) => {
+        try {
+          const { TokenStore } = await import('../../../../electron/store')
+          const tokenStore = TokenStore.getInstance()
+          tokenStore.deleteToken(input)
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      }),
+      
+    hasValidToken: procedure
+      .input(z.string())
+      .output(ConfigResponseSchema)
+      .query(async ({ input }) => {
+        const { TokenStore } = await import('../../../../electron/store')
+        const tokenStore = TokenStore.getInstance()
+        const isValid = tokenStore.hasValidToken(input)
+        
+        return {
+          success: true,
+          data: { isValid }
+        }
+      }),
+      
+    clearAllTokens: procedure
+      .output(OperationResultSchema)
+      .mutation(async () => {
+        try {
+          const { TokenStore } = await import('../../../../electron/store')
+          const tokenStore = TokenStore.getInstance()
+          tokenStore.clearAllTokens()
+          return { success: true }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return { success: false, error: errorMessage }
+        }
+      })
+  }),
+  
   // Adapter procedures
   adapter: router({
     getStatus: procedure

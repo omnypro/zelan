@@ -1,5 +1,5 @@
-import Store from 'electron-store';
 import { z } from 'zod';
+import { isRenderer } from '../../utils';
 
 /**
  * Schema for auth tokens with validation
@@ -15,23 +15,14 @@ export const TokenSchema = z.object({
 export type Token = z.infer<typeof TokenSchema>;
 
 /**
- * Schema for the token store
- */
-const TokenStoreSchema = z.record(z.string(), TokenSchema);
-
-/**
  * TokenManager handles secure storage and retrieval of authentication tokens
- * using electron-store with encryption
+ * using IPC to communicate with the main process's TokenStore
  */
 export class TokenManager {
   private static instance: TokenManager;
-  private store: Store<z.infer<typeof TokenStoreSchema>>;
   
   private constructor() {
-    this.store = new Store({
-      name: 'auth-tokens',
-      encryptionKey: 'app-specific-encryption-key', // In production, use a secure key
-    }) as Store<z.infer<typeof TokenStoreSchema>>;
+    // No initialization needed - all operations happen through IPC
   }
   
   /**
@@ -47,10 +38,25 @@ export class TokenManager {
   /**
    * Save a token for a service
    */
-  public saveToken(serviceId: string, token: Token): void {
+  public async saveToken(serviceId: string, token: Token): Promise<void> {
     try {
+      // Validate the token first
       const validatedToken = TokenSchema.parse(token);
-      this.store.set(serviceId, validatedToken);
+      
+      // Call through IPC
+      if (isRenderer()) {
+        // Use tRPC from renderer
+        const { client } = await import('../../trpc/client');
+        await client.config.saveToken.mutate({ 
+          serviceId, 
+          token: validatedToken 
+        });
+      } else {
+        // Direct call in main process
+        const { TokenStore } = await import('../../../../electron/store');
+        const tokenStore = TokenStore.getInstance();
+        tokenStore.saveToken(serviceId, validatedToken);
+      }
     } catch (error) {
       console.error('Invalid token format:', error);
       throw new Error('Failed to save token: invalid format');
@@ -60,10 +66,40 @@ export class TokenManager {
   /**
    * Get a token for a service
    */
-  public getToken(serviceId: string): Token | null {
+  public async getToken(serviceId: string): Promise<Token | null> {
     try {
-      const token = this.store.get(serviceId);
-      return token ? TokenSchema.parse(token) : null;
+      if (isRenderer()) {
+        // Use tRPC from renderer
+        const { client } = await import('../../trpc/client');
+        const result = await client.config.getToken.query(serviceId);
+        
+        if (!result.success || !result.data) {
+          return null;
+        }
+        
+        try {
+          return TokenSchema.parse(result.data);
+        } catch (parseError) {
+          console.error('Invalid token format:', parseError);
+          return null;
+        }
+      } else {
+        // Direct call in main process
+        const { TokenStore } = await import('../../../../electron/store');
+        const tokenStore = TokenStore.getInstance();
+        const token = tokenStore.getToken(serviceId);
+        
+        if (!token) {
+          return null;
+        }
+        
+        try {
+          return TokenSchema.parse(token);
+        } catch (parseError) {
+          console.error('Invalid token format:', parseError);
+          return null;
+        }
+      }
     } catch (error) {
       console.error('Error retrieving token:', error);
       return null;
@@ -73,25 +109,72 @@ export class TokenManager {
   /**
    * Check if a token exists and is valid
    */
-  public hasValidToken(serviceId: string): boolean {
-    const token = this.getToken(serviceId);
-    if (!token) return false;
-    
-    // Check if token is expired (with 60s buffer)
-    return token.expiresAt > Date.now() + 60000;
+  public async hasValidToken(serviceId: string): Promise<boolean> {
+    try {
+      if (isRenderer()) {
+        // Use tRPC from renderer
+        const { client } = await import('../../trpc/client');
+        const result = await client.config.hasValidToken.query(serviceId);
+        return result.success ? result.data.isValid : false;
+      } else {
+        // Direct call in main process
+        const { TokenStore } = await import('../../../../electron/store');
+        const tokenStore = TokenStore.getInstance();
+        return tokenStore.hasValidToken(serviceId);
+      }
+    } catch (error) {
+      console.error('Error checking token validity:', error);
+      return false;
+    }
   }
   
   /**
    * Delete a token
    */
-  public deleteToken(serviceId: string): void {
-    this.store.delete(serviceId);
+  public async deleteToken(serviceId: string): Promise<void> {
+    try {
+      if (isRenderer()) {
+        // Use tRPC from renderer
+        const { client } = await import('../../trpc/client');
+        const result = await client.config.deleteToken.mutate(serviceId);
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to delete token');
+        }
+      } else {
+        // Direct call in main process
+        const { TokenStore } = await import('../../../../electron/store');
+        const tokenStore = TokenStore.getInstance();
+        tokenStore.deleteToken(serviceId);
+      }
+    } catch (error) {
+      console.error('Error deleting token:', error);
+      throw new Error(`Failed to delete token: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   
   /**
    * Clear all tokens
    */
-  public clearAllTokens(): void {
-    this.store.clear();
+  public async clearAllTokens(): Promise<void> {
+    try {
+      if (isRenderer()) {
+        // Use tRPC from renderer
+        const { client } = await import('../../trpc/client');
+        const result = await client.config.clearAllTokens.mutate();
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to clear tokens');
+        }
+      } else {
+        // Direct call in main process
+        const { TokenStore } = await import('../../../../electron/store');
+        const tokenStore = TokenStore.getInstance();
+        tokenStore.clearAllTokens();
+      }
+    } catch (error) {
+      console.error('Error clearing tokens:', error);
+      throw new Error(`Failed to clear tokens: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }
