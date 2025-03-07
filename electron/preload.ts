@@ -112,4 +112,50 @@ contextBridge.exposeInMainWorld('zelan', {
       return ipcRenderer.invoke('get-recent-events', count)
     },
   },
+  
+  // Configuration functions
+  config: {
+    getAdapterSettings(adapterId: string) {
+      return ipcRenderer.invoke('get-adapter-settings', adapterId)
+    },
+    updateAdapterSettings(adapterId: string, settings: Record<string, unknown>) {
+      return ipcRenderer.invoke('update-adapter-settings', adapterId, settings)
+    },
+    getAllAdapterSettings() {
+      return ipcRenderer.invoke('get-all-adapter-settings')
+    },
+    setAdapterEnabled(adapterId: string, enabled: boolean) {
+      return ipcRenderer.invoke('set-adapter-enabled', adapterId, enabled)
+    },
+    setAdapterAutoConnect(adapterId: string, autoConnect: boolean) {
+      return ipcRenderer.invoke('set-adapter-auto-connect', adapterId, autoConnect)
+    },
+    getAppConfig() {
+      return ipcRenderer.invoke('get-app-config')
+    },
+    updateAppConfig(config: Record<string, unknown>) {
+      return ipcRenderer.invoke('update-app-config', config)
+    },
+    getUserData() {
+      return ipcRenderer.invoke('get-user-data')
+    },
+    updateUserData(data: Record<string, unknown>) {
+      return ipcRenderer.invoke('update-user-data', data)
+    },
+    getToken(serviceId: string) {
+      return ipcRenderer.invoke('get-token', serviceId)
+    },
+    saveToken(serviceId: string, token: Record<string, unknown>) {
+      return ipcRenderer.invoke('save-token', serviceId, token)
+    },
+    deleteToken(serviceId: string) {
+      return ipcRenderer.invoke('delete-token', serviceId)
+    },
+    hasValidToken(serviceId: string) {
+      return ipcRenderer.invoke('has-valid-token', serviceId)
+    },
+    clearAllTokens() {
+      return ipcRenderer.invoke('clear-all-tokens')
+    }
+  }
 })

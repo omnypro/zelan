@@ -311,6 +311,209 @@ const handlers = {
   }
 }
 
+// Config handlers
+const configHandlers = {
+  // Adapter settings handlers
+  getAdapterSettings: async (adapterId: string) => {
+    const { AdapterSettingsStore } = await import('./store')
+    const settingsStore = AdapterSettingsStore.getInstance()
+    const settings = settingsStore.getSettings(adapterId)
+    
+    return {
+      success: !!settings,
+      data: settings || {},
+      error: settings ? undefined : 'Settings not found'
+    }
+  },
+  
+  updateAdapterSettings: async (adapterId: string, settings: Record<string, unknown>) => {
+    try {
+      const { AdapterSettingsStore } = await import('./store')
+      const settingsStore = AdapterSettingsStore.getInstance()
+      settingsStore.updateSettings(adapterId, settings)
+      
+      // Update adapter runtime config if connected
+      const { AdapterManager } = await import('../src/lib/core/adapters')
+      const adapterManager = AdapterManager.getInstance()
+      const adapter = adapterManager.getAdapter(adapterId)
+      
+      if (adapter) {
+        adapter.updateConfig(settings)
+      }
+      
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  },
+  
+  getAllAdapterSettings: async () => {
+    const { AdapterSettingsStore } = await import('./store')
+    const settingsStore = AdapterSettingsStore.getInstance()
+    const settings = settingsStore.getAllSettings()
+    
+    return {
+      success: true,
+      data: settings
+    }
+  },
+  
+  setAdapterEnabled: async (adapterId: string, enabled: boolean) => {
+    try {
+      const { AdapterSettingsStore } = await import('./store')
+      const settingsStore = AdapterSettingsStore.getInstance()
+      settingsStore.setAdapterEnabled(adapterId, enabled)
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  },
+  
+  setAdapterAutoConnect: async (adapterId: string, autoConnect: boolean) => {
+    try {
+      const { AdapterSettingsStore } = await import('./store')
+      const settingsStore = AdapterSettingsStore.getInstance()
+      settingsStore.setAdapterAutoConnect(adapterId, autoConnect)
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  },
+  
+  // App config handlers
+  getAppConfig: async () => {
+    const { ConfigStore } = await import('./store')
+    const configStore = ConfigStore.getInstance()
+    const config = configStore.getConfig()
+    
+    return {
+      success: true,
+      data: config
+    }
+  },
+  
+  updateAppConfig: async (config: Record<string, unknown>) => {
+    try {
+      const { ConfigStore } = await import('./store')
+      const configStore = ConfigStore.getInstance()
+      configStore.updateConfig(config)
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  },
+  
+  // User data handlers
+  getUserData: async () => {
+    const { UserDataStore } = await import('./store')
+    const userDataStore = UserDataStore.getInstance()
+    const userData = userDataStore.getData()
+    
+    return {
+      success: true,
+      data: userData
+    }
+  },
+  
+  updateUserData: async (data: Record<string, unknown>) => {
+    try {
+      const { UserDataStore } = await import('./store')
+      const userDataStore = UserDataStore.getInstance()
+      userDataStore.updateData(data)
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  },
+  
+  // Token handlers
+  getToken: async (serviceId: string) => {
+    try {
+      const { TokenStore } = await import('./store')
+      const tokenStore = TokenStore.getInstance()
+      const token = tokenStore.getToken(serviceId)
+      
+      return {
+        success: !!token,
+        data: token || {},
+        error: token ? undefined : 'Token not found'
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error(`Error in getToken for ${serviceId}:`, errorMessage)
+      return {
+        success: false,
+        data: {},
+        error: `Failed to get token: ${errorMessage}`
+      }
+    }
+  },
+  
+  saveToken: async (serviceId: string, token: Record<string, unknown>) => {
+    try {
+      const { TokenStore, TokenSchema } = await import('./store')
+      const tokenStore = TokenStore.getInstance()
+      // Validate token using Zod schema first
+      const validToken = TokenSchema.parse(token)
+      tokenStore.saveToken(serviceId, validToken)
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  },
+  
+  deleteToken: async (serviceId: string) => {
+    try {
+      const { TokenStore } = await import('./store')
+      const tokenStore = TokenStore.getInstance()
+      tokenStore.deleteToken(serviceId)
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  },
+  
+  hasValidToken: async (serviceId: string) => {
+    try {
+      const { TokenStore } = await import('./store')
+      const tokenStore = TokenStore.getInstance()
+      const isValid = tokenStore.hasValidToken(serviceId)
+      
+      return {
+        success: true,
+        data: { isValid }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error(`Error in hasValidToken for ${serviceId}:`, errorMessage)
+      return {
+        success: false,
+        data: { isValid: false },
+        error: `Failed to check token validity: ${errorMessage}`
+      }
+    }
+  },
+  
+  clearAllTokens: async () => {
+    try {
+      const { TokenStore } = await import('./store')
+      const tokenStore = TokenStore.getInstance()
+      tokenStore.clearAllTokens()
+      return { success: true }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  }
+}
+
 // Register tRPC and IPC handlers
 function registerHandlers() {
   // Increase the maximum number of listeners to avoid memory leak warnings
@@ -329,6 +532,51 @@ function registerHandlers() {
 
       // Instead of accessing the tRPC router directly, map to our handlers
       switch (`${namespace}.${procedure}`) {
+        // Config procedures
+        case 'config.getAdapterSettings':
+          result = await configHandlers.getAdapterSettings(input)
+          break
+        case 'config.updateAdapterSettings':
+          result = await configHandlers.updateAdapterSettings(input.adapterId, input.settings)
+          break
+        case 'config.getAllAdapterSettings':
+          result = await configHandlers.getAllAdapterSettings()
+          break
+        case 'config.setAdapterEnabled':
+          result = await configHandlers.setAdapterEnabled(input.adapterId, input.enabled)
+          break
+        case 'config.setAdapterAutoConnect':
+          result = await configHandlers.setAdapterAutoConnect(input.adapterId, input.autoConnect)
+          break
+        case 'config.getAppConfig':
+          result = await configHandlers.getAppConfig()
+          break
+        case 'config.updateAppConfig':
+          result = await configHandlers.updateAppConfig(input)
+          break
+        case 'config.getUserData':
+          result = await configHandlers.getUserData()
+          break
+        case 'config.updateUserData':
+          result = await configHandlers.updateUserData(input)
+          break
+        case 'config.getToken':
+          result = await configHandlers.getToken(input)
+          break
+        case 'config.saveToken':
+          result = await configHandlers.saveToken(input.serviceId, input.token)
+          break
+        case 'config.deleteToken':
+          result = await configHandlers.deleteToken(input)
+          break
+        case 'config.hasValidToken':
+          result = await configHandlers.hasValidToken(input)
+          break
+        case 'config.clearAllTokens':
+          result = await configHandlers.clearAllTokens()
+          break
+          
+        // Adapter procedures
         case 'adapter.getStatus':
           result = await handlers.getAdapterStatus(input)
           break
@@ -390,6 +638,64 @@ function registerHandlers() {
         }
       }
     }
+  })
+
+  // Config IPC handlers
+  ipcMain.handle('get-adapter-settings', async (_event, adapterId) => {
+    return await configHandlers.getAdapterSettings(adapterId)
+  })
+
+  ipcMain.handle('update-adapter-settings', async (_event, adapterId, settings) => {
+    return await configHandlers.updateAdapterSettings(adapterId, settings)
+  })
+
+  ipcMain.handle('get-all-adapter-settings', async () => {
+    return await configHandlers.getAllAdapterSettings()
+  })
+
+  ipcMain.handle('set-adapter-enabled', async (_event, adapterId, enabled) => {
+    return await configHandlers.setAdapterEnabled(adapterId, enabled)
+  })
+
+  ipcMain.handle('set-adapter-auto-connect', async (_event, adapterId, autoConnect) => {
+    return await configHandlers.setAdapterAutoConnect(adapterId, autoConnect)
+  })
+
+  ipcMain.handle('get-app-config', async () => {
+    return await configHandlers.getAppConfig()
+  })
+
+  ipcMain.handle('update-app-config', async (_event, config) => {
+    return await configHandlers.updateAppConfig(config)
+  })
+
+  ipcMain.handle('get-user-data', async () => {
+    return await configHandlers.getUserData()
+  })
+
+  ipcMain.handle('update-user-data', async (_event, data) => {
+    return await configHandlers.updateUserData(data)
+  })
+  
+  // Token IPC handlers
+  ipcMain.handle('get-token', async (_event, serviceId) => {
+    return await configHandlers.getToken(serviceId)
+  })
+  
+  ipcMain.handle('save-token', async (_event, serviceId, token) => {
+    return await configHandlers.saveToken(serviceId, token)
+  })
+  
+  ipcMain.handle('delete-token', async (_event, serviceId) => {
+    return await configHandlers.deleteToken(serviceId)
+  })
+  
+  ipcMain.handle('has-valid-token', async (_event, serviceId) => {
+    return await configHandlers.hasValidToken(serviceId)
+  })
+  
+  ipcMain.handle('clear-all-tokens', async () => {
+    return await configHandlers.clearAllTokens()
   })
 
   // Legacy IPC handlers for backward compatibility
