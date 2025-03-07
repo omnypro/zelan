@@ -12,6 +12,9 @@ import {
   createSerializableAdapter 
 } from '../../shared/utils/rx-trpc';
 
+// Import WebSocketService
+import { WebSocketService } from '../services/websocket';
+
 /**
  * Context for tRPC procedures
  */
@@ -19,6 +22,7 @@ interface TRPCContext {
   mainEventBus: MainEventBus;
   adapterManager: AdapterManager;
   configStore: ReturnType<typeof getConfigStore>;
+  webSocketService: WebSocketService;
   senderIds: Set<number>;
 }
 
@@ -30,6 +34,7 @@ function createContext(mainEventBus: MainEventBus, adapterManager: AdapterManage
     mainEventBus,
     adapterManager,
     configStore: getConfigStore(),
+    webSocketService: WebSocketService.getInstance(mainEventBus),
     senderIds: new Set<number>()
   };
 }
@@ -211,6 +216,19 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
           
           return { id, type: 'started' };
         }
+      } else if (moduleName === 'websocket') {
+        if (type === 'query' && procedureName === 'getStatus') {
+          const status = ctx.webSocketService.getStatus();
+          return { id, result: status, type: 'data' };
+        } else if (type === 'mutation') {
+          if (procedureName === 'start') {
+            const result = ctx.webSocketService.start();
+            return { id, result, type: 'data' };
+          } else if (procedureName === 'stop') {
+            ctx.webSocketService.stop();
+            return { id, result: true, type: 'data' };
+          }
+        }
       } else if (moduleName === 'adapters') {
         if (type === 'query') {
           if (procedureName === 'getAll') {
@@ -272,8 +290,24 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
  */
 export const createTRPCRouter = (mainEventBus: MainEventBus, adapterManager: AdapterManager) => {
   const configStore = getConfigStore();
+  const webSocketService = WebSocketService.getInstance(mainEventBus);
   
   return appRouter.createCaller({
+    // WebSocket router implementation
+    websocket: {
+      getStatus: async () => {
+        return webSocketService.getStatus();
+      },
+      
+      start: async () => {
+        return webSocketService.start();
+      },
+      
+      stop: async () => {
+        webSocketService.stop();
+        return true;
+      }
+    },
     // Config router implementation
     config: {
       get: async ({ key, defaultValue }) => {

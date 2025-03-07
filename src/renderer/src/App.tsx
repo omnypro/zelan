@@ -4,11 +4,12 @@ import EventsDemo from './components/EventsDemo'
 import AdapterStatus from './components/AdapterStatus'
 import Settings from './components/Settings'
 import { TrpcDemo } from './components/TrpcDemo'
+import { WebSocketDemo } from './components/demos/WebSocketDemo'
 import electronLogo from './assets/electron.svg'
 import './assets/main.css'
 
 function App(): JSX.Element {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'settings' | 'trpc'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'settings' | 'trpc' | 'websocket'>('dashboard')
 
   const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
 
@@ -74,6 +75,18 @@ function App(): JSX.Element {
                 tRPC Demo
               </button>
             </li>
+            <li>
+              <button
+                className={`w-full text-left px-4 py-2 ${
+                  activeTab === 'websocket' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setActiveTab('websocket')}
+              >
+                WebSocket
+              </button>
+            </li>
           </ul>
           
           <div className="mt-auto p-4 text-xs text-gray-400">
@@ -104,8 +117,12 @@ function App(): JSX.Element {
                   This is your stream data aggregation service. Connect to various streaming platforms
                   and merge their data into a unified API.
                 </p>
-                <p>
+                <p className="mb-3">
                   Check out the <strong>Events</strong> tab to see the reactive event system in action.
+                </p>
+                <p>
+                  The <strong>WebSocket</strong> tab allows you to control the WebSocket server that external
+                  applications can connect to for real-time event data.
                 </p>
               </div>
               
@@ -118,6 +135,13 @@ function App(): JSX.Element {
           {activeTab === 'settings' && <Settings />}
           
           {activeTab === 'trpc' && <TrpcDemo />}
+          
+          {activeTab === 'websocket' && (
+            <div className="p-6">
+              <h2 className="text-2xl font-bold mb-6">WebSocket Server</h2>
+              <WebSocketDemo />
+            </div>
+          )}
         </main>
       </div>
     </div>

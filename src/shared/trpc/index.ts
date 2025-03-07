@@ -42,6 +42,34 @@ export const adapterConfigSchema = z.object({
  * Create the root router
  */
 export const appRouter = router({
+  // WebSocket server procedures
+  websocket: router({
+    // Get WebSocket server status
+    getStatus: procedure
+      .query(({ ctx }) => {
+        // This will be implemented later in the server
+        return {
+          running: false,
+          clientCount: 0,
+          port: 8081
+        };
+      }),
+    
+    // Start WebSocket server
+    start: procedure
+      .mutation(({ ctx }) => {
+        // This will be implemented later in the server
+        return true;
+      }),
+    
+    // Stop WebSocket server
+    stop: procedure
+      .mutation(({ ctx }) => {
+        // This will be implemented later in the server
+        return true;
+      })
+  }),
+
   // Configuration procedures
   config: router({
     // Get configuration value

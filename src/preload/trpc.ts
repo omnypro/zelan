@@ -241,6 +241,12 @@ const createClient = () => {
         update: createProcedureCaller('update', 'mutation'),
         delete: createProcedureCaller('delete', 'mutation'),
         getTypes: createProcedureCaller('getTypes', 'query')
+      } : {}),
+      
+      ...(moduleName === 'websocket' ? {
+        getStatus: createProcedureCaller('getStatus', 'query'),
+        start: createProcedureCaller('start', 'mutation'),
+        stop: createProcedureCaller('stop', 'mutation')
       } : {})
     };
   };
@@ -249,7 +255,8 @@ const createClient = () => {
   return {
     config: makeModuleWithProcedures('config'),
     events: makeModuleWithProcedures('events'),
-    adapters: makeModuleWithProcedures('adapters')
+    adapters: makeModuleWithProcedures('adapters'),
+    websocket: makeModuleWithProcedures('websocket')
   };
 };
 
@@ -259,6 +266,7 @@ export const trpcClient = createClient();
 console.log('tRPC client created:', !!trpcClient);
 console.log('tRPC client keys:', Object.keys(trpcClient));
 console.log('tRPC config keys:', trpcClient.config ? Object.keys(trpcClient.config) : 'No config module');
+console.log('tRPC websocket keys:', trpcClient.websocket ? Object.keys(trpcClient.websocket) : 'No websocket module');
 
 /**
  * Helper function to create an observable from a tRPC subscription

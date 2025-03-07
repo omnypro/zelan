@@ -430,3 +430,33 @@ export function useAdapterControl(adapterId: string) {
     error
   };
 }
+
+/**
+ * General tRPC client hook for accessing all endpoints
+ */
+export function useTrpc() {
+  const [error, setError] = useState<Error | null>(null);
+  
+  const checkTrpc = () => {
+    if (!window.trpc) {
+      const err = new Error('tRPC client not available');
+      setError(err);
+      throw err;
+    }
+    return window.trpc;
+  };
+  
+  // Use an effect to verify tRPC is available on mount
+  useEffect(() => {
+    try {
+      checkTrpc();
+    } catch (err) {
+      // Error already set by checkTrpc
+    }
+  }, []);
+  
+  return {
+    client: window.trpc || {},
+    error
+  };
+}

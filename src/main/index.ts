@@ -6,6 +6,7 @@ import icon from '../../resources/icon.png?asset'
 // Import our services
 import { MainEventBus } from './services/eventBus';
 import { AdapterManager } from './services/adapters';
+import { WebSocketService } from './services/websocket';
 import { AdapterRegistry } from '../shared/adapters';
 import { TestAdapterFactory } from './adapters';
 import { createConfigStore, getConfigStore } from '../shared/core/config';
@@ -17,6 +18,7 @@ let mainWindow: BrowserWindow | null = null;
 let mainEventBus: MainEventBus | null = null;
 let adapterRegistry: AdapterRegistry | null = null;
 let adapterManager: AdapterManager | null = null;
+let webSocketService: WebSocketService | null = null;
 
 function createWindow(): void {
   // Create the browser window.
@@ -90,6 +92,24 @@ async function initializeServices(): Promise<void> {
           eventTypes: ['message', 'follow', 'subscription']
         }
       });
+    }
+    
+    // Initialize WebSocket service
+    if (mainEventBus) {
+      // Get WebSocket settings from config or use defaults
+      const configStore = getConfigStore();
+      const port = configStore.get('websocket.port', 8081);
+      const pingInterval = configStore.get('websocket.pingInterval', 30000);
+
+      // Create and start WebSocket service
+      webSocketService = WebSocketService.getInstance(mainEventBus, { port, pingInterval });
+      const started = webSocketService.start();
+      
+      if (started) {
+        console.log(`WebSocket server started on port ${port}`);
+      } else {
+        console.error('Failed to start WebSocket server');
+      }
     }
     
     // Publish startup event
@@ -194,12 +214,19 @@ function setupConfigIpc(): void {
  */
 async function cleanupServices(): Promise<void> {
   try {
+    // Stop WebSocket server
+    if (webSocketService) {
+      webSocketService.stop();
+      console.log('WebSocket server stopped');
+    }
+    
     // Dispose of adapters
     if (adapterManager) {
       await adapterManager.dispose();
     }
     
     // Clean up references
+    webSocketService = null;
     mainEventBus = null;
     adapterRegistry = null;
     adapterManager = null;
