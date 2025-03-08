@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Versions from './components/Versions'
 import EventsDemo from './components/EventsDemo'
+import EnhancedEventsDemo from './components/EnhancedEventsDemo'
 import AdapterStatus from './components/AdapterStatus'
 import Settings from './components/Settings'
 import { TrpcDemo } from './components/TrpcDemo'
@@ -10,7 +11,7 @@ import './assets/main.css'
 
 function App(): JSX.Element {
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'events' | 'settings' | 'trpc' | 'websocket'
+    'dashboard' | 'events' | 'enhanced-events' | 'settings' | 'trpc' | 'websocket'
   >('dashboard')
 
   const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
@@ -51,6 +52,18 @@ function App(): JSX.Element {
                 onClick={() => setActiveTab('events')}
               >
                 Events
+              </button>
+            </li>
+            <li>
+              <button
+                className={`w-full text-left px-4 py-2 ${
+                  activeTab === 'enhanced-events'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setActiveTab('enhanced-events')}
+              >
+                Enhanced Events
               </button>
             </li>
             <li>
@@ -131,6 +144,8 @@ function App(): JSX.Element {
           )}
 
           {activeTab === 'events' && <EventsDemo />}
+          
+          {activeTab === 'enhanced-events' && <EnhancedEventsDemo />}
 
           {activeTab === 'settings' && <Settings />}
 

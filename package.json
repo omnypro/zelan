@@ -29,6 +29,7 @@
     "@trpc/react-query": "^10.45.2",
     "@trpc/server": "^10.45.2",
     "@types/ws": "^8.18.0",
+    "date-fns": "^4.1.0",
     "electron-updater": "^6.3.9",
     "obs-websocket-js": "^5.0.6",
     "postcss": "^8.5.3",
