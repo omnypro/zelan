@@ -1,2 +1,2 @@
-export * from './ObsAdapter';
-export * from './ObsAdapterFactory';
+export * from './ObsAdapter'
+export * from './ObsAdapterFactory'

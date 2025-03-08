@@ -1,15 +1,15 @@
-import { BaseAdapterFactory } from '../../../shared/adapters/base';
-import { EventBus } from '../../../shared/core/bus';
-import { ObsAdapter, ObsAdapterOptions } from './ObsAdapter';
+import { BaseAdapterFactory } from '@s/adapters/base'
+import { EventBus } from '@s/core/bus'
+import { ObsAdapter, ObsAdapterOptions } from './ObsAdapter'
 
 /**
  * Factory for creating OBS adapters
  */
 export class ObsAdapterFactory extends BaseAdapterFactory<ObsAdapter> {
   constructor() {
-    super('obs');
+    super('obs')
   }
-  
+
   /**
    * Create a new OBS adapter
    */
@@ -19,6 +19,6 @@ export class ObsAdapterFactory extends BaseAdapterFactory<ObsAdapter> {
     options: Partial<ObsAdapterOptions>,
     eventBus: EventBus
   ): ObsAdapter {
-    return new ObsAdapter(id, name, options, eventBus);
+    return new ObsAdapter(id, name, options, eventBus)
   }
 }

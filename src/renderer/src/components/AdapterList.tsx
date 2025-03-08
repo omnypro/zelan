@@ -1,24 +1,24 @@
-import React, { useState } from 'react';
-import { AdapterStatus } from '../../../shared/adapters/interfaces/AdapterStatus';
+import React, { useState } from 'react'
+import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
 
 export interface Adapter {
-  id: string;
-  type: string;
-  name: string;
-  enabled: boolean;
+  id: string
+  type: string
+  name: string
+  enabled: boolean
   status?: {
-    status?: AdapterStatus;
-    message?: string;
-  };
-  options: Record<string, any>;
+    status?: AdapterStatus
+    message?: string
+  }
+  options: Record<string, any>
 }
 
 interface AdapterListProps {
-  adapters: Adapter[];
-  loadingAdapterId?: string | null;
-  onStartAdapter: (id: string) => Promise<void>;
-  onStopAdapter: (id: string) => Promise<void>;
-  onDeleteAdapter: (id: string) => Promise<void>;
+  adapters: Adapter[]
+  loadingAdapterId?: string | null
+  onStartAdapter: (id: string) => Promise<void>
+  onStopAdapter: (id: string) => Promise<void>
+  onDeleteAdapter: (id: string) => Promise<void>
 }
 
 const AdapterList: React.FC<AdapterListProps> = ({
@@ -28,68 +28,66 @@ const AdapterList: React.FC<AdapterListProps> = ({
   onStopAdapter,
   onDeleteAdapter
 }) => {
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null)
 
   const handleStartAdapter = async (id: string) => {
-    setError(null);
+    setError(null)
     try {
-      await onStartAdapter(id);
+      await onStartAdapter(id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start adapter');
-      console.error('Error starting adapter:', err);
+      setError(err instanceof Error ? err.message : 'Failed to start adapter')
+      console.error('Error starting adapter:', err)
     }
-  };
+  }
 
   const handleStopAdapter = async (id: string) => {
-    setError(null);
+    setError(null)
     try {
-      await onStopAdapter(id);
+      await onStopAdapter(id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop adapter');
-      console.error('Error stopping adapter:', err);
+      setError(err instanceof Error ? err.message : 'Failed to stop adapter')
+      console.error('Error stopping adapter:', err)
     }
-  };
+  }
 
   const handleDeleteAdapter = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this adapter?')) {
-      return;
+      return
     }
-    
-    setError(null);
+
+    setError(null)
     try {
-      await onDeleteAdapter(id);
+      await onDeleteAdapter(id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete adapter');
-      console.error('Error deleting adapter:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete adapter')
+      console.error('Error deleting adapter:', err)
     }
-  };
+  }
 
   const getStatusClass = (status?: AdapterStatus) => {
     // Convert status to string if it's an object
-    const statusValue = typeof status === 'object' && status !== null 
-      ? String(status) 
-      : status;
-      
+    const statusValue = typeof status === 'object' && status !== null ? String(status) : status
+
     switch (statusValue) {
       case AdapterStatus.CONNECTED:
-        return 'bg-green-100 text-green-800';
+        return 'bg-green-100 text-green-800'
       case AdapterStatus.CONNECTING:
       case AdapterStatus.RECONNECTING:
-        return 'bg-yellow-100 text-yellow-800';
+        return 'bg-yellow-100 text-yellow-800'
       case AdapterStatus.ERROR:
-        return 'bg-red-100 text-red-800';
+        return 'bg-red-100 text-red-800'
       case AdapterStatus.DISCONNECTED:
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-gray-100 text-gray-800'
     }
-  };
+  }
 
   if (adapters.length === 0) {
     return (
       <div className="p-4 border rounded-lg shadow-sm bg-white">
         <p className="text-center text-gray-500">No adapters found</p>
       </div>
-    );
+    )
   }
 
   return (
@@ -107,10 +105,12 @@ const AdapterList: React.FC<AdapterListProps> = ({
               <div className="mb-3 sm:mb-0">
                 <div className="flex items-center">
                   <span className="font-medium text-lg">{adapter.name}</span>
-                  <span className={`ml-2 text-xs px-2 py-1 rounded ${getStatusClass(adapter.status?.status)}`}>
-                    {typeof adapter.status?.status === 'object' 
-                      ? 'complex status' 
-                      : (adapter.status?.status || 'unknown')}
+                  <span
+                    className={`ml-2 text-xs px-2 py-1 rounded ${getStatusClass(adapter.status?.status)}`}
+                  >
+                    {typeof adapter.status?.status === 'object'
+                      ? 'complex status'
+                      : adapter.status?.status || 'unknown'}
                   </span>
                   <span className="ml-2 text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded">
                     {adapter.type}
@@ -120,7 +120,7 @@ const AdapterList: React.FC<AdapterListProps> = ({
                   <p className="text-sm text-gray-500 mt-1">{adapter.status.message}</p>
                 )}
               </div>
-              
+
               <div className="flex space-x-2">
                 {String(adapter.status?.status) === AdapterStatus.CONNECTED ? (
                   <button
@@ -134,21 +134,21 @@ const AdapterList: React.FC<AdapterListProps> = ({
                   <button
                     onClick={() => handleStartAdapter(adapter.id)}
                     disabled={
-                      loadingAdapterId === adapter.id || 
-                      String(adapter.status?.status) === AdapterStatus.CONNECTING || 
+                      loadingAdapterId === adapter.id ||
+                      String(adapter.status?.status) === AdapterStatus.CONNECTING ||
                       String(adapter.status?.status) === AdapterStatus.RECONNECTING
                     }
                     className="px-3 py-1 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
                   >
-                    {loadingAdapterId === adapter.id 
-                      ? 'Starting...' 
-                      : String(adapter.status?.status) === AdapterStatus.CONNECTING || String(adapter.status?.status) === AdapterStatus.RECONNECTING
+                    {loadingAdapterId === adapter.id
+                      ? 'Starting...'
+                      : String(adapter.status?.status) === AdapterStatus.CONNECTING ||
+                          String(adapter.status?.status) === AdapterStatus.RECONNECTING
                         ? 'Connecting...'
-                        : 'Start'
-                    }
+                        : 'Start'}
                   </button>
                 )}
-                
+
                 <button
                   onClick={() => handleDeleteAdapter(adapter.id)}
                   disabled={loadingAdapterId === adapter.id}
@@ -158,13 +158,13 @@ const AdapterList: React.FC<AdapterListProps> = ({
                 </button>
               </div>
             </div>
-            
+
             <div className="mt-3">
               <div className="text-sm">
                 <span className="font-medium">ID: </span>
                 <span className="text-gray-600">{adapter.id}</span>
               </div>
-              
+
               <div className="mt-2">
                 <details className="text-sm">
                   <summary className="cursor-pointer font-medium text-blue-600 hover:text-blue-800">
@@ -180,7 +180,7 @@ const AdapterList: React.FC<AdapterListProps> = ({
         ))}
       </ul>
     </div>
-  );
-};
+  )
+}
 
-export default AdapterList;
+export default AdapterList

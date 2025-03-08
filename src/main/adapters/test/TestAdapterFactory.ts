@@ -1,15 +1,15 @@
-import { BaseAdapterFactory } from '../../../shared/adapters/base';
-import { EventBus } from '../../../shared/core/bus';
-import { TestAdapter, TestAdapterOptions } from './TestAdapter';
+import { BaseAdapterFactory } from '@s/adapters/base'
+import { EventBus } from '@s/core/bus'
+import { TestAdapter, TestAdapterOptions } from './TestAdapter'
 
 /**
  * Factory for creating test adapters
  */
 export class TestAdapterFactory extends BaseAdapterFactory<TestAdapter> {
   constructor() {
-    super('test');
+    super('test')
   }
-  
+
   /**
    * Create a new test adapter
    */
@@ -19,6 +19,6 @@ export class TestAdapterFactory extends BaseAdapterFactory<TestAdapter> {
     options: Partial<TestAdapterOptions>,
     eventBus: EventBus
   ): TestAdapter {
-    return new TestAdapter(id, name, options, eventBus);
+    return new TestAdapter(id, name, options, eventBus)
   }
 }

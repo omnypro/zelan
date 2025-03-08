@@ -1,39 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react'
 
 interface AdapterCreationFormProps {
-  onCreateAdapter: (config: any) => Promise<void>;
+  onCreateAdapter: (config: any) => Promise<void>
 }
 
 const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapter }) => {
-  const [adapterType, setAdapterType] = useState<string>('test');
-  const [name, setName] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [adapterType, setAdapterType] = useState<string>('test')
+  const [name, setName] = useState<string>('')
+  const [isLoading, setIsLoading] = useState<boolean>(false)
+  const [error, setError] = useState<string | null>(null)
 
   // OBS specific options
-  const [obsHost, setObsHost] = useState<string>('localhost');
-  const [obsPort, setObsPort] = useState<number>(4455);
-  const [obsPassword, setObsPassword] = useState<string>('');
-  const [autoReconnect, setAutoReconnect] = useState<boolean>(true);
+  const [obsHost, setObsHost] = useState<string>('localhost')
+  const [obsPort, setObsPort] = useState<number>(4455)
+  const [obsPassword, setObsPassword] = useState<string>('')
+  const [autoReconnect, setAutoReconnect] = useState<boolean>(true)
 
   // Test adapter options
-  const [eventInterval, setEventInterval] = useState<number>(3000);
-  const [simulateErrors, setSimulateErrors] = useState<boolean>(false);
+  const [eventInterval, setEventInterval] = useState<number>(3000)
+  const [simulateErrors, setSimulateErrors] = useState<boolean>(false)
 
   // Generate a unique ID for the adapter
   const generateAdapterId = () => {
-    return `${adapterType}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-  };
+    return `${adapterType}-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+  }
 
   // Form submission handler
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
+    e.preventDefault()
+    setIsLoading(true)
+    setError(null)
 
     try {
-      const id = generateAdapterId();
-      let options: any = {};
+      const id = generateAdapterId()
+      let options: any = {}
 
       // Configure options based on adapter type
       if (adapterType === 'obs') {
@@ -43,13 +43,13 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
           password: obsPassword || undefined,
           autoReconnect,
           reconnectInterval: 5000
-        };
+        }
       } else if (adapterType === 'test') {
         options = {
           eventInterval,
           simulateErrors,
           eventTypes: ['message', 'follow', 'subscription']
-        };
+        }
       }
 
       // Create the adapter config
@@ -59,28 +59,28 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
         name: name || `${adapterType.charAt(0).toUpperCase() + adapterType.slice(1)} Adapter`,
         enabled: true,
         options
-      };
+      }
 
-      await onCreateAdapter(adapterConfig);
-      
+      await onCreateAdapter(adapterConfig)
+
       // Reset form
-      setName('');
-      
+      setName('')
+
       if (adapterType === 'obs') {
-        setObsHost('localhost');
-        setObsPort(4455);
-        setObsPassword('');
+        setObsHost('localhost')
+        setObsPort(4455)
+        setObsPassword('')
       } else if (adapterType === 'test') {
-        setEventInterval(3000);
-        setSimulateErrors(false);
+        setEventInterval(3000)
+        setSimulateErrors(false)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create adapter');
-      console.error('Error creating adapter:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create adapter')
+      console.error('Error creating adapter:', err)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
@@ -122,7 +122,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
         {adapterType === 'obs' && (
           <div className="bg-gray-50 p-4 rounded-md mb-4">
             <h4 className="font-medium mb-3">OBS WebSocket Settings</h4>
-            
+
             <div className="mb-3">
               <label className="block text-sm font-medium mb-1">Host</label>
               <input
@@ -134,7 +134,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 placeholder="localhost"
               />
             </div>
-            
+
             <div className="mb-3">
               <label className="block text-sm font-medium mb-1">Port</label>
               <input
@@ -146,7 +146,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 placeholder="4455"
               />
             </div>
-            
+
             <div className="mb-3">
               <label className="block text-sm font-medium mb-1">Password (optional)</label>
               <input
@@ -158,7 +158,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 placeholder="Leave empty if no password"
               />
             </div>
-            
+
             <div className="flex items-center">
               <input
                 type="checkbox"
@@ -179,7 +179,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
         {adapterType === 'test' && (
           <div className="bg-gray-50 p-4 rounded-md mb-4">
             <h4 className="font-medium mb-3">Test Adapter Settings</h4>
-            
+
             <div className="mb-3">
               <label className="block text-sm font-medium mb-1">Event Interval (ms)</label>
               <input
@@ -196,7 +196,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 How often test events will be generated (in milliseconds)
               </p>
             </div>
-            
+
             <div className="flex items-center">
               <input
                 type="checkbox"
@@ -224,7 +224,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
         </div>
       </form>
     </div>
-  );
-};
+  )
+}
 
-export default AdapterCreationForm;
+export default AdapterCreationForm

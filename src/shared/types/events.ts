@@ -36,34 +36,34 @@ export enum AdapterEventType {
  * Event source information
  */
 export interface EventSource {
-  id: string;
-  name: string;
-  type: string;
+  id: string
+  name: string
+  type: string
 }
 
 /**
  * Base event interface
  */
 export interface BaseEvent<T = unknown> {
-  id: string;
-  timestamp: number;
-  source: EventSource;
-  category: EventCategory;
-  type: string;
-  data: T;
+  id: string
+  timestamp: number
+  source: EventSource
+  category: EventCategory
+  type: string
+  data: T
   metadata: {
-    version: string;
-    [key: string]: unknown;
-  };
-  
+    version: string
+    [key: string]: unknown
+  }
+
   // For compatibility with older code
-  payload?: T;
+  payload?: T
 }
 
 /**
  * System information event payload
  */
 export interface SystemInfoPayload {
-  message?: string;
-  appVersion?: string;
+  message?: string
+  appVersion?: string
 }

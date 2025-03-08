@@ -1,106 +1,97 @@
-import { Subject, Observable } from 'rxjs';
-import { filter, share } from 'rxjs/operators';
-import { BrowserWindow, WebContents } from 'electron';
-import { 
-  BaseEvent, 
-  EventCategory,
-  SystemEventType
-} from '../../../shared/types/events';
-import { createSystemEvent } from '../../../shared/core/events';
-import { EventBus } from '../../../shared/core/bus/EventBus';
-import { EventCache } from '../events/EventCache';
+import { Subject, Observable } from 'rxjs'
+import { filter, share } from 'rxjs/operators'
+import { BrowserWindow, WebContents } from 'electron'
+import { BaseEvent, EventCategory, SystemEventType } from '@s/types/events'
+import { createSystemEvent } from '@s/core/events'
+import { EventBus } from '@s/core/bus/EventBus'
+import { EventCache } from '../events/EventCache'
 
 /**
  * Main process implementation of the EventBus
  */
 export class MainEventBus implements EventBus {
-  private eventSubject = new Subject<BaseEvent>();
-  private eventCache: EventCache;
-  private rendererWindows = new Set<WebContents>();
-  
+  private eventSubject = new Subject<BaseEvent>()
+  private eventCache: EventCache
+  private rendererWindows = new Set<WebContents>()
+
   /**
    * Create the main event bus with event cache
    */
   constructor(eventCache: EventCache) {
-    this.eventCache = eventCache;
-    
+    this.eventCache = eventCache
+
     // All events are multicasted to multiple subscribers
-    this.events$ = this.eventSubject.asObservable().pipe(share());
-    
+    this.events$ = this.eventSubject.asObservable().pipe(share())
+
     // Cache all events for short-term access
-    this.events$.subscribe(event => {
-      this.eventCache.addEvent(event);
-    });
+    this.events$.subscribe((event) => {
+      this.eventCache.addEvent(event)
+    })
   }
-  
+
   /**
-   * Observable of all events 
+   * Observable of all events
    */
-  readonly events$: Observable<BaseEvent>;
-  
+  readonly events$: Observable<BaseEvent>
+
   /**
    * Add a new window to receive events
    */
   addWebContents(webContents: WebContents): void {
     if (!this.rendererWindows.has(webContents)) {
-      this.rendererWindows.add(webContents);
-      
+      this.rendererWindows.add(webContents)
+
       // Remove when destroyed
       webContents.once('destroyed', () => {
-        this.rendererWindows.delete(webContents);
-      });
-      
+        this.rendererWindows.delete(webContents)
+      })
+
       // Send welcome event
-      this.publish(createSystemEvent(
-        SystemEventType.INFO,
-        'Renderer process connected to event bus',
-        'info',
-        { windowId: webContents.id }
-      ));
+      this.publish(
+        createSystemEvent(SystemEventType.INFO, 'Renderer process connected to event bus', 'info', {
+          windowId: webContents.id
+        })
+      )
     }
   }
-  
+
   /**
    * Add a browser window to receive events
    */
   addWindow(window: BrowserWindow): void {
-    this.addWebContents(window.webContents);
+    this.addWebContents(window.webContents)
   }
-  
+
   /**
    * Get events filtered by category
    */
   getEventsByCategory$(category: EventCategory): Observable<BaseEvent> {
-    return this.events$.pipe(
-      filter(event => event.category === category)
-    );
+    return this.events$.pipe(filter((event) => event.category === category))
   }
-  
+
   /**
    * Get events filtered by type
    */
   getEventsByType$(type: string): Observable<BaseEvent> {
-    return this.events$.pipe(
-      filter(event => event.type === type)
-    );
+    return this.events$.pipe(filter((event) => event.type === type))
   }
-  
+
   /**
    * Publish an event to all subscribers
    */
   publish(event: BaseEvent): void {
     // Add timestamp if not present
     if (!event.timestamp) {
-      event.timestamp = Date.now();
+      event.timestamp = Date.now()
     }
-    
+
     // Publish to subscribers
-    this.eventSubject.next(event);
-    
+    this.eventSubject.next(event)
+
     // Forward to all renderer processes
-    this.forwardToRenderers(event);
+    this.forwardToRenderers(event)
   }
-  
+
   /**
    * Forward event to all connected renderer processes
    */
@@ -108,34 +99,38 @@ export class MainEventBus implements EventBus {
     // Send to each window that's still valid
     for (const webContents of this.rendererWindows) {
       if (!webContents.isDestroyed()) {
-        webContents.send('zelan:event', event);
+        webContents.send('zelan:event', event)
       }
     }
   }
-  
+
   /**
    * Get recent events with filtering options
    */
-  getRecentEvents(options: {
-    limit?: number;
-    category?: EventCategory | string;
-    type?: string;
-    sourceId?: string;
-    sourceType?: string;
-    since?: number;
-  } = {}): BaseEvent[] {
-    return this.eventCache.getEvents(options);
+  getRecentEvents(
+    options: {
+      limit?: number
+      category?: EventCategory | string
+      type?: string
+      sourceId?: string
+      sourceType?: string
+      since?: number
+    } = {}
+  ): BaseEvent[] {
+    return this.eventCache.getEvents(options)
   }
-  
+
   /**
    * Get a reactive stream of recent events
    */
-  recentEvents$(options: {
-    category?: EventCategory | string;
-    type?: string;
-    sourceId?: string;
-    sourceType?: string;
-  } = {}): Observable<BaseEvent[]> {
-    return this.eventCache.filteredEvents$(options);
+  recentEvents$(
+    options: {
+      category?: EventCategory | string
+      type?: string
+      sourceId?: string
+      sourceType?: string
+    } = {}
+  ): Observable<BaseEvent[]> {
+    return this.eventCache.filteredEvents$(options)
   }
 }

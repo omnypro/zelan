@@ -1,6 +1,6 @@
-import { RendererEventBus } from './RendererEventBus';
+import { RendererEventBus } from './RendererEventBus'
 
 // Create singleton instance
-export const rendererEventBus = new RendererEventBus();
+export const rendererEventBus = new RendererEventBus()
 
-export * from './RendererEventBus';
+export * from './RendererEventBus'

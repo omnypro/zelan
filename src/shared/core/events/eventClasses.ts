@@ -1,31 +1,31 @@
-import { EventCategory, SystemEventType, SystemInfoPayload, BaseEvent } from '../../types/events';
-import { createSystemEvent, createObsEvent, createEvent } from './createEvents';
-import { ObsEventType } from '../../types/events/ObsEvents';
+import { EventCategory, SystemEventType, SystemInfoPayload, BaseEvent } from '@s/types/events'
+import { createSystemEvent, createObsEvent, createEvent } from './createEvents'
+import { ObsEventType } from '@s/types/events/ObsEvents'
 
 /**
  * Base class for all event types
  */
 export class Event<T> implements BaseEvent<T> {
-  id: string;
-  timestamp: number;
-  category: EventCategory;
-  type: string;
+  id: string
+  timestamp: number
+  category: EventCategory
+  type: string
   source: {
-    id: string;
-    name: string;
-    type: string;
-  };
-  data: T;
+    id: string
+    name: string
+    type: string
+  }
+  data: T
   metadata: {
-    version: string;
-    [key: string]: unknown;
-  };
+    version: string
+    [key: string]: unknown
+  }
 
   // For backward compatibility
   get payload(): T {
-    return this.data;
+    return this.data
   }
-  
+
   constructor(
     category: EventCategory,
     type: string,
@@ -34,14 +34,14 @@ export class Event<T> implements BaseEvent<T> {
     sourceName: string = sourceId,
     sourceType: string = category
   ) {
-    const event = createEvent(category, type, data, sourceId, sourceName, sourceType);
-    this.id = event.id;
-    this.timestamp = event.timestamp;
-    this.category = event.category;
-    this.type = event.type;
-    this.source = event.source;
-    this.data = event.data;
-    this.metadata = event.metadata;
+    const event = createEvent(category, type, data, sourceId, sourceName, sourceType)
+    this.id = event.id
+    this.timestamp = event.timestamp
+    this.category = event.category
+    this.type = event.type
+    this.source = event.source
+    this.data = event.data
+    this.metadata = event.metadata
   }
 }
 
@@ -54,7 +54,7 @@ export class SystemInfoEvent extends Event<SystemInfoPayload> {
     level: 'info' | 'warning' | 'error' = 'info',
     details?: Record<string, unknown>
   ) {
-    const event = createSystemEvent(SystemEventType.INFO, message, level, details);
+    const event = createSystemEvent(SystemEventType.INFO, message, level, details)
     super(
       event.category,
       event.type,
@@ -62,7 +62,7 @@ export class SystemInfoEvent extends Event<SystemInfoPayload> {
       event.source.id,
       event.source.name,
       event.source.type
-    );
+    )
   }
 }
 
@@ -70,11 +70,8 @@ export class SystemInfoEvent extends Event<SystemInfoPayload> {
  * System error event class
  */
 export class SystemErrorEvent extends Event<SystemInfoPayload> {
-  constructor(
-    message: string,
-    details?: Record<string, unknown>
-  ) {
-    const event = createSystemEvent(SystemEventType.ERROR, message, 'error', details);
+  constructor(message: string, details?: Record<string, unknown>) {
+    const event = createSystemEvent(SystemEventType.ERROR, message, 'error', details)
     super(
       event.category,
       event.type,
@@ -82,7 +79,7 @@ export class SystemErrorEvent extends Event<SystemInfoPayload> {
       event.source.id,
       event.source.name,
       event.source.type
-    );
+    )
   }
 }
 
@@ -90,13 +87,8 @@ export class SystemErrorEvent extends Event<SystemInfoPayload> {
  * OBS event class
  */
 export class ObsEvent<T> extends Event<T> {
-  constructor(
-    type: ObsEventType,
-    data: T,
-    adapterId: string,
-    adapterName: string
-  ) {
-    const event = createObsEvent(type, data, adapterId, adapterName);
+  constructor(type: ObsEventType, data: T, adapterId: string, adapterName: string) {
+    const event = createObsEvent(type, data, adapterId, adapterName)
     super(
       event.category,
       event.type,
@@ -104,7 +96,7 @@ export class ObsEvent<T> extends Event<T> {
       event.source.id,
       event.source.name,
       event.source.type
-    );
+    )
   }
 }
 
@@ -112,20 +104,7 @@ export class ObsEvent<T> extends Event<T> {
  * Adapter event class
  */
 export class AdapterEvent<T> extends Event<T> {
-  constructor(
-    type: string,
-    data: T,
-    adapterId: string,
-    adapterName: string,
-    adapterType: string
-  ) {
-    super(
-      EventCategory.ADAPTER,
-      type,
-      data,
-      adapterId,
-      adapterName, 
-      adapterType
-    );
+  constructor(type: string, data: T, adapterId: string, adapterName: string, adapterType: string) {
+    super(EventCategory.ADAPTER, type, data, adapterId, adapterName, adapterType)
   }
 }

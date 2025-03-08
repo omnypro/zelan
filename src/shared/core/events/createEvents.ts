@@ -1,19 +1,14 @@
-import {
-  BaseEvent,
-  EventCategory,
-  SystemEventType,
-  SystemInfoPayload
-} from '../../types/events';
+import { BaseEvent, EventCategory, SystemEventType, SystemInfoPayload } from '@s/types/events'
 
 // Re-export for convenience
-import { ObsEventType } from '../../types/events/ObsEvents';
-export { ObsEventType };
+import { ObsEventType } from '@s/types/events/ObsEvents'
+export { ObsEventType }
 
 /**
  * Generate a unique event ID
  */
 function generateEventId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5)
 }
 
 /**
@@ -43,7 +38,7 @@ export function createEvent<T>(
     },
     // For backward compatibility
     payload: data
-  };
+  }
 }
 
 /**
@@ -55,14 +50,7 @@ export function createObsEvent<T>(
   adapterId: string,
   adapterName: string
 ): BaseEvent<T> {
-  return createEvent(
-    EventCategory.OBS,
-    type,
-    data,
-    adapterId,
-    adapterName,
-    'obs'
-  );
+  return createEvent(EventCategory.OBS, type, data, adapterId, adapterName, 'obs')
 }
 
 /**
@@ -85,5 +73,5 @@ export function createSystemEvent(
     'system',
     'System',
     'system'
-  );
+  )
 }

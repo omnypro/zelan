@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
-import { EventCategory } from '../../../shared/types/events';
-import { createEventStream } from '../../../shared/core/bus/createEventStream';
-import { rendererEventBus } from '../services/eventBus';
-import { useObservable, useObservableWithStatus } from './useObservable';
+import { useMemo } from 'react'
+import { Observable } from 'rxjs'
+import { map } from 'rxjs/operators'
+import { EventCategory } from '@s/types/events'
+import { createEventStream } from '@s/core/bus/createEventStream'
+import { rendererEventBus } from '@r/services/eventBus'
+import { useObservable, useObservableWithStatus } from './useObservable'
 
 /**
  * Create an event stream for a specific category and type
@@ -13,13 +13,10 @@ import { useObservable, useObservableWithStatus } from './useObservable';
  * @param type Optional event type
  * @returns Event stream
  */
-export function useEventStreamSource<T = unknown>(
-  category: EventCategory,
-  type?: string
-) {
+export function useEventStreamSource<T = unknown>(category: EventCategory, type?: string) {
   return useMemo(() => {
-    return createEventStream<T>(rendererEventBus, category, type);
-  }, [category, type]);
+    return createEventStream<T>(rendererEventBus, category, type)
+  }, [category, type])
 }
 
 /**
@@ -34,11 +31,11 @@ export function useEvents<T = unknown>(
   type?: string,
   limit: number = 100
 ): Array<{ id: string; timestamp: number; payload: T }> {
-  const stream$ = useEventStreamSource<T>(category, type);
+  const stream$ = useEventStreamSource<T>(category, type)
 
   const events$ = useMemo(() => {
     return new Observable<Array<{ id: string; timestamp: number; payload: T }>>((observer) => {
-      const events: Array<{ id: string; timestamp: number; payload: T }> = [];
+      const events: Array<{ id: string; timestamp: number; payload: T }> = []
 
       const subscription = stream$.subscribe({
         next: (event) => {
@@ -46,27 +43,27 @@ export function useEvents<T = unknown>(
             id: event.id,
             timestamp: event.timestamp,
             payload: event.payload
-          });
+          })
 
           // Keep only the latest events
           if (events.length > limit) {
-            events.pop();
+            events.pop()
           }
 
-          observer.next([...events]);
+          observer.next([...events])
         },
         error: (err) => observer.error(err),
         complete: () => observer.complete()
-      });
+      })
 
       // Initial empty array
-      observer.next([]);
+      observer.next([])
 
-      return () => subscription.unsubscribe();
-    });
-  }, [stream$, limit]);
+      return () => subscription.unsubscribe()
+    })
+  }, [stream$, limit])
 
-  return useObservable(events$, []);
+  return useObservable(events$, [])
 }
 
 /**
@@ -81,20 +78,20 @@ export function useEventPayload<T = unknown>(
   type: string,
   initialValue?: T
 ): {
-  payload: T | undefined;
-  loading: boolean;
-  error: Error | null;
+  payload: T | undefined
+  loading: boolean
+  error: Error | null
 } {
-  const stream$ = useEventStreamSource<T>(category, type);
-  const payloads$ = useMemo(() => stream$.pipe(map((event) => event.payload)), [stream$]);
+  const stream$ = useEventStreamSource<T>(category, type)
+  const payloads$ = useMemo(() => stream$.pipe(map((event) => event.payload)), [stream$])
 
-  const result = useObservableWithStatus(payloads$, initialValue);
+  const result = useObservableWithStatus(payloads$, initialValue)
 
   return {
     payload: result.value,
     loading: result.loading,
     error: result.error
-  };
+  }
 }
 
 /**
@@ -118,7 +115,7 @@ export function useEventPublisher<T = unknown>(
         category,
         type,
         payload
-      });
-    };
-  }, [category, type, source]);
+      })
+    }
+  }, [category, type, source])
 }

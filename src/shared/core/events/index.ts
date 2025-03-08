@@ -1,2 +1,2 @@
-export * from './createEvents';
-export * from './eventClasses';
+export * from './createEvents'
+export * from './eventClasses'

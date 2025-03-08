@@ -1,14 +1,14 @@
-import { WebSocket, WebSocketServer as WSServer } from 'ws';
-import { Subscription } from 'rxjs';
-import { EventBus } from '../../../shared/core/bus';
-import { BaseEvent, EventCategory, SystemEventType } from '../../../shared/types/events';
+import { WebSocket, WebSocketServer as WSServer } from 'ws'
+import { Subscription } from 'rxjs'
+import { EventBus } from '@s/core/bus'
+import { BaseEvent, EventCategory, SystemEventType } from '@s/types/events'
 
 /**
  * WebSocket server configuration
  */
 export interface WebSocketServerConfig {
-  port: number;
-  pingInterval: number; // in milliseconds
+  port: number
+  pingInterval: number // in milliseconds
 }
 
 /**
@@ -17,21 +17,24 @@ export interface WebSocketServerConfig {
 const DEFAULT_CONFIG: WebSocketServerConfig = {
   port: 8081,
   pingInterval: 30000 // 30 seconds
-};
+}
 
 /**
  * WebSocket server for exposing events to external clients
  */
 export class WebSocketServer {
-  private server: WSServer | null = null;
-  private clients: Set<WebSocket> = new Set();
-  private eventSubscription: Subscription | null = null;
-  private pingInterval: NodeJS.Timeout | null = null;
-  private config: WebSocketServerConfig;
-  private isRunning = false;
+  private server: WSServer | null = null
+  private clients: Set<WebSocket> = new Set()
+  private eventSubscription: Subscription | null = null
+  private pingInterval: NodeJS.Timeout | null = null
+  private config: WebSocketServerConfig
+  private isRunning = false
 
-  constructor(private eventBus: EventBus, config?: Partial<WebSocketServerConfig>) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+  constructor(
+    private eventBus: EventBus,
+    config?: Partial<WebSocketServerConfig>
+  ) {
+    this.config = { ...DEFAULT_CONFIG, ...config }
   }
 
   /**
@@ -40,33 +43,31 @@ export class WebSocketServer {
    */
   start(): boolean {
     if (this.isRunning) {
-      console.log('WebSocket server is already running');
-      return false;
+      console.log('WebSocket server is already running')
+      return false
     }
 
     try {
       // Create WebSocket server
-      this.server = new WSServer({ port: this.config.port });
-      
+      this.server = new WSServer({ port: this.config.port })
+
       // Set up connection handling
-      this.server.on('connection', this.handleConnection.bind(this));
-      this.server.on('error', this.handleServerError.bind(this));
+      this.server.on('connection', this.handleConnection.bind(this))
+      this.server.on('error', this.handleServerError.bind(this))
 
       // Subscribe to all events
-      this.eventSubscription = this.eventBus.getEvents().subscribe(
-        this.broadcastEvent.bind(this)
-      );
+      this.eventSubscription = this.eventBus.getEvents().subscribe(this.broadcastEvent.bind(this))
 
       // Set up ping interval
-      this.setupPingInterval();
+      this.setupPingInterval()
 
-      this.isRunning = true;
-      console.log(`WebSocket server started on port ${this.config.port}`);
-      return true;
+      this.isRunning = true
+      console.log(`WebSocket server started on port ${this.config.port}`)
+      return true
     } catch (error) {
-      console.error('Failed to start WebSocket server:', error);
-      this.stop();
-      return false;
+      console.error('Failed to start WebSocket server:', error)
+      this.stop()
+      return false
     }
   }
 
@@ -76,38 +77,38 @@ export class WebSocketServer {
   stop(): void {
     // Clear ping interval
     if (this.pingInterval) {
-      clearInterval(this.pingInterval);
-      this.pingInterval = null;
+      clearInterval(this.pingInterval)
+      this.pingInterval = null
     }
 
     // Unsubscribe from events
     if (this.eventSubscription) {
-      this.eventSubscription.unsubscribe();
-      this.eventSubscription = null;
+      this.eventSubscription.unsubscribe()
+      this.eventSubscription = null
     }
 
     // Close all client connections
     for (const client of this.clients) {
       try {
-        client.terminate();
+        client.terminate()
       } catch (e) {
         // Ignore errors when closing clients
       }
     }
-    this.clients.clear();
+    this.clients.clear()
 
     // Close server
     if (this.server) {
       try {
-        this.server.close();
+        this.server.close()
       } catch (e) {
         // Ignore errors when closing server
       }
-      this.server = null;
+      this.server = null
     }
 
-    this.isRunning = false;
-    console.log('WebSocket server stopped');
+    this.isRunning = false
+    console.log('WebSocket server stopped')
   }
 
   /**
@@ -118,7 +119,7 @@ export class WebSocketServer {
       running: this.isRunning,
       clientCount: this.clients.size,
       port: this.config.port
-    };
+    }
   }
 
   /**
@@ -126,31 +127,31 @@ export class WebSocketServer {
    */
   private setupPingInterval(): void {
     this.pingInterval = setInterval(() => {
-      this.pingClients();
-    }, this.config.pingInterval);
+      this.pingClients()
+    }, this.config.pingInterval)
   }
 
   /**
    * Send ping to all clients to keep connections alive
    */
   private pingClients(): void {
-    const deadClients: WebSocket[] = [];
+    const deadClients: WebSocket[] = []
 
     for (const client of this.clients) {
       if (client.readyState === WebSocket.OPEN) {
         try {
-          client.ping();
+          client.ping()
         } catch (e) {
-          deadClients.push(client);
+          deadClients.push(client)
         }
       } else if (client.readyState !== WebSocket.CONNECTING) {
-        deadClients.push(client);
+        deadClients.push(client)
       }
     }
 
     // Remove dead clients
     for (const client of deadClients) {
-      this.removeClient(client);
+      this.removeClient(client)
     }
   }
 
@@ -159,12 +160,12 @@ export class WebSocketServer {
    */
   private handleConnection(client: WebSocket): void {
     // Add to client set
-    this.clients.add(client);
+    this.clients.add(client)
 
     // Setup client event listeners
-    client.on('close', () => this.removeClient(client));
-    client.on('error', () => this.removeClient(client));
-    client.on('pong', () => {}); // Keep alive response
+    client.on('close', () => this.removeClient(client))
+    client.on('error', () => this.removeClient(client))
+    client.on('pong', () => {}) // Keep alive response
 
     // Send welcome message
     this.sendToClient(client, {
@@ -177,9 +178,9 @@ export class WebSocketServer {
         message: 'Connected to Zelan WebSocket Server',
         clientCount: this.clients.size
       }
-    });
+    })
 
-    console.log(`WebSocket client connected. Total clients: ${this.clients.size}`);
+    console.log(`WebSocket client connected. Total clients: ${this.clients.size}`)
   }
 
   /**
@@ -188,12 +189,12 @@ export class WebSocketServer {
   private removeClient(client: WebSocket): void {
     if (this.clients.has(client)) {
       try {
-        client.terminate();
+        client.terminate()
       } catch (e) {
         // Ignore errors when terminating
       }
-      this.clients.delete(client);
-      console.log(`WebSocket client disconnected. Total clients: ${this.clients.size}`);
+      this.clients.delete(client)
+      console.log(`WebSocket client disconnected. Total clients: ${this.clients.size}`)
     }
   }
 
@@ -201,7 +202,7 @@ export class WebSocketServer {
    * Handle server error
    */
   private handleServerError(error: Error): void {
-    console.error('WebSocket server error:', error);
+    console.error('WebSocket server error:', error)
   }
 
   /**
@@ -209,26 +210,29 @@ export class WebSocketServer {
    */
   private broadcastEvent<T>(event: BaseEvent<T>): void {
     if (!this.isRunning || this.clients.size === 0) {
-      return;
+      return
     }
 
-    const deadClients: WebSocket[] = [];
+    const deadClients: WebSocket[] = []
 
     for (const client of this.clients) {
       try {
         if (client.readyState === WebSocket.OPEN) {
-          this.sendToClient(client, event);
-        } else if (client.readyState === WebSocket.CLOSED || client.readyState === WebSocket.CLOSING) {
-          deadClients.push(client);
+          this.sendToClient(client, event)
+        } else if (
+          client.readyState === WebSocket.CLOSED ||
+          client.readyState === WebSocket.CLOSING
+        ) {
+          deadClients.push(client)
         }
       } catch (e) {
-        deadClients.push(client);
+        deadClients.push(client)
       }
     }
 
     // Clean up dead clients
     for (const client of deadClients) {
-      this.removeClient(client);
+      this.removeClient(client)
     }
   }
 
@@ -238,10 +242,10 @@ export class WebSocketServer {
   private sendToClient<T>(client: WebSocket, event: BaseEvent<T>): void {
     try {
       // Stringify with proper error handling for circular references
-      const message = JSON.stringify(event, this.safeReplacer);
-      client.send(message);
+      const message = JSON.stringify(event, this.safeReplacer)
+      client.send(message)
     } catch (error) {
-      console.error('Error sending message to client:', error);
+      console.error('Error sending message to client:', error)
     }
   }
 
@@ -251,8 +255,8 @@ export class WebSocketServer {
   private safeReplacer(_: string, value: any): any {
     // Handle special cases like functions, circular refs, etc.
     if (typeof value === 'function') {
-      return '[Function]';
+      return '[Function]'
     }
-    return value;
+    return value
   }
 }

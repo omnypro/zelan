@@ -1,2 +1,2 @@
-export * from './TestAdapter';
-export * from './TestAdapterFactory';
+export * from './TestAdapter'
+export * from './TestAdapterFactory'

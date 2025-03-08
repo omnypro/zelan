@@ -1,2 +1,2 @@
-export * from './test';
-export * from './obs';
+export * from './test'
+export * from './obs'

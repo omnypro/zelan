@@ -33,51 +33,51 @@ export enum AdapterEventType {
 }
 
 // OBS events are now in ObsEvents.ts
-export * from './ObsEvents';
+export * from './ObsEvents'
 
 /**
  * Base event interface with enhanced metadata
  */
 export interface BaseEvent<T = unknown> {
   // Base identifier properties
-  id: string;
-  timestamp: number;
-  
+  id: string
+  timestamp: number
+
   // Categorization
-  category: EventCategory;
-  type: string;
-  
+  category: EventCategory
+  type: string
+
   // Source metadata
   source: {
-    id: string;
-    name: string;
-    type: string;
-  };
-  
+    id: string
+    name: string
+    type: string
+  }
+
   // Main payload data
-  data: T;
-  
+  data: T
+
   // App-specific metadata
   metadata?: {
-    sessionId?: string;
-    correlationId?: string;
-    version?: string;
-    tags?: string[];
-    ttl?: number; // Time to live in seconds
-  };
-  
+    sessionId?: string
+    correlationId?: string
+    version?: string
+    tags?: string[]
+    ttl?: number // Time to live in seconds
+  }
+
   // API response enrichment properties
-  links?: Record<string, string>; // HATEOAS-style links
+  links?: Record<string, string> // HATEOAS-style links
 }
 
 /**
  * System information event payload
  */
 export interface SystemInfoPayload {
-  message: string;
-  level: 'info' | 'warning' | 'error';
-  appVersion?: string;
-  details?: Record<string, unknown>;
+  message: string
+  level: 'info' | 'warning' | 'error'
+  appVersion?: string
+  details?: Record<string, unknown>
 }
 
 // OBS payload types are now in ObsEvents.ts
@@ -86,10 +86,10 @@ export interface SystemInfoPayload {
  * Generic adapter status event payload
  */
 export interface AdapterStatusPayload {
-  status: string;
-  message?: string;
-  timestamp: number;
-  details?: Record<string, unknown>;
+  status: string
+  message?: string
+  timestamp: number
+  details?: Record<string, unknown>
 }
 
 // Event creation functions are now in src/shared/core/events

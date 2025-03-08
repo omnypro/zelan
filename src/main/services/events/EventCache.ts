@@ -1,167 +1,164 @@
-import { BehaviorSubject, Observable } from 'rxjs';
-import { map, filter } from 'rxjs/operators';
-import { BaseEvent, EventCategory } from '../../../shared/types/events';
-import { ConfigStore } from '../../../shared/core/config/ConfigStore';
+import { BehaviorSubject, Observable } from 'rxjs'
+import { map, filter } from 'rxjs/operators'
+import { BaseEvent, EventCategory } from '@s/types/events'
+import { ConfigStore } from '@s/core/config/ConfigStore'
 
 /**
  * In-memory cache for recent events
  */
 export class EventCache {
-  private events: BaseEvent[] = [];
-  private eventsSubject = new BehaviorSubject<BaseEvent[]>([]);
-  private cacheSize: number;
-  
+  private events: BaseEvent[] = []
+  private eventsSubject = new BehaviorSubject<BaseEvent[]>([])
+  private cacheSize: number
+
   /**
    * Create a new event cache
    */
   constructor(configStore: ConfigStore) {
     // Set a default cache size
-    this.cacheSize = 100;
-    
+    this.cacheSize = 100
+
     try {
       // Try to get from settings, but use default if not available
-      const settings = configStore.getSettings?.();
+      const settings = configStore.getSettings?.()
       if (settings && typeof settings.eventCacheSize === 'number') {
-        this.cacheSize = settings.eventCacheSize;
+        this.cacheSize = settings.eventCacheSize
       }
     } catch (error) {
-      console.warn('Could not get event cache size from settings, using default:', this.cacheSize);
+      console.warn('Could not get event cache size from settings, using default:', this.cacheSize)
     }
-    
+
     // Listen for settings changes
     try {
-      configStore.settings$?.()?.subscribe?.(settings => {
+      configStore.settings$?.()?.subscribe?.((settings) => {
         if (settings && typeof settings.eventCacheSize === 'number') {
-          const newCacheSize = settings.eventCacheSize;
+          const newCacheSize = settings.eventCacheSize
           if (this.cacheSize !== newCacheSize) {
-            this.cacheSize = newCacheSize;
-            this.pruneCache();
+            this.cacheSize = newCacheSize
+            this.pruneCache()
           }
         }
-      });
+      })
     } catch (error) {
-      console.warn('Could not subscribe to settings changes:', error);
+      console.warn('Could not subscribe to settings changes:', error)
     }
   }
-  
+
   /**
    * Add an event to the cache
    */
   addEvent(event: BaseEvent): void {
     // Add to front of array (newest first)
-    this.events.unshift(event);
-    
+    this.events.unshift(event)
+
     // Prune if needed
-    this.pruneCache();
-    
+    this.pruneCache()
+
     // Notify subscribers
-    this.eventsSubject.next([...this.events]);
+    this.eventsSubject.next([...this.events])
   }
-  
+
   /**
    * Reduce cache size if it exceeds the limit
    */
   private pruneCache(): void {
     if (this.events.length > this.cacheSize) {
-      this.events = this.events.slice(0, this.cacheSize);
+      this.events = this.events.slice(0, this.cacheSize)
     }
   }
-  
+
   /**
    * Get events with optional filtering
    */
-  getEvents(options: {
-    limit?: number;
-    category?: EventCategory | string;
-    type?: string;
-    sourceId?: string;
-    sourceType?: string;
-    since?: number; // Timestamp
-  } = {}): BaseEvent[] {
-    const {
-      limit = 20,
-      category,
-      type,
-      sourceId,
-      sourceType,
-      since
-    } = options;
-    
-    let filtered = [...this.events];
-    
+  getEvents(
+    options: {
+      limit?: number
+      category?: EventCategory | string
+      type?: string
+      sourceId?: string
+      sourceType?: string
+      since?: number // Timestamp
+    } = {}
+  ): BaseEvent[] {
+    const { limit = 20, category, type, sourceId, sourceType, since } = options
+
+    let filtered = [...this.events]
+
     // Apply filters
     if (category) {
-      filtered = filtered.filter(e => e.category === category);
+      filtered = filtered.filter((e) => e.category === category)
     }
-    
+
     if (type) {
-      filtered = filtered.filter(e => e.type === type);
+      filtered = filtered.filter((e) => e.type === type)
     }
-    
+
     if (sourceId) {
-      filtered = filtered.filter(e => e.source.id === sourceId);
+      filtered = filtered.filter((e) => e.source.id === sourceId)
     }
-    
+
     if (sourceType) {
-      filtered = filtered.filter(e => e.source.type === sourceType);
+      filtered = filtered.filter((e) => e.source.type === sourceType)
     }
-    
+
     if (since) {
-      filtered = filtered.filter(e => e.timestamp >= since);
+      filtered = filtered.filter((e) => e.timestamp >= since)
     }
-    
+
     // Apply limit
-    return filtered.slice(0, limit);
+    return filtered.slice(0, limit)
   }
-  
+
   /**
    * Get all cached events as an observable
    */
   events$(): Observable<BaseEvent[]> {
-    return this.eventsSubject.asObservable();
+    return this.eventsSubject.asObservable()
   }
-  
+
   /**
    * Get filtered events as an observable
    */
-  filteredEvents$(options: {
-    category?: EventCategory | string;
-    type?: string;
-    sourceId?: string;
-    sourceType?: string;
-  } = {}): Observable<BaseEvent[]> {
-    const { category, type, sourceId, sourceType } = options;
-    
+  filteredEvents$(
+    options: {
+      category?: EventCategory | string
+      type?: string
+      sourceId?: string
+      sourceType?: string
+    } = {}
+  ): Observable<BaseEvent[]> {
+    const { category, type, sourceId, sourceType } = options
+
     return this.eventsSubject.pipe(
-      map(events => {
-        let filtered = events;
-        
+      map((events) => {
+        let filtered = events
+
         if (category) {
-          filtered = filtered.filter(e => e.category === category);
+          filtered = filtered.filter((e) => e.category === category)
         }
-        
+
         if (type) {
-          filtered = filtered.filter(e => e.type === type);
+          filtered = filtered.filter((e) => e.type === type)
         }
-        
+
         if (sourceId) {
-          filtered = filtered.filter(e => e.source.id === sourceId);
+          filtered = filtered.filter((e) => e.source.id === sourceId)
         }
-        
+
         if (sourceType) {
-          filtered = filtered.filter(e => e.source.type === sourceType);
+          filtered = filtered.filter((e) => e.source.type === sourceType)
         }
-        
-        return filtered;
+
+        return filtered
       })
-    );
+    )
   }
-  
+
   /**
    * Clear all events from the cache
    */
   clearCache(): void {
-    this.events = [];
-    this.eventsSubject.next([]);
+    this.events = []
+    this.eventsSubject.next([])
   }
 }

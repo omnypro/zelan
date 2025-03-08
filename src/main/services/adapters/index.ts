@@ -1,1 +1,1 @@
-export * from './AdapterManager';
+export * from './AdapterManager'

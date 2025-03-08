@@ -9,7 +9,9 @@ import electronLogo from './assets/electron.svg'
 import './assets/main.css'
 
 function App(): JSX.Element {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'settings' | 'trpc' | 'websocket'>('dashboard')
+  const [activeTab, setActiveTab] = useState<
+    'dashboard' | 'events' | 'settings' | 'trpc' | 'websocket'
+  >('dashboard')
 
   const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
 

@@ -1,11 +1,11 @@
-import { Observable } from 'rxjs';
-import { EventBus } from './EventBus';
-import { BaseEvent, EventCategory } from '../../types/events';
+import { Observable } from 'rxjs'
+import { EventBus } from './EventBus'
+import { BaseEvent, EventCategory } from '@s/types/events'
 
 /**
  * Event stream type
  */
-export type EventStream<T> = Observable<BaseEvent<T>>;
+export type EventStream<T> = Observable<BaseEvent<T>>
 
 /**
  * Create an event stream filtered by category and optionally by type
@@ -20,8 +20,8 @@ export function createEventStream<T>(
   type?: string
 ): EventStream<T> {
   if (type) {
-    return eventBus.getEventsByCategoryAndType<T>(category, type);
+    return eventBus.getEventsByCategoryAndType<T>(category, type)
   } else {
-    return eventBus.getEventsByCategory<T>(category);
+    return eventBus.getEventsByCategory<T>(category)
   }
 }

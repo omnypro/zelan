@@ -1,4 +1,4 @@
-import { BaseEvent as IBaseEvent, EventCategory } from '../../types/events';
+import { BaseEvent as IBaseEvent, EventCategory } from '@s/types/events'
 
 /**
  * Create a new event with the given parameters
@@ -21,5 +21,5 @@ export function createEvent<T>(
     category,
     type,
     payload
-  };
+  }
 }

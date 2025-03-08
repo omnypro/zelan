@@ -24,46 +24,46 @@ export enum ObsEventType {
  * OBS Scene change event payload
  */
 export interface ObsSceneChangePayload {
-  sceneName: string;
-  previousSceneName?: string;
-  transitionName?: string;
-  transitionDuration?: number;
+  sceneName: string
+  previousSceneName?: string
+  transitionName?: string
+  transitionDuration?: number
   sceneItems?: Array<{
-    id: number;
-    name: string;
-    visible: boolean;
-  }>;
+    id: number
+    name: string
+    visible: boolean
+  }>
 }
 
 /**
  * OBS Stream state event payload
  */
 export interface ObsStreamStatePayload {
-  active: boolean;
-  startTime?: number;
-  duration?: number;
-  kbitsPerSec?: number;
-  numDroppedFrames?: number;
-  numTotalFrames?: number;
+  active: boolean
+  startTime?: number
+  duration?: number
+  kbitsPerSec?: number
+  numDroppedFrames?: number
+  numTotalFrames?: number
 }
 
 /**
  * OBS Recording state event payload
  */
 export interface ObsRecordStatePayload {
-  active: boolean;
-  startTime?: number;
-  duration?: number;
-  filePath?: string;
-  paused?: boolean;
+  active: boolean
+  startTime?: number
+  duration?: number
+  filePath?: string
+  paused?: boolean
 }
 
 /**
  * OBS Source visibility event payload
  */
 export interface ObsSourceVisibilityPayload {
-  sceneName: string;
-  sourceName: string;
-  sourceId: number; 
-  visible: boolean;
+  sceneName: string
+  sourceName: string
+  sourceId: number
+  visible: boolean
 }

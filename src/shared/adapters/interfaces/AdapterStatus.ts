@@ -13,8 +13,8 @@ export enum AdapterStatus {
  * Status with additional information
  */
 export interface AdapterStatusInfo {
-  status: AdapterStatus;
-  message?: string;
-  error?: Error;
-  timestamp: number;
+  status: AdapterStatus
+  message?: string
+  error?: Error
+  timestamp: number
 }

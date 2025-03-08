@@ -1,1 +1,1 @@
-export * from './AdapterRegistry';
+export * from './AdapterRegistry'
