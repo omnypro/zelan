@@ -338,7 +338,7 @@ export class ObsAdapter extends BaseAdapter {
     }
   }
 
-  private handleConnectionError(error: any): void {
+  private handleConnectionError(error: Error | unknown): void {
     // Only log detailed error in development mode to avoid log spam
     if (process.env.NODE_ENV === 'development') {
       console.error('OBS WebSocket connection error:', error);
@@ -346,7 +346,7 @@ export class ObsAdapter extends BaseAdapter {
       console.error('OBS WebSocket connection error');
     }
     
-    this.updateStatus(AdapterStatus.ERROR, 'OBS connection error', error);
+    this.updateStatus(AdapterStatus.ERROR, 'OBS connection error', error instanceof Error ? error : new Error(String(error)));
     this.connectionState = 'error';
     
     // Set up reconnection if enabled and not already reconnecting

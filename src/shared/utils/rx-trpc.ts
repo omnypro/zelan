@@ -1,4 +1,5 @@
 import { Observable, EMPTY, catchError } from 'rxjs';
+import { ServiceAdapter } from '../adapters/interfaces/ServiceAdapter';
 
 /**
  * Standardized error type for cross-process serialization
@@ -65,17 +66,32 @@ export function isValidTRPCResponse(data: unknown): data is { type: string } {
 }
 
 /**
+ * Interface for serialized adapter format
+ */
+export interface SerializableAdapter {
+  id: string;
+  name: string;
+  type: string;
+  status?: {
+    status: string;
+    message?: string;
+    timestamp: number;
+  };
+  enabled: boolean;
+  options?: Record<string, unknown>;
+}
+
+/**
  * Creates a standardized adapter object that is safely serializable
  * for sending between processes
  */
-export function createSerializableAdapter(adapter: any): Record<string, unknown> {
+export function createSerializableAdapter(adapter: ServiceAdapter): SerializableAdapter {
   return toSerializable({
     id: adapter.id,
     name: adapter.name,
     type: adapter.type,
     status: adapter.status,
     enabled: adapter.enabled,
-    // Add other properties as needed, ensuring they're serializable
     options: adapter.options ? toSerializable(adapter.options) : undefined
-  });
+  }) as SerializableAdapter;
 }

@@ -122,7 +122,7 @@ export class TestAdapter extends BaseAdapter {
     const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)];
     
     // Create event payload based on type
-    let payload: any;
+    let payload: Record<string, unknown>;
     
     switch (eventType) {
       case 'message':
