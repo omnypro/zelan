@@ -10,7 +10,7 @@ export interface AdapterConfig {
   type: string;
   name: string;
   enabled: boolean;
-  options: Record<string, any>;
+  options: Record<string, unknown>;
 }
 
 /**

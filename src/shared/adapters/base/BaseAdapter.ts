@@ -11,11 +11,11 @@ import { createEvent } from '../../core/events';
 export abstract class BaseAdapter implements ServiceAdapter {
   readonly id: string;
   readonly type: string;
-  readonly name: string;
+  private _name: string;
   readonly eventBus: EventBus;
   
   private _enabled: boolean;
-  protected _options: Record<string, any>;
+  protected _options: Record<string, unknown>;
   protected _status$ = new BehaviorSubject<AdapterStatusInfo>({
     status: AdapterStatus.DISCONNECTED,
     timestamp: Date.now()
@@ -27,16 +27,23 @@ export abstract class BaseAdapter implements ServiceAdapter {
     id: string, 
     type: string,
     name: string,
-    options: Record<string, any>,
+    options: Record<string, unknown>,
     eventBus: EventBus,
     enabled = true
   ) {
     this.id = id;
     this.type = type;
-    this.name = name;
+    this._name = name;
     this._options = options;
     this.eventBus = eventBus;
     this._enabled = enabled;
+  }
+  
+  /**
+   * Get the adapter name
+   */
+  get name(): string {
+    return this._name;
   }
   
   get status$(): Observable<AdapterStatusInfo> {
@@ -51,7 +58,7 @@ export abstract class BaseAdapter implements ServiceAdapter {
     return this._enabled;
   }
   
-  get options(): Record<string, any> {
+  get options(): Record<string, unknown> {
     return { ...this._options };
   }
   
@@ -154,7 +161,7 @@ export abstract class BaseAdapter implements ServiceAdapter {
     
     // Update properties
     if (config.name !== undefined) {
-      (this as any).name = config.name;
+      this._name = config.name;
     }
     
     if (config.enabled !== undefined) {

@@ -41,6 +41,12 @@ const AppSettingsSchema = z.object({
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
+// Define default config structure
+const DEFAULT_CONFIG = {
+  adapters: {},
+  settings: AppSettingsSchema.parse({})
+};
+
 /**
  * Enhanced config store with reactive updates
  */
@@ -64,10 +70,7 @@ export class ConfigStore {
     this.configPath = path.join(userDataPath, 'config.json');
     
     // Initialize with defaults
-    this.data = {
-      adapters: {},
-      settings: AppSettingsSchema.parse({})
-    };
+    this.data = { ...DEFAULT_CONFIG };
     
     // Create subjects
     this.adaptersSubject = new BehaviorSubject<Record<string, AdapterConfig>>({});
@@ -80,41 +83,80 @@ export class ConfigStore {
   }
   
   /**
+   * Safely get a nested property value from an object using a dot-separated path
+   */
+  private getValueAtPath<T>(obj: any, path: string[], defaultValue?: T): T {
+    let current = obj;
+    
+    for (const part of path) {
+      if (current === undefined || current === null) {
+        return defaultValue as T;
+      }
+      current = current[part];
+    }
+    
+    return (current === undefined || current === null) ? defaultValue as T : current;
+  }
+  
+  /**
+   * Create and emit a change event
+   */
+  private emitChangeEvent(key: string, value: unknown, previousValue?: unknown): void {
+    this.changesSubject.next({
+      key,
+      value,
+      previousValue,
+      timestamp: Date.now()
+    });
+  }
+  
+  /**
    * Load configuration from disk
    */
   private loadConfig(): void {
     try {
-      if (fs.existsSync(this.configPath)) {
-        const fileData = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
+      if (!fs.existsSync(this.configPath)) {
+        // If file doesn't exist, create it with defaults
+        this.saveConfig();
+        return;
+      }
+      
+      const fileContent = fs.readFileSync(this.configPath, 'utf8');
+      const fileData = JSON.parse(fileContent);
+      
+      // Process adapters
+      if (fileData.adapters && typeof fileData.adapters === 'object') {
+        const validAdapters: Record<string, AdapterConfig> = {};
         
-        // Process adapters
-        if (fileData.adapters && typeof fileData.adapters === 'object') {
-          const validAdapters: Record<string, AdapterConfig> = {};
-          
-          for (const [id, adapter] of Object.entries(fileData.adapters)) {
-            try {
-              validAdapters[id] = AdapterConfigSchema.parse(adapter);
-            } catch (err) {
-              console.error(`Invalid adapter config for ${id}:`, err);
-            }
+        for (const [id, adapter] of Object.entries(fileData.adapters)) {
+          try {
+            validAdapters[id] = AdapterConfigSchema.parse(adapter);
+          } catch (err) {
+            console.error(`Invalid adapter config for ${id}:`, err);
           }
-          
-          this.data.adapters = validAdapters;
-          this.adaptersSubject.next(validAdapters);
         }
         
-        // Process settings
-        if (fileData.settings) {
-          try {
-            this.data.settings = AppSettingsSchema.parse(fileData.settings);
-            this.settingsSubject.next(this.data.settings);
-          } catch (err) {
-            console.error('Invalid settings:', err);
-          }
+        this.data.adapters = validAdapters;
+        this.adaptersSubject.next({ ...validAdapters });
+      }
+      
+      // Process settings
+      if (fileData.settings) {
+        try {
+          this.data.settings = AppSettingsSchema.parse({
+            ...DEFAULT_CONFIG.settings,
+            ...fileData.settings
+          });
+          this.settingsSubject.next({ ...this.data.settings });
+        } catch (err) {
+          console.error('Invalid settings:', err);
         }
       }
     } catch (err) {
       console.error('Error loading config:', err);
+      // Use defaults on error
+      this.data = { ...DEFAULT_CONFIG };
+      this.saveConfig();
     }
   }
   
@@ -158,15 +200,10 @@ export class ConfigStore {
     
     // Update internal state
     this.data.adapters[adapter.id] = validAdapter;
-    this.adaptersSubject.next({...this.data.adapters});
+    this.adaptersSubject.next({ ...this.data.adapters });
     
     // Emit change event
-    this.changesSubject.next({
-      key: `adapters.${adapter.id}`,
-      value: validAdapter,
-      previousValue,
-      timestamp: Date.now()
-    });
+    this.emitChangeEvent(`adapters.${adapter.id}`, validAdapter, previousValue);
     
     // Persist to disk
     this.saveConfig();
@@ -181,15 +218,10 @@ export class ConfigStore {
       
       // Update internal state
       delete this.data.adapters[id];
-      this.adaptersSubject.next({...this.data.adapters});
+      this.adaptersSubject.next({ ...this.data.adapters });
       
       // Emit change event
-      this.changesSubject.next({
-        key: `adapters.${id}`,
-        value: undefined,
-        previousValue,
-        timestamp: Date.now()
-      });
+      this.emitChangeEvent(`adapters.${id}`, undefined, previousValue);
       
       // Persist to disk
       this.saveConfig();
@@ -207,7 +239,7 @@ export class ConfigStore {
    * Get all adapter configurations
    */
   getAllAdapters(): Record<string, AdapterConfig> {
-    return {...this.data.adapters};
+    return { ...this.data.adapters };
   }
   
   /**
@@ -225,7 +257,7 @@ export class ConfigStore {
    * Update application settings
    */
   updateSettings(settings: Partial<AppSettings>): void {
-    const previousValue = {...this.data.settings};
+    const previousValue = { ...this.data.settings };
     
     // Update with partial data
     const newSettings = {
@@ -241,12 +273,7 @@ export class ConfigStore {
     this.settingsSubject.next(validSettings);
     
     // Emit change event
-    this.changesSubject.next({
-      key: 'settings',
-      value: validSettings,
-      previousValue,
-      timestamp: Date.now()
-    });
+    this.emitChangeEvent('settings', validSettings, previousValue);
     
     // Persist to disk
     this.saveConfig();
@@ -256,7 +283,7 @@ export class ConfigStore {
    * Get all application settings
    */
   getSettings(): AppSettings {
-    return {...this.data.settings};
+    return { ...this.data.settings };
   }
   
   /**
@@ -275,17 +302,41 @@ export class ConfigStore {
    */
   get<T>(key: string, defaultValue?: T): T {
     const parts = key.split('.');
-    let current: any = this.data;
+    return this.getValueAtPath<T>(this.data, parts, defaultValue);
+  }
+  
+  /**
+   * Update an adapter property or subproperty
+   */
+  private updateAdapterProperty(adapterId: string, propPath: string, value: unknown): void {
+    const adapter = this.getAdapter(adapterId);
+    if (!adapter) return;
     
-    for (const part of parts) {
-      if (current === undefined || current === null) {
-        return defaultValue as T;
-      }
-      
-      current = current[part];
+    let updatedAdapter: AdapterConfig;
+    
+    // Handle different property paths for adapters
+    if (propPath === 'options') {
+      updatedAdapter = { 
+        ...adapter, 
+        options: value as Record<string, unknown> 
+      };
+    } else if (propPath.startsWith('options.')) {
+      const optionKey = propPath.substring(8);
+      updatedAdapter = { 
+        ...adapter, 
+        options: { 
+          ...adapter.options, 
+          [optionKey]: value 
+        } 
+      };
+    } else {
+      updatedAdapter = { 
+        ...adapter, 
+        [propPath]: value 
+      };
     }
     
-    return (current === undefined || current === null) ? defaultValue as T : current;
+    this.saveAdapter(updatedAdapter);
   }
   
   /**
@@ -315,33 +366,19 @@ export class ConfigStore {
           this.saveAdapter(value as unknown as AdapterConfig);
         } else {
           // Adapter property
-          const adapter = this.getAdapter(adapterId);
-          if (adapter) {
-            const propPath = parts.slice(2).join('.');
-            const updatedAdapter = { 
-              ...adapter,
-              // Set nested property
-              ...(propPath === 'options' 
-                ? { options: value } 
-                : propPath.startsWith('options.') 
-                  ? { options: { 
-                      ...adapter.options,
-                      [propPath.substring(8)]: value 
-                    } 
-                  }
-                  : { [parts[2]]: value })
-            };
-            this.saveAdapter(updatedAdapter);
-          }
+          const propPath = parts.slice(2).join('.');
+          this.updateAdapterProperty(adapterId, propPath, value);
         }
         return;
       }
     }
     
-    // Generic path
+    // Generic path for other config sections
+    const previousValue = this.get(key);
+    
+    // Build path to the property
     let current = this.data;
     const lastIndex = parts.length - 1;
-    const previousValue = this.get(key);
     
     for (let i = 0; i < lastIndex; i++) {
       const part = parts[i];
@@ -351,15 +388,11 @@ export class ConfigStore {
       current = current[part];
     }
     
+    // Set the value
     current[parts[lastIndex]] = value;
     
     // Emit change event
-    this.changesSubject.next({
-      key,
-      value,
-      previousValue,
-      timestamp: Date.now()
-    });
+    this.emitChangeEvent(key, value, previousValue);
     
     // Persist to disk
     this.saveConfig();
@@ -369,19 +402,45 @@ export class ConfigStore {
    * Update multiple config values at once
    */
   update(updates: Record<string, unknown>): void {
+    // Track if we need to save
+    let needsSave = false;
     const timestamp = Date.now();
     
+    // Batch all updates
     for (const [key, value] of Object.entries(updates)) {
       const previousValue = this.get(key);
-      this.set(key, value);
+      const parts = key.split('.');
+      const rootPart = parts[0];
+      
+      // Handle special cases
+      if (rootPart === 'settings' || rootPart === 'adapters') {
+        // These have their own save methods
+        this.set(key, value);
+        continue;
+      }
+      
+      // Generic path
+      let current = this.data;
+      const lastIndex = parts.length - 1;
+      
+      for (let i = 0; i < lastIndex; i++) {
+        const part = parts[i];
+        if (!(part in current)) {
+          current[part] = {};
+        }
+        current = current[part];
+      }
+      
+      current[parts[lastIndex]] = value;
+      needsSave = true;
       
       // Emit change event
-      this.changesSubject.next({
-        key,
-        value,
-        previousValue,
-        timestamp
-      });
+      this.emitChangeEvent(key, value, previousValue);
+    }
+    
+    // Save once if needed
+    if (needsSave) {
+      this.saveConfig();
     }
   }
   
@@ -396,7 +455,6 @@ export class ConfigStore {
       if (current === undefined || current === null || !(part in current)) {
         return false;
       }
-      
       current = current[part];
     }
     
@@ -408,7 +466,6 @@ export class ConfigStore {
    */
   delete(key: string): void {
     const parts = key.split('.');
-    const previousValue = this.get(key);
     
     if (parts.length === 0) {
       return;
@@ -419,6 +476,8 @@ export class ConfigStore {
       this.deleteAdapter(parts[1]);
       return;
     }
+    
+    const previousValue = this.get(key);
     
     // Generic path
     let current = this.data;
@@ -435,12 +494,7 @@ export class ConfigStore {
     delete current[parts[lastIndex]];
     
     // Emit change event
-    this.changesSubject.next({
-      key,
-      value: undefined,
-      previousValue,
-      timestamp: Date.now()
-    });
+    this.emitChangeEvent(key, undefined, previousValue);
     
     // Persist to disk
     this.saveConfig();
@@ -448,6 +502,7 @@ export class ConfigStore {
   
   /**
    * Get all configuration as a single object
+   * Note: This creates a deep copy to prevent modification of internal state
    */
   getAll(): Record<string, any> {
     return JSON.parse(JSON.stringify(this.data));
