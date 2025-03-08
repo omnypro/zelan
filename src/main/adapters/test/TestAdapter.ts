@@ -67,10 +67,17 @@ export class TestAdapter extends BaseAdapter {
   }
   
   /**
+   * Get the options with proper typing
+   */
+  private getTypedOptions(): TestAdapterOptions {
+    return this.options as TestAdapterOptions;
+  }
+  
+  /**
    * Start generating test events
    */
   private startEventGeneration(): void {
-    const options = this.options as TestAdapterOptions;
+    const options = this.getTypedOptions();
     
     // Clear any existing interval
     this.stopEventGeneration();
@@ -111,7 +118,7 @@ export class TestAdapter extends BaseAdapter {
    * Generate a random test event
    */
   private generateTestEvent(): void {
-    const options = this.options as TestAdapterOptions;
+    const options = this.getTypedOptions();
     const eventTypes = options.eventTypes;
     
     if (!eventTypes || eventTypes.length === 0) {

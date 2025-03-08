@@ -21,6 +21,11 @@ export class Event<T> implements BaseEvent<T> {
     [key: string]: unknown;
   };
 
+  // For backward compatibility
+  get payload(): T {
+    return this.data;
+  }
+  
   constructor(
     category: EventCategory,
     type: string,

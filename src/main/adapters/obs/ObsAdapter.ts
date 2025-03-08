@@ -35,14 +35,14 @@ const DEFAULT_OPTIONS: ObsAdapterOptions = {
  * This maps internal event types to the standard ObsEventType enum
  */
 const OBS_EVENT_TYPE_MAP: Record<string, ObsEventType> = {
-  scene_switched: ObsEventType.SCENE_CHANGED,
-  streaming_started: ObsEventType.STREAM_STARTED,
-  streaming_stopped: ObsEventType.STREAM_STOPPED,
+  scene_switched: ObsEventType.SCENE_SWITCHED,
+  streaming_started: ObsEventType.STREAMING_STARTED,
+  streaming_stopped: ObsEventType.STREAMING_STOPPED,
   recording_started: ObsEventType.RECORDING_STARTED,
   recording_stopped: ObsEventType.RECORDING_STOPPED,
-  source_changed: ObsEventType.SOURCE_VISIBILITY_CHANGED,
+  source_changed: ObsEventType.SOURCE_CHANGED,
   scene_collection_changed: ObsEventType.SCENE_COLLECTION_CHANGED,
-  scene_list_changed: ObsEventType.SCENE_COLLECTION_CHANGED,
+  scene_list_changed: ObsEventType.SCENE_LIST_CHANGED,
   virtual_cam_started: ObsEventType.VIRTUAL_CAM_STARTED,
   virtual_cam_stopped: ObsEventType.VIRTUAL_CAM_STOPPED
 };
@@ -83,8 +83,15 @@ export class ObsAdapter extends BaseAdapter {
     this.setupForwardedEvents();
   }
 
+  /**
+   * Get the options with proper typing
+   */
+  private getTypedOptions(): ObsAdapterOptions {
+    return this.options as ObsAdapterOptions;
+  }
+
   protected async connectImplementation(): Promise<void> {
-    const options = this.options as ObsAdapterOptions;
+    const options = this.getTypedOptions();
     const connectionString = `ws://${options.host}:${options.port}`;
     
     // Update status to connecting
@@ -262,7 +269,7 @@ export class ObsAdapter extends BaseAdapter {
    * Set up reconnection logic
    */
   private setupReconnection(): void {
-    const options = this.options as ObsAdapterOptions;
+    const options = this.getTypedOptions();
     
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -299,10 +306,13 @@ export class ObsAdapter extends BaseAdapter {
   /**
    * Publish an OBS event to the event bus
    */
-  private publishEvent(eventType: ObsEventType, data: any): void {
+  private publishEvent(eventType: string, data: any): void {
+    // Convert raw OBS event type string to our enum type if it exists in the map
+    const mappedType = OBS_EVENT_TYPE_MAP[eventType] || eventType as ObsEventType;
+    
     this.eventBus.publish(
       createObsEvent(
-        eventType,
+        mappedType,
         { ...data },
         this.id,
         this.name
@@ -331,7 +341,8 @@ export class ObsAdapter extends BaseAdapter {
       this.connectionState = 'disconnected';
       
       // Set up reconnection if enabled and not already reconnecting
-      if (this.options.autoReconnect && !this.isReconnecting) {
+      const options = this.getTypedOptions();
+      if (options.autoReconnect && !this.isReconnecting) {
         this.setupReconnection();
       }
     }

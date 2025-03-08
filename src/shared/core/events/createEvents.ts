@@ -40,7 +40,9 @@ export function createEvent<T>(
     data,
     metadata: {
       version: '1.0.0'
-    }
+    },
+    // For backward compatibility
+    payload: data
   };
 }
 
