@@ -1,6 +1,9 @@
 import { Observable, Subject } from 'rxjs'
-import { filter } from 'rxjs/operators'
 import { BaseEvent, EventCategory } from '@s/types/events'
+import { 
+  EventFilterCriteria, 
+  filterEventStream
+} from '@s/utils/filters/event-filter'
 
 /**
  * Interface for the event bus that handles event pub/sub
@@ -10,6 +13,11 @@ export interface EventBus {
    * Observable of all events emitted by the event bus
    */
   readonly events$: Observable<BaseEvent>
+
+  /**
+   * Get events filtered by specified criteria
+   */
+  getFilteredEvents$<T = unknown>(criteria: EventFilterCriteria<T>): Observable<BaseEvent<T>>
 
   /**
    * Get events filtered by category
@@ -65,19 +73,26 @@ export class BaseEventBus implements EventBus {
   readonly events$ = this.eventsSubject.asObservable()
 
   /**
+   * Get events filtered by specified criteria
+   */
+  getFilteredEvents$<T = unknown>(criteria: EventFilterCriteria<T>): Observable<BaseEvent<T>> {
+    // Using type assertion to bridge the gap
+    const stream$ = this.events$ as unknown as Observable<BaseEvent<T>>
+    return filterEventStream<T>(criteria)(stream$)
+  }
+
+  /**
    * Get events filtered by category
    */
   getEventsByCategory$<T = unknown>(category: EventCategory): Observable<BaseEvent<T>> {
-    return this.events$.pipe(filter((event) => event.category === category)) as Observable<
-      BaseEvent<T>
-    >
+    return this.getFilteredEvents$<T>({ category })
   }
 
   /**
    * Get events filtered by type
    */
   getEventsByType$<T = unknown>(type: string): Observable<BaseEvent<T>> {
-    return this.events$.pipe(filter((event) => event.type === type)) as Observable<BaseEvent<T>>
+    return this.getFilteredEvents$<T>({ type })
   }
 
   /**
@@ -87,9 +102,7 @@ export class BaseEventBus implements EventBus {
     category: EventCategory,
     type: string
   ): Observable<BaseEvent<T>> {
-    return this.events$.pipe(
-      filter((event) => event.category === category && event.type === type)
-    ) as Observable<BaseEvent<T>>
+    return this.getFilteredEvents$<T>({ category, type })
   }
 
   /**

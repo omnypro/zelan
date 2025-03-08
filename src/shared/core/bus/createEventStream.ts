@@ -1,6 +1,7 @@
 import { Observable } from 'rxjs'
 import { EventBus } from './EventBus'
 import { BaseEvent, EventCategory } from '@s/types/events'
+import { EventFilterCriteria } from '@s/utils/filters/event-filter'
 
 /**
  * Event stream type
@@ -24,4 +25,17 @@ export function createEventStream<T>(
   } else {
     return eventBus.getEventsByCategory<T>(category)
   }
+}
+
+/**
+ * Create an event stream with specified filter criteria
+ * @param eventBus The event bus instance
+ * @param criteria Filter criteria to apply
+ * @returns Observable of filtered events
+ */
+export function createFilteredEventStream<T>(
+  eventBus: EventBus,
+  criteria: EventFilterCriteria<T>
+): EventStream<T> {
+  return eventBus.getFilteredEvents$<T>(criteria)
 }

@@ -1,7 +1,18 @@
 import { BehaviorSubject, Observable } from 'rxjs'
 import { map } from 'rxjs/operators'
-import { BaseEvent, EventCategory } from '@s/types/events'
+import { BaseEvent } from '@s/types/events'
 import { ConfigStore } from '@s/core/config/ConfigStore'
+import { 
+  EventFilterCriteria, 
+  filterEvents 
+} from '@s/utils/filters/event-filter'
+
+/**
+ * Options for getting events from cache, including filter criteria
+ */
+export interface EventCacheOptions extends EventFilterCriteria {
+  limit?: number
+}
 
 /**
  * In-memory cache for recent events
@@ -70,41 +81,12 @@ export class EventCache {
   /**
    * Get events with optional filtering
    */
-  getEvents(
-    options: {
-      limit?: number
-      category?: EventCategory | string
-      type?: string
-      sourceId?: string
-      sourceType?: string
-      since?: number // Timestamp
-    } = {}
-  ): BaseEvent[] {
-    const { limit = 20, category, type, sourceId, sourceType, since } = options
-
-    let filtered = [...this.events]
-
-    // Apply filters
-    if (category) {
-      filtered = filtered.filter((e) => e.category === category)
-    }
-
-    if (type) {
-      filtered = filtered.filter((e) => e.type === type)
-    }
-
-    if (sourceId) {
-      filtered = filtered.filter((e) => e.source.id === sourceId)
-    }
-
-    if (sourceType) {
-      filtered = filtered.filter((e) => e.source.type === sourceType)
-    }
-
-    if (since) {
-      filtered = filtered.filter((e) => e.timestamp >= since)
-    }
-
+  getEvents(options: EventCacheOptions = {}): BaseEvent[] {
+    const { limit = 20, ...filterCriteria } = options
+    
+    // Apply filters using the filterEvents utility
+    const filtered = filterEvents(this.events, filterCriteria)
+    
     // Apply limit
     return filtered.slice(0, limit)
   }
@@ -119,38 +101,9 @@ export class EventCache {
   /**
    * Get filtered events as an observable
    */
-  filteredEvents$(
-    options: {
-      category?: EventCategory | string
-      type?: string
-      sourceId?: string
-      sourceType?: string
-    } = {}
-  ): Observable<BaseEvent[]> {
-    const { category, type, sourceId, sourceType } = options
-
+  filteredEvents$(filterCriteria: EventFilterCriteria = {}): Observable<BaseEvent[]> {
     return this.eventsSubject.pipe(
-      map((events) => {
-        let filtered = events
-
-        if (category) {
-          filtered = filtered.filter((e) => e.category === category)
-        }
-
-        if (type) {
-          filtered = filtered.filter((e) => e.type === type)
-        }
-
-        if (sourceId) {
-          filtered = filtered.filter((e) => e.source.id === sourceId)
-        }
-
-        if (sourceType) {
-          filtered = filtered.filter((e) => e.source.type === sourceType)
-        }
-
-        return filtered
-      })
+      map((events) => filterEvents(events, filterCriteria))
     )
   }
 

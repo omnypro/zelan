@@ -7,6 +7,7 @@ import icon from '../../resources/icon.png?asset'
 import { MainEventBus } from '@m/services/eventBus'
 import { AdapterManager } from '@m/services/adapters'
 import { WebSocketService } from '@m/services/websocket'
+import { getErrorService } from '@m/services/errors'
 import { AdapterRegistry } from '@s/adapters'
 import { EventCache } from '@m/services/events/EventCache'
 import { ConfigStore, getConfigStore } from '@s/core/config'
@@ -15,12 +16,15 @@ import { ObsAdapterFactory } from '@m/adapters/obs'
 import { setupTRPCServer } from '@m/trpc'
 import { SystemEventType } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
+// We use these types in our error handling
+import type { ErrorService } from '@m/services/errors'
 
 // Global references
 let mainWindow: BrowserWindow | null = null
 let configStore: ConfigStore | null = null
 let eventCache: EventCache | null = null
 let mainEventBus: MainEventBus | null = null
+let errorService: ErrorService | null = null
 let adapterRegistry: AdapterRegistry | null = null
 let adapterManager: AdapterManager | null = null
 let webSocketService: WebSocketService | null = null
@@ -132,6 +136,19 @@ async function initializeServices(): Promise<void> {
     // Initialize event bus
     mainEventBus = new MainEventBus(eventCache)
 
+    // Initialize error service
+    errorService = getErrorService(mainEventBus)
+    
+    // Add console error handler for development
+    if (is.dev) {
+      errorService.addHandler({
+        handleError: () => {
+          // Additional development-mode error handling could go here
+          // (already logged to console by the error service)
+        }
+      });
+    }
+
     // Publish startup event
     mainEventBus.publish(
       createSystemEvent(SystemEventType.STARTUP, 'Zelan application starting', 'info', {
@@ -183,12 +200,25 @@ async function initializeServices(): Promise<void> {
 
     console.log('Services initialized successfully')
   } catch (error) {
-    console.error('Failed to initialize services:', error)
-    mainEventBus?.publish(
-      createSystemEvent(SystemEventType.ERROR, 'Failed to initialize services', 'error', {
-        error: error instanceof Error ? error.message : String(error)
-      })
-    )
+    // Report error through error service if available
+    if (errorService) {
+      errorService.reportError(
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: 'ApplicationCore',
+          operation: 'initializeServices',
+          recoverable: false
+        }
+      );
+    } else {
+      // Fallback if error service isn't initialized yet
+      console.error('Failed to initialize services:', error);
+      mainEventBus?.publish(
+        createSystemEvent(SystemEventType.ERROR, 'Failed to initialize services', 'error', {
+          error: error instanceof Error ? error.message : String(error)
+        })
+      );
+    }
   }
 }
 
@@ -259,8 +289,27 @@ app.on('before-quit', async (event) => {
       app.quit()
     }, 200)
   } catch (error) {
-    console.error('Error during cleanup:', error)
-    app.quit() // Force quit if cleanup fails
+    // Report error through error service if available
+    if (errorService) {
+      errorService.reportError(
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: 'ApplicationCore',
+          operation: 'appCleanup',
+          recoverable: false
+        }
+      );
+    } else {
+      console.error('Error during cleanup:', error);
+    }
+    
+    // Force quit if cleanup fails
+    app.quit();
+  } finally {
+    // Clean up error service as the last step
+    if (errorService) {
+      errorService.dispose();
+    }
   }
 })
 

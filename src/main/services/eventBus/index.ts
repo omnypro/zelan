@@ -1,10 +1,14 @@
 import { Subject, Observable } from 'rxjs'
-import { filter, share } from 'rxjs/operators'
+import { share } from 'rxjs/operators'
 import { BrowserWindow, WebContents } from 'electron'
 import { BaseEvent, EventCategory, SystemEventType } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
 import { EventBus } from '@s/core/bus/EventBus'
-import { EventCache } from '../events/EventCache'
+import { EventCache, EventCacheOptions } from '../events/EventCache'
+import { 
+  EventFilterCriteria, 
+  filterEventStream 
+} from '@s/utils/filters/event-filter'
 
 /**
  * Main process implementation of the EventBus
@@ -63,19 +67,26 @@ export class MainEventBus implements EventBus {
   }
 
   /**
+   * Get events filtered by specified criteria
+   */
+  getFilteredEvents$<T = unknown>(criteria: EventFilterCriteria<T>): Observable<BaseEvent<T>> {
+    // Using type assertion to bridge the gap
+    const stream$ = this.events$ as unknown as Observable<BaseEvent<T>>
+    return filterEventStream<T>(criteria)(stream$)
+  }
+
+  /**
    * Get events filtered by category
    */
   getEventsByCategory$<T = unknown>(category: EventCategory): Observable<BaseEvent<T>> {
-    return this.events$.pipe(filter((event) => event.category === category)) as Observable<
-      BaseEvent<T>
-    >
+    return this.getFilteredEvents$<T>({ category })
   }
 
   /**
    * Get events filtered by type
    */
   getEventsByType$<T = unknown>(type: string): Observable<BaseEvent<T>> {
-    return this.events$.pipe(filter((event) => event.type === type)) as Observable<BaseEvent<T>>
+    return this.getFilteredEvents$<T>({ type })
   }
 
   /**
@@ -85,9 +96,7 @@ export class MainEventBus implements EventBus {
     category: EventCategory,
     type: string
   ): Observable<BaseEvent<T>> {
-    return this.events$.pipe(
-      filter((event) => event.category === category && event.type === type)
-    ) as Observable<BaseEvent<T>>
+    return this.getFilteredEvents$<T>({ category, type })
   }
 
   /**
@@ -145,30 +154,14 @@ export class MainEventBus implements EventBus {
   /**
    * Get recent events with filtering options
    */
-  getRecentEvents(
-    options: {
-      limit?: number
-      category?: EventCategory | string
-      type?: string
-      sourceId?: string
-      sourceType?: string
-      since?: number
-    } = {}
-  ): BaseEvent[] {
+  getRecentEvents(options: EventCacheOptions = {}): BaseEvent[] {
     return this.eventCache.getEvents(options)
   }
 
   /**
    * Get a reactive stream of recent events
    */
-  recentEvents$(
-    options: {
-      category?: EventCategory | string
-      type?: string
-      sourceId?: string
-      sourceType?: string
-    } = {}
-  ): Observable<BaseEvent[]> {
-    return this.eventCache.filteredEvents$(options)
+  recentEvents$(filterCriteria: EventFilterCriteria = {}): Observable<BaseEvent[]> {
+    return this.eventCache.filteredEvents$(filterCriteria)
   }
 }

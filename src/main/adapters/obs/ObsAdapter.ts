@@ -11,6 +11,8 @@ import {
   createObjectValidator
 } from '@s/utils/type-guards'
 import { AdapterConfig } from '@s/adapters/interfaces/ServiceAdapter'
+import { getErrorService } from '@m/services/errors'
+import { ApplicationError, ErrorCategory, ErrorSeverity } from '@s/errors'
 
 /**
  * OBS adapter options
@@ -132,14 +134,31 @@ export class ObsAdapter extends BaseAdapter {
         `Connected to OBS WebSocket v${obsWebSocketVersion}`
       )
     } catch (error) {
-      console.error('Failed to connect to OBS:', error)
+      // Report error through the error service
+      try {
+        const errorService = getErrorService();
+        errorService.reportError(
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            component: 'ObsAdapter',
+            operation: 'connect',
+            adapterId: this.id,
+            adapterName: this.name,
+            connectionString,
+            recoverable: options.autoReconnect
+          }
+        );
+      } catch (serviceError) {
+        // Fallback to console if error service isn't available
+        console.error('Failed to connect to OBS:', error);
+      }
 
       // Update status to error
-      this.updateStatus(AdapterStatus.ERROR, 'Failed to connect to OBS', error as Error)
+      this.updateStatus(AdapterStatus.ERROR, 'Failed to connect to OBS', error as Error);
 
       // Set up reconnection if enabled and not already reconnecting
       if (options.autoReconnect && !this.isReconnecting) {
-        this.setupReconnection()
+        this.setupReconnection();
       }
 
       throw error
@@ -367,9 +386,26 @@ export class ObsAdapter extends BaseAdapter {
       this.isReconnecting = false;
       this.consecutiveReconnectAttempts = 0;
     } catch (error) {
-      // Only log detailed errors in development mode to reduce log spam
-      if (process.env.NODE_ENV === 'development') {
-        console.error('Reconnection attempt failed:', error);
+      // Report error through the error service
+      try {
+        const errorService = getErrorService();
+        errorService.reportError(
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            component: 'ObsAdapter',
+            operation: 'reconnect',
+            adapterId: this.id,
+            adapterName: this.name,
+            attemptNumber: this.consecutiveReconnectAttempts,
+            recoverable: true,
+            severity: ErrorSeverity.WARNING
+          }
+        );
+      } catch (serviceError) {
+        // Fallback to console if error service isn't available
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Reconnection attempt failed:', error);
+        }
       }
 
       // Schedule next reconnection attempt
@@ -389,29 +425,83 @@ export class ObsAdapter extends BaseAdapter {
     if (config.options) {
       // Validate host if provided
       if ('host' in config.options && !isString(config.options.host)) {
-        throw new Error(`Invalid OBS host: ${config.options.host}, expected string`);
+        throw new ApplicationError(
+          `Invalid OBS host: ${config.options.host}, expected string`,
+          ErrorCategory.VALIDATION,
+          ErrorSeverity.ERROR,
+          { 
+            component: 'ObsAdapter', 
+            adapterId: this.id, 
+            fieldName: 'host',
+            receivedValue: config.options.host,
+            expectedType: 'string'
+          }
+        );
       }
       
       // Validate port if provided
       if ('port' in config.options && !isNumber(config.options.port)) {
-        throw new Error(`Invalid OBS port: ${config.options.port}, expected number`);
+        throw new ApplicationError(
+          `Invalid OBS port: ${config.options.port}, expected number`,
+          ErrorCategory.VALIDATION,
+          ErrorSeverity.ERROR,
+          { 
+            component: 'ObsAdapter', 
+            adapterId: this.id, 
+            fieldName: 'port',
+            receivedValue: config.options.port,
+            expectedType: 'number'
+          }
+        );
       }
       
       // Validate password if provided (can be undefined or string)
       if ('password' in config.options && 
           config.options.password !== undefined && 
           !isString(config.options.password)) {
-        throw new Error(`Invalid OBS password, expected string or undefined`);
+        throw new ApplicationError(
+          `Invalid OBS password, expected string or undefined`,
+          ErrorCategory.VALIDATION,
+          ErrorSeverity.ERROR,
+          { 
+            component: 'ObsAdapter', 
+            adapterId: this.id, 
+            fieldName: 'password',
+            expectedType: 'string or undefined'
+          }
+        );
       }
       
       // Validate reconnect interval if provided
       if ('reconnectInterval' in config.options && !isNumber(config.options.reconnectInterval)) {
-        throw new Error(`Invalid reconnect interval: ${config.options.reconnectInterval}, expected number`);
+        throw new ApplicationError(
+          `Invalid reconnect interval: ${config.options.reconnectInterval}, expected number`,
+          ErrorCategory.VALIDATION,
+          ErrorSeverity.ERROR,
+          { 
+            component: 'ObsAdapter', 
+            adapterId: this.id, 
+            fieldName: 'reconnectInterval',
+            receivedValue: config.options.reconnectInterval,
+            expectedType: 'number'
+          }
+        );
       }
       
       // Validate auto reconnect if provided
       if ('autoReconnect' in config.options && !isBoolean(config.options.autoReconnect)) {
-        throw new Error(`Invalid auto reconnect value: ${config.options.autoReconnect}, expected boolean`);
+        throw new ApplicationError(
+          `Invalid auto reconnect value: ${config.options.autoReconnect}, expected boolean`,
+          ErrorCategory.VALIDATION,
+          ErrorSeverity.ERROR,
+          { 
+            component: 'ObsAdapter', 
+            adapterId: this.id, 
+            fieldName: 'autoReconnect',
+            receivedValue: config.options.autoReconnect,
+            expectedType: 'boolean'
+          }
+        );
       }
     }
   }
