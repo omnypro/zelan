@@ -1,7 +1,35 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
+import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+
+// Load environment variables from .env file manually
+try {
+  // __dirname may be relative in dev mode, so use app.getAppPath()
+  const appRoot = app.getAppPath()
+  const envPath = join(appRoot, '.env')
+  console.log('Looking for .env at path:', envPath)
+  const envContent = readFileSync(envPath, 'utf8')
+  
+  envContent.split('\n').forEach(line => {
+    // Skip empty lines and comments
+    if (!line || line.startsWith('#')) return
+    
+    // Parse KEY=VALUE format
+    const [key, ...valueParts] = line.split('=')
+    const value = valueParts.join('=').trim()
+    
+    if (key && value) {
+      process.env[key.trim()] = value
+      console.log(`Loaded env var: ${key.trim()}=${value}`)
+    }
+  })
+  
+  console.log('Environment variables loaded from .env file')
+} catch (error) {
+  console.error('Failed to load .env file:', error)
+}
 
 // Import our services
 import { MainEventBus } from '@m/services/eventBus'

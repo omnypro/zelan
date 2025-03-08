@@ -1,5 +1,5 @@
 import { EventBus } from '@s/core/bus/EventBus';
-import { getErrorService } from '@m/services/errors/ErrorService';
+import { getErrorService } from '@m/services/errors';
 import { 
   AuthService as IAuthService,
   AuthProvider, 
@@ -164,7 +164,7 @@ export class AuthService implements IAuthService {
    */
   dispose(): void {
     // Dispose all provider services
-    for (const [provider, service] of this.providerMap.entries()) {
+    for (const [, service] of this.providerMap.entries()) {
       if ('dispose' in service && typeof service.dispose === 'function') {
         service.dispose();
       }

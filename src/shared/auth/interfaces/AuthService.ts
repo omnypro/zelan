@@ -47,9 +47,9 @@ export interface AuthService {
    * Get the authentication token for a provider
    * 
    * @param provider The authentication provider
-   * @returns The authentication token or undefined if not authenticated
+   * @returns A promise that resolves with the authentication token or undefined if not authenticated
    */
-  getToken(provider: AuthProvider): AuthToken | undefined;
+  getToken(provider: AuthProvider): Promise<AuthToken | undefined>;
 
   /**
    * Get the authentication status for a provider

@@ -36,10 +36,10 @@ export class AuthError extends ApplicationError {
     super(
       message,
       ErrorCategory.AUTHENTICATION,
-      code,
       ErrorSeverity.WARNING,
       {
         provider,
+        code,
         ...metadata
       },
       cause

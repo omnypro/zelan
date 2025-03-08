@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect } from 'react'
 import { AuthProvider, AuthState } from '@s/auth/interfaces'
 import { useAuth } from '@r/hooks/useAuth'
 
@@ -7,7 +7,6 @@ import { useAuth } from '@r/hooks/useAuth'
  */
 export default function TwitchAuthCard() {
   const { status, deviceCode, isLoading, error, login, logout } = useAuth(AuthProvider.TWITCH)
-  const [clientId, setClientId] = useState('')
 
   // Default Twitch scopes for basic integration
   const scopes = [
@@ -21,13 +20,10 @@ export default function TwitchAuthCard() {
 
   // Handle login click
   const handleLogin = async () => {
-    if (!clientId) {
-      alert('Please enter your Twitch Client ID')
-      return
-    }
-
+    // Use the Client ID from the environment
     await login({
-      clientId,
+      // This will be replaced by the server with the actual Client ID from .env
+      clientId: 'FROM_ENV',
       scopes
     })
   }
@@ -44,32 +40,32 @@ export default function TwitchAuthCard() {
         <div className="flex items-center">
           <span
             className={`inline-block w-3 h-3 rounded-full mr-2 ${
-              status.isAuthenticated ? 'bg-green-500' : 'bg-red-500'
+              status?.isAuthenticated ? 'bg-green-500' : 'bg-red-500'
             }`}
           />
           <span className="text-sm">
-            {status.isAuthenticated ? 'Connected' : 'Disconnected'}
+            {status?.isAuthenticated ? 'Connected' : 'Disconnected'}
           </span>
         </div>
       </div>
 
-      {status.isAuthenticated ? (
+      {status?.isAuthenticated ? (
         // Authenticated state
         <div className="space-y-4">
           <div className="border rounded-md p-3 bg-gray-50">
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="text-gray-500">Username:</div>
-              <div className="font-medium">{status.username || 'Unknown'}</div>
+              <div className="font-medium">{status?.username || 'Unknown'}</div>
               
               <div className="text-gray-500">User ID:</div>
-              <div className="font-medium">{status.userId || 'Unknown'}</div>
+              <div className="font-medium">{status?.userId || 'Unknown'}</div>
               
               <div className="text-gray-500">Status:</div>
-              <div className="font-medium">{status.state}</div>
+              <div className="font-medium">{status?.state || 'Unknown'}</div>
               
               <div className="text-gray-500">Expires:</div>
               <div className="font-medium">
-                {status.expiresAt 
+                {status?.expiresAt 
                   ? new Date(status.expiresAt).toLocaleString() 
                   : 'Unknown'}
               </div>
@@ -121,37 +117,21 @@ export default function TwitchAuthCard() {
               )}
             </div>
           ) : (
-            // Login form
+            // Simple login button
             <div className="space-y-4">
-              <div>
-                <label htmlFor="client-id" className="block text-sm font-medium text-gray-700 mb-1">
-                  Twitch Client ID
-                </label>
-                <input
-                  id="client-id"
-                  type="text"
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder="Enter your Twitch Client ID"
-                  className="w-full p-2 border rounded-md focus:ring-blue-500 focus:border-blue-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  You can get your Client ID from the{' '}
-                  <a
-                    href="https://dev.twitch.tv/console/apps"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-500 underline"
-                  >
-                    Twitch Developer Console
-                  </a>
+              <div className="bg-gray-50 p-4 rounded-md border mb-4">
+                <p className="text-sm text-gray-700 mb-2">
+                  Connect your Twitch account to enable streaming features. You'll be prompted to authorize this app through Twitch's secure authentication.
+                </p>
+                <p className="text-xs text-gray-500">
+                  Only the minimum required permissions will be requested, and your credentials are securely stored locally.
                 </p>
               </div>
               
               <div>
                 <button
                   onClick={handleLogin}
-                  disabled={isLoading || !clientId}
+                  disabled={isLoading}
                   className="w-full py-2 px-4 bg-purple-600 text-white rounded-md hover:bg-purple-700
                     focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50
                     disabled:opacity-50 disabled:cursor-not-allowed"

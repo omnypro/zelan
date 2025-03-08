@@ -5,7 +5,7 @@ import path from 'path';
 import { AuthProvider, AuthToken } from '@s/auth/interfaces';
 import { TokenManager as ITokenManager } from '@s/auth/interfaces';
 import { StorageError } from '@s/auth/errors';
-import { getErrorService } from '@m/services/errors/ErrorService';
+import { getErrorService } from '@m/services/errors';
 
 /**
  * Implementation of TokenManager that securely stores tokens

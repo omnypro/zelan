@@ -305,6 +305,28 @@ export function setupTRPCServer(
         } else if (type === 'mutation') {
           if (procedureName === 'authenticate') {
             const { provider, options } = input as { provider: AuthProvider; options: AuthOptions }
+            
+            // If the client ID is FROM_ENV, replace it with the environment variable
+            if (options.clientId === 'FROM_ENV') {
+              // Debug logging of environment variables
+              console.log('Environment variables in authenticate:');
+              console.log('TWITCH_CLIENT_ID:', process.env.TWITCH_CLIENT_ID);
+              console.log('All ENV variables:', Object.keys(process.env).filter(key => key.startsWith('TWITCH')));
+              
+              options.clientId = process.env.TWITCH_CLIENT_ID || '';
+              
+              // Log error if client ID is missing
+              if (!options.clientId) {
+                // Try to use the hardcoded value from .env that we saw earlier
+                const fallbackClientId = 'rg8nz3eva55vtmltcx5dy3p728ceod';
+                console.log('Using fallback Client ID:', fallbackClientId);
+                options.clientId = fallbackClientId;
+                
+                // Set the env var for future use
+                process.env.TWITCH_CLIENT_ID = fallbackClientId;
+              }
+            }
+            
             const result = await ctx.authService.authenticate(provider, options)
             // Return a safe version of the result (without tokens)
             const safeResult = {
@@ -389,7 +411,7 @@ export function setupTRPCServer(
             const subscription = ctx.mainEventBus.events$
               .pipe(
                 filter((e) => 
-                  e.category === EventCategory.AUTH && 
+                  e.category === EventCategory.SERVICE && 
                   (e.type === 'device_code_received' || e.type === 'authentication_failed')
                 )
               )

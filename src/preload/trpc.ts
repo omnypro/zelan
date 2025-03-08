@@ -71,11 +71,11 @@ const createClient = () => {
             subscribe: (observer) => {
               // Handle incoming messages
               const onMessage = (_, data) => {
-                if (data.type === 'data') {
-                  observer.next(data.data)
-                } else if (data.type === 'error') {
-                  observer.error(new Error(data.error.message))
-                } else if (data.type === 'stopped') {
+                if (data?.type === 'data') {
+                  observer.next(data.result)
+                } else if (data?.type === 'error') {
+                  observer.error(new Error(data.error?.message || 'Unknown error'))
+                } else if (data?.type === 'stopped') {
                   observer.complete()
                   cleanup()
                 }

@@ -15,6 +15,11 @@ export interface AuthToken {
   expiresAt: number; // timestamp in ms
   scope: string[];
   tokenType: string;
+  metadata?: {
+    userId?: string;
+    username?: string;
+    [key: string]: any;
+  };
 }
 
 /**

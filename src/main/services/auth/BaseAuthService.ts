@@ -2,7 +2,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { EventBus } from '@s/core/bus/EventBus';
 import { EventCategory } from '@s/types/events';
 import { createEvent } from '@s/core/events';
-import { getErrorService } from '@m/services/errors/ErrorService';
+import { getErrorService } from '@m/services/errors';
 import { getTokenManager } from './TokenManager';
 import { TokenManager } from '@s/auth/interfaces/TokenManager';
 import {
@@ -16,6 +16,7 @@ import {
 } from '@s/auth/interfaces';
 import { 
   AuthError, 
+  AuthErrorCode,
   TokenExpiredError, 
   RefreshFailedError 
 } from '@s/auth/errors';
@@ -78,10 +79,12 @@ export abstract class BaseAuthService implements AuthService {
               });
             });
           } else {
-            // Token is valid, update status
+            // Token is valid, update status with user data from metadata
             this.updateStatus(provider, {
               state: AuthState.AUTHENTICATED,
-              expiresAt: token.expiresAt
+              expiresAt: token.expiresAt,
+              userId: token.metadata?.userId,
+              username: token.metadata?.username
             });
           }
         }
@@ -96,7 +99,7 @@ export abstract class BaseAuthService implements AuthService {
         error instanceof AuthError ? error : new AuthError(
           'Failed to initialize authentication service',
           AuthProvider.TWITCH, // Default provider
-          'initialization_failed',
+          AuthErrorCode.AUTHENTICATION_FAILED,
           {},
           error instanceof Error ? error : undefined
         )
@@ -233,7 +236,7 @@ export abstract class BaseAuthService implements AuthService {
         error instanceof AuthError ? error : new AuthError(
           `Failed to revoke token for ${provider}`,
           provider,
-          'revocation_failed',
+          AuthErrorCode.TOKEN_REVOKED,
           {},
           error instanceof Error ? error : undefined
         )
@@ -364,7 +367,7 @@ export abstract class BaseAuthService implements AuthService {
   ): void {
     this.eventBus.publish(
       createEvent(
-        EventCategory.AUTH,
+        EventCategory.SERVICE, // Using SERVICE category for auth events
         type,
         {
           provider,
@@ -376,12 +379,15 @@ export abstract class BaseAuthService implements AuthService {
     );
   }
 
+  // Store for our token refresh timers
+  private tokenRefreshTimers: Map<string, NodeJS.Timeout> = new Map();
+  
   /**
    * Set up timers to refresh tokens before they expire
    */
   protected setupTokenRefreshTimers(): void {
-    // Clear existing subscriptions
-    this.subscriptionManager.unsubscribeGroup('tokenRefresh');
+    // Clear existing timers
+    this.clearTokenRefreshTimers();
 
     // Set up refresh timers for all providers
     for (const provider of Object.values(AuthProvider)) {
@@ -389,40 +395,64 @@ export abstract class BaseAuthService implements AuthService {
       const status$ = this.status$(provider);
       
       // Subscribe to status changes
-      this.subscriptionManager.subscribe(
-        'tokenRefresh',
-        status$.subscribe(async (status) => {
-          // Only set up refresh timer for authenticated status with an expiration
-          if (status.state === AuthState.AUTHENTICATED && status.expiresAt) {
-            const now = Date.now();
-            const expiresIn = status.expiresAt - now;
+      const subscription = status$.subscribe(async (status) => {
+        // Only set up refresh timer for authenticated status with an expiration
+        if (status.state === AuthState.AUTHENTICATED && status.expiresAt) {
+          const now = Date.now();
+          const expiresIn = status.expiresAt - now;
+          
+          // Buffer time (5 minutes before expiration)
+          const bufferTime = 5 * 60 * 1000;
+          
+          // Calculate refresh time (expiration - buffer)
+          const refreshTime = expiresIn - bufferTime;
+          
+          // Only set up a timer if refresh time is positive
+          if (refreshTime > 0) {
+            // Clear any existing timer for this provider
+            this.clearTokenRefreshTimer(provider);
             
-            // Buffer time (5 minutes before expiration)
-            const bufferTime = 5 * 60 * 1000;
+            // Set up a timer to refresh the token
+            const timerId = setTimeout(async () => {
+              try {
+                await this.refreshToken(provider);
+              } catch (error) {
+                console.error(`Failed to refresh token for ${provider}:`, error);
+              }
+              // Remove the timer ID after it's been executed
+              this.tokenRefreshTimers.delete(provider);
+            }, refreshTime);
             
-            // Calculate refresh time (expiration - buffer)
-            const refreshTime = expiresIn - bufferTime;
-            
-            // Only set up a timer if refresh time is positive
-            if (refreshTime > 0) {
-              // Set up a timer to refresh the token
-              const timerId = setTimeout(async () => {
-                try {
-                  await this.refreshToken(provider);
-                } catch (error) {
-                  console.error(`Failed to refresh token for ${provider}:`, error);
-                }
-              }, refreshTime);
-              
-              // Store the timer ID for cleanup
-              this.subscriptionManager.add('tokenRefresh', {
-                unsubscribe: () => clearTimeout(timerId)
-              });
-            }
+            // Store the timer ID for cleanup
+            this.tokenRefreshTimers.set(provider, timerId);
           }
-        })
-      );
+        }
+      });
+      
+      // Add the subscription to our manager
+      this.subscriptionManager.add(subscription);
     }
+  }
+  
+  /**
+   * Clear a specific token refresh timer
+   */
+  private clearTokenRefreshTimer(provider: AuthProvider): void {
+    const timerId = this.tokenRefreshTimers.get(provider);
+    if (timerId) {
+      clearTimeout(timerId);
+      this.tokenRefreshTimers.delete(provider);
+    }
+  }
+  
+  /**
+   * Clear all token refresh timers
+   */
+  private clearTokenRefreshTimers(): void {
+    this.tokenRefreshTimers.forEach((timerId) => {
+      clearTimeout(timerId);
+    });
+    this.tokenRefreshTimers.clear();
   }
 
   /**
@@ -449,6 +479,6 @@ export abstract class BaseAuthService implements AuthService {
     this.subscriptionManager.unsubscribeAll();
     
     // Clear token refresh timers
-    this.subscriptionManager.unsubscribeGroup('tokenRefresh');
+    this.clearTokenRefreshTimers();
   }
 }
