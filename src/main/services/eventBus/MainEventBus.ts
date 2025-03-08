@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { EventBus } from '../../../shared/core/bus';
+import { BaseEventBus } from '../../../shared/core/bus';
 import { BaseEvent } from '../../../shared/types/events';
 
 // IPC channels
@@ -9,7 +9,7 @@ const EVENT_SYNC_CHANNEL = 'zelan:event-sync';
 /**
  * Main process event bus with IPC support
  */
-export class MainEventBus extends EventBus {
+export class MainEventBus extends BaseEventBus {
   private webContents: Electron.WebContents[] = [];
   private isForwarding = false;
   

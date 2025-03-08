@@ -1,10 +1,9 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { observable } from '@trpc/server/observable';
 import { appRouter } from '../../shared/trpc';
-import { getConfigStore } from '../../shared/core/config';
+import { ConfigStore } from '../../shared/core/config';
 import { MainEventBus } from '../services/eventBus';
 import { AdapterManager } from '../services/adapters';
-import { filter } from 'rxjs/operators';
 import { Subject } from 'rxjs';
 import { 
   createSubscriptionHandler, 
@@ -21,20 +20,24 @@ import { WebSocketService } from '../services/websocket';
 interface TRPCContext {
   mainEventBus: MainEventBus;
   adapterManager: AdapterManager;
-  configStore: ReturnType<typeof getConfigStore>;
+  configStore: ConfigStore;
   webSocketService: WebSocketService;
   senderIds: Set<number>;
 }
 
 /**
- * Create the tRPC context for procedure resolvers
+ * Create the context for procedure resolvers
  */
-function createContext(mainEventBus: MainEventBus, adapterManager: AdapterManager): TRPCContext {
+function createContext(
+  mainEventBus: MainEventBus, 
+  adapterManager: AdapterManager,
+  configStore: ConfigStore
+): TRPCContext {
   return {
     mainEventBus,
     adapterManager,
-    configStore: getConfigStore(),
-    webSocketService: WebSocketService.getInstance(mainEventBus),
+    configStore,
+    webSocketService: WebSocketService.getInstance(mainEventBus, configStore),
     senderIds: new Set<number>()
   };
 }
@@ -42,8 +45,12 @@ function createContext(mainEventBus: MainEventBus, adapterManager: AdapterManage
 /**
  * Setup tRPC server over Electron IPC
  */
-export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: AdapterManager) {
-  const ctx = createContext(mainEventBus, adapterManager);
+export function setupTRPCServer(
+  mainEventBus: MainEventBus, 
+  adapterManager: AdapterManager,
+  configStore: ConfigStore
+) {
+  const ctx = createContext(mainEventBus, adapterManager, configStore);
   
   // Channel for tRPC requests
   const TRPC_CHANNEL = 'zelan:trpc';
@@ -84,11 +91,9 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
         if (type === 'query') {
           if (procedureName === 'get') {
             const result = ctx.configStore.get(input.key, input.defaultValue);
-            console.log(`Config get result for ${input.key}:`, result);
             return { id, result, type: 'data' };
           } else if (procedureName === 'getAll') {
             const result = ctx.configStore.getAll();
-            console.log('Config getAll result:', result);
             return { id, result, type: 'data' };
           } else if (procedureName === 'has') {
             const result = ctx.configStore.has(input);
@@ -160,11 +165,7 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
                 if (!event.sender.isDestroyed()) {
                   event.sender.send(subChannelName, {
                     id,
-                    error: {
-                      message: err.message,
-                      code: 'SUBSCRIPTION_ERROR',
-                      stack: err.stack,
-                    },
+                    error: toSerializableError(err),
                     type: 'error'
                   });
                 }
@@ -198,11 +199,7 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
               if (!event.sender.isDestroyed()) {
                 event.sender.send(subChannelName, {
                   id,
-                  error: {
-                    message: err.message,
-                    code: 'SUBSCRIPTION_ERROR',
-                    stack: err.stack,
-                  },
+                  error: toSerializableError(err),
                   type: 'error'
                 });
               }
@@ -215,6 +212,9 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
           });
           
           return { id, type: 'started' };
+        } else if (type === 'query' && procedureName === 'getRecent') {
+          const result = (ctx.mainEventBus as any).getRecentEvents?.(input) || [];
+          return { id, result, type: 'data' };
         }
       } else if (moduleName === 'websocket') {
         if (type === 'query' && procedureName === 'getStatus') {
@@ -246,9 +246,7 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
             return { id, result, type: 'data' };
           } else if (procedureName === 'getTypes') {
             const types = ctx.adapterManager.getAvailableAdapterTypes();
-            // Create a plain array of strings
-            const result = [...types];
-            return { id, result, type: 'data' };
+            return { id, result: types, type: 'data' };
           }
         } else if (type === 'mutation') {
           if (procedureName === 'create') {
@@ -284,156 +282,3 @@ export function setupTRPCServer(mainEventBus: MainEventBus, adapterManager: Adap
     }
   });
 }
-
-/**
- * Create the tRPC router implementation with actual logic
- */
-export const createTRPCRouter = (mainEventBus: MainEventBus, adapterManager: AdapterManager) => {
-  const configStore = getConfigStore();
-  const webSocketService = WebSocketService.getInstance(mainEventBus);
-  
-  return appRouter.createCaller({
-    // WebSocket router implementation
-    websocket: {
-      getStatus: async () => {
-        return webSocketService.getStatus();
-      },
-      
-      start: async () => {
-        return webSocketService.start();
-      },
-      
-      stop: async () => {
-        webSocketService.stop();
-        return true;
-      }
-    },
-    // Config router implementation
-    config: {
-      get: async ({ key, defaultValue }) => {
-        return configStore.get(key, defaultValue);
-      },
-      
-      set: async ({ key, value }) => {
-        configStore.set(key, value);
-        return true;
-      },
-      
-      update: async (updates) => {
-        configStore.update(updates);
-        return true;
-      },
-      
-      delete: async (key) => {
-        configStore.delete(key);
-        return true;
-      },
-      
-      has: async (key) => {
-        return configStore.has(key);
-      },
-      
-      getAll: async () => {
-        return configStore.getAll();
-      },
-      
-      getPath: async () => {
-        return configStore.fileName;
-      },
-      
-      onConfigChange: () => {
-        return observable((emit) => {
-          const subscription = configStore.changes$().subscribe({
-            next: (change) => emit.next(change),
-            error: (err) => emit.error(err),
-            complete: () => emit.complete()
-          });
-          
-          return () => {
-            subscription.unsubscribe();
-          };
-        });
-      },
-      
-      onPathChange: (path) => {
-        return observable((emit) => {
-          // Manually filter events since we're having an issue with the rxjs operator
-          const subscription = configStore.changes$().subscribe({
-            next: (change) => {
-              if (change.key === path || change.key.startsWith(`${path}.`)) {
-                emit.next(change);
-              }
-            },
-            error: (err) => emit.error(err),
-            complete: () => emit.complete()
-          });
-          
-          return () => {
-            subscription.unsubscribe();
-          };
-        });
-      }
-    },
-    
-    // Events router implementation
-    events: {
-      send: async (event) => {
-        mainEventBus.publish(event);
-        return true;
-      },
-      
-      onEvent: () => {
-        return observable((emit) => {
-          const subscription = mainEventBus.events$.subscribe({
-            next: (event) => emit.next(event),
-            error: (err) => emit.error(err),
-            complete: () => emit.complete()
-          });
-          
-          return () => {
-            subscription.unsubscribe();
-          };
-        });
-      }
-    },
-    
-    // Adapters router implementation
-    adapters: {
-      getAll: async () => {
-        return adapterManager.getAllAdapters();
-      },
-      
-      getById: async (id) => {
-        return adapterManager.getAdapter(id);
-      },
-      
-      create: async (config) => {
-        return adapterManager.createAdapter(config);
-      },
-      
-      start: async (id) => {
-        await adapterManager.startAdapter(id);
-        return true;
-      },
-      
-      stop: async (id) => {
-        await adapterManager.stopAdapter(id);
-        return true;
-      },
-      
-      update: async ({ id, config }) => {
-        await adapterManager.updateAdapter(id, config);
-        return true;
-      },
-      
-      delete: async (id) => {
-        await adapterManager.deleteAdapter(id);
-        return true;
-      },
-      
-      getTypes: async () => {
-        return adapterManager.getAvailableAdapterTypes();
-      }
-    }
-  } as any);
-};

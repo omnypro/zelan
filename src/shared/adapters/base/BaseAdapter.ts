@@ -84,11 +84,12 @@ export abstract class BaseAdapter implements ServiceAdapter {
           EventCategory.ADAPTER,
           AdapterEventType.CONNECTED,
           {
-            id: this.id,
-            type: this.type,
-            name: this.name
+            status: 'connected',
+            timestamp: Date.now()
           },
-          this.id
+          this.id,
+          this.name,
+          this.type
         )
       );
     } catch (error) {
@@ -111,11 +112,12 @@ export abstract class BaseAdapter implements ServiceAdapter {
           EventCategory.ADAPTER,
           AdapterEventType.DISCONNECTED,
           {
-            id: this.id,
-            type: this.type,
-            name: this.name
+            status: 'disconnected',
+            timestamp: Date.now()
           },
-          this.id
+          this.id,
+          this.name,
+          this.type
         )
       );
     } catch (error) {
@@ -216,13 +218,10 @@ export abstract class BaseAdapter implements ServiceAdapter {
       createEvent(
         EventCategory.ADAPTER,
         AdapterEventType.STATUS,
-        {
-          id: this.id,
-          type: this.type,
-          name: this.name,
-          status: statusInfo
-        },
-        this.id
+        statusInfo,
+        this.id,
+        this.name,
+        this.type
       )
     );
     
@@ -233,15 +232,13 @@ export abstract class BaseAdapter implements ServiceAdapter {
           EventCategory.ADAPTER,
           AdapterEventType.ERROR,
           {
-            id: this.id,
-            type: this.type,
-            name: this.name,
-            error: {
-              message: error.message,
-              stack: error.stack
-            }
+            message: error.message,
+            stack: error.stack,
+            timestamp: Date.now()
           },
-          this.id
+          this.id,
+          this.name,
+          this.type
         )
       );
     }

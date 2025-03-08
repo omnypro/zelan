@@ -12,7 +12,31 @@ export const AdapterStatus: React.FC = () => {
 
   // Group by adapter id
   const adapterStatuses = adapterStatusEvents.reduce((acc, event) => {
-    const { id, name, type, status } = event.payload;
+    // Make sure payload is properly formatted before accessing properties
+    const payload = event.payload || {};
+    
+    // Extract properties safely
+    const id = typeof payload.id === 'string' ? payload.id : 'unknown';
+    const name = typeof payload.name === 'string' ? payload.name : 'Unknown Adapter';
+    const type = typeof payload.type === 'string' ? payload.type : 'unknown';
+    
+    // Handle status which might be either an object with status property or a direct status value
+    let statusValue;
+    let statusMessage;
+    
+    if (payload.status && typeof payload.status === 'object') {
+      // Handle case where status is an object with status and message properties
+      statusValue = payload.status.status;
+      statusMessage = payload.status.message;
+    } else if (typeof payload.status === 'string') {
+      // Handle case where status is just a string
+      statusValue = payload.status;
+      statusMessage = payload.message;
+    } else {
+      // Default status
+      statusValue = AdapterStatusEnum.DISCONNECTED;
+      statusMessage = "Unknown status";
+    }
     
     // Only add if we don't already have a more recent status for this adapter
     if (!acc[id] || acc[id].timestamp < event.timestamp) {
@@ -20,8 +44,8 @@ export const AdapterStatus: React.FC = () => {
         id,
         name,
         type,
-        status: status.status,
-        message: status.message,
+        status: statusValue,
+        message: statusMessage,
         timestamp: event.timestamp
       };
     }
@@ -42,26 +66,42 @@ export const AdapterStatus: React.FC = () => {
   // Status badge component
   const StatusBadge: React.FC<{ status: AdapterStatusEnum }> = ({ status }) => {
     let color = '';
+    let displayStatus = '';
     
-    switch (status) {
+    // Handle when status is an object rather than enum string
+    const statusValue = typeof status === 'object' && status !== null 
+      ? JSON.stringify(status) 
+      : String(status);
+    
+    switch (statusValue) {
       case AdapterStatusEnum.CONNECTED:
         color = 'bg-green-100 text-green-800';
+        displayStatus = 'Connected';
         break;
       case AdapterStatusEnum.CONNECTING:
+        color = 'bg-yellow-100 text-yellow-800';
+        displayStatus = 'Connecting';
+        break;
       case AdapterStatusEnum.RECONNECTING:
         color = 'bg-yellow-100 text-yellow-800';
+        displayStatus = 'Reconnecting';
         break;
       case AdapterStatusEnum.ERROR:
         color = 'bg-red-100 text-red-800';
+        displayStatus = 'Error';
         break;
       case AdapterStatusEnum.DISCONNECTED:
+        color = 'bg-gray-100 text-gray-800';
+        displayStatus = 'Disconnected';
+        break;
       default:
         color = 'bg-gray-100 text-gray-800';
+        displayStatus = 'Unknown';
     }
     
     return (
       <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${color}`}>
-        {status}
+        {displayStatus}
       </span>
     );
   };

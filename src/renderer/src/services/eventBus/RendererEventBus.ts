@@ -1,10 +1,10 @@
-import { EventBus } from '../../../../shared/core/bus';
+import { BaseEventBus } from '../../../../shared/core/bus';
 import { BaseEvent } from '../../../../shared/types/events';
 
 /**
  * Renderer process event bus with IPC bridge
  */
-export class RendererEventBus extends EventBus {
+export class RendererEventBus extends BaseEventBus {
   private isForwarding = false;
   private unsubscribeFn: (() => void) | null = null;
   

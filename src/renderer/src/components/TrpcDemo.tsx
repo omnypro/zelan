@@ -178,7 +178,18 @@ export function TrpcDemo() {
                   <li key={index} className="text-xs border-b border-muted-foreground/20 pb-1">
                     <div><span className="font-mono">{event?.type || 'Unknown Type'}</span></div>
                     <div className="text-muted-foreground">
-                      {event?.payload ? JSON.stringify(event.payload) : 'No payload'}
+                      {event?.payload ? (
+                        typeof event.payload === 'object' ? (
+                          // Try to safely stringify the object
+                          (() => {
+                            try {
+                              return JSON.stringify(event.payload);
+                            } catch (err) {
+                              return '[Complex Object]';
+                            }
+                          })()
+                        ) : String(event.payload)
+                      ) : 'No payload'}
                     </div>
                   </li>
                 ))}
@@ -204,27 +215,59 @@ export function TrpcDemo() {
                     <div className="text-xs text-muted-foreground">Type: {adapter.type}</div>
                     <div className="text-xs flex gap-1 mt-1">
                       <span className={`px-1.5 py-0.5 rounded-full text-xs ${
-                        adapter.status === 'running' 
-                          ? 'bg-green-200 text-green-800'
-                          : adapter.status === 'stopped'
-                          ? 'bg-orange-200 text-orange-800'
-                          : 'bg-red-200 text-red-800'
+                        // Handle different status values and also handle object status values
+                        (() => {
+                          const statusStr = typeof adapter.status === 'object' 
+                            ? 'complex' 
+                            : String(adapter.status || '');
+                            
+                          if (statusStr === 'running' || statusStr === 'connected') {
+                            return 'bg-green-200 text-green-800';
+                          } else if (statusStr === 'stopped' || statusStr === 'disconnected') {
+                            return 'bg-orange-200 text-orange-800';
+                          } else if (statusStr === 'connecting' || statusStr === 'reconnecting') {
+                            return 'bg-yellow-200 text-yellow-800';
+                          } else {
+                            return 'bg-red-200 text-red-800';
+                          }
+                        })()
                       }`}>
-                        {adapter.status}
+                        {/* Safely display the status */}
+                        {typeof adapter.status === 'object' 
+                          ? (adapter.status && typeof adapter.status.status === 'string' 
+                              ? adapter.status.status 
+                              : 'complex status')
+                          : adapter.status || 'unknown'}
                       </span>
                     </div>
                     
                     <div className="flex gap-1 mt-2">
                       <button
                         onClick={() => window.trpc.adapters.start.mutate(adapter.id)}
-                        disabled={adapter.status === 'running'}
+                        disabled={(() => {
+                          // Check if status is an object or a simple string
+                          if (typeof adapter.status === 'object') {
+                            return adapter.status?.status === 'connected' || 
+                                   adapter.status?.status === 'running';
+                          }
+                          return adapter.status === 'running' || 
+                                 adapter.status === 'connected';
+                        })()}
                         className="px-2 py-1 text-xs bg-green-500 text-white rounded-md disabled:opacity-50"
                       >
                         Start
                       </button>
                       <button
                         onClick={() => window.trpc.adapters.stop.mutate(adapter.id)}
-                        disabled={adapter.status !== 'running'}
+                        disabled={(() => {
+                          // Check if status is an object or a simple string
+                          if (typeof adapter.status === 'object') {
+                            return adapter.status?.status !== 'connected' && 
+                                   adapter.status?.status !== 'running';
+                          }
+                          return adapter.status !== 'running' && 
+                                 adapter.status !== 'connected';
+                        })()}
                         className="px-2 py-1 text-xs bg-orange-500 text-white rounded-md disabled:opacity-50"
                       >
                         Stop

@@ -3,7 +3,10 @@ import { EventEmitter } from 'events';
 import { BaseAdapter } from '../../../shared/adapters/base';
 import { EventBus } from '../../../shared/core/bus';
 import { EventCategory } from '../../../shared/types/events';
-import { createEvent } from '../../../shared/core/events';
+import { 
+  createObsEvent,
+  ObsEventType
+} from '../../../shared/core/events';
 import { AdapterStatus } from '../../../shared/adapters/interfaces/AdapterStatus';
 
 /**
@@ -28,19 +31,21 @@ const DEFAULT_OPTIONS: ObsAdapterOptions = {
 };
 
 /**
- * OBS event type
+ * OBS adapter specific event type mapping
+ * This maps internal event types to the standard ObsEventType enum
  */
-export type ObsEventType = 
-  | 'scene_switched'
-  | 'streaming_started'
-  | 'streaming_stopped'
-  | 'recording_started'
-  | 'recording_stopped'
-  | 'source_changed'
-  | 'scene_collection_changed'
-  | 'scene_list_changed'
-  | 'virtual_cam_started'
-  | 'virtual_cam_stopped';
+const OBS_EVENT_TYPE_MAP: Record<string, ObsEventType> = {
+  scene_switched: ObsEventType.SCENE_CHANGED,
+  streaming_started: ObsEventType.STREAM_STARTED,
+  streaming_stopped: ObsEventType.STREAM_STOPPED,
+  recording_started: ObsEventType.RECORDING_STARTED,
+  recording_stopped: ObsEventType.RECORDING_STOPPED,
+  source_changed: ObsEventType.SOURCE_VISIBILITY_CHANGED,
+  scene_collection_changed: ObsEventType.SCENE_COLLECTION_CHANGED,
+  scene_list_changed: ObsEventType.SCENE_COLLECTION_CHANGED,
+  virtual_cam_started: ObsEventType.VIRTUAL_CAM_STARTED,
+  virtual_cam_stopped: ObsEventType.VIRTUAL_CAM_STOPPED
+};
 
 /**
  * OBS adapter for connecting to OBS Studio via websocket
@@ -195,12 +200,10 @@ export class ObsAdapter extends BaseAdapter {
    */
   private setupForwardedEvents(): void {
     // Add listeners for adapter-specific events
-    ['scene_switched', 'streaming_started', 'streaming_stopped',
-     'recording_started', 'recording_stopped', 'source_changed',
-     'scene_collection_changed', 'scene_list_changed',
-     'virtual_cam_started', 'virtual_cam_stopped'].forEach(eventType => {
-      this.eventEmitter.on(eventType, (data) => {
-        this.publishEvent(eventType as ObsEventType, data);
+    Object.keys(OBS_EVENT_TYPE_MAP).forEach(internalEventType => {
+      this.eventEmitter.on(internalEventType, (data) => {
+        const standardEventType = OBS_EVENT_TYPE_MAP[internalEventType];
+        this.publishEvent(standardEventType, data);
       });
     });
   }
@@ -298,15 +301,11 @@ export class ObsAdapter extends BaseAdapter {
    */
   private publishEvent(eventType: ObsEventType, data: any): void {
     this.eventBus.publish(
-      createEvent(
-        EventCategory.OBS,
+      createObsEvent(
         eventType,
-        {
-          id: this.id,
-          name: this.name,
-          ...data
-        },
-        this.id
+        { ...data },
+        this.id,
+        this.name
       )
     );
   }

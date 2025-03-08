@@ -2,7 +2,9 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AdapterRegistry, ServiceAdapter } from '../../../shared/adapters';
 import { EventBus } from '../../../shared/core/bus';
-import { AdapterConfig, ReactiveConfigStore } from '../../../shared/core/config';
+import { ConfigStore, AdapterConfig } from '../../../shared/core/config';
+import { SystemEventType } from '../../../shared/types/events';
+import { createSystemEvent } from '../../../shared/core/events';
 
 /**
  * Manages adapter lifecycle and configuration
@@ -11,10 +13,13 @@ export class AdapterManager {
   private adapters = new Map<string, ServiceAdapter>();
   private adaptersSubject = new BehaviorSubject<ServiceAdapter[]>([]);
   
+  /**
+   * Create a new adapter manager
+   */
   constructor(
     private registry: AdapterRegistry,
     private eventBus: EventBus,
-    private configStore: ReactiveConfigStore
+    private configStore: ConfigStore
   ) {}
   
   /**
@@ -22,7 +27,7 @@ export class AdapterManager {
    */
   async initialize(): Promise<void> {
     // Load adapter configurations
-    const adapterConfigs = this.configStore.get<Record<string, AdapterConfig>>('adapters', {});
+    const adapterConfigs = this.configStore.getAllAdapters();
     
     // Create adapter instances from configurations
     const initPromises = Object.values(adapterConfigs).map(async (config) => {
@@ -30,6 +35,14 @@ export class AdapterManager {
         await this.createAdapter(config);
       } catch (error) {
         console.error(`Failed to initialize adapter ${config.id}:`, error);
+        this.eventBus.publish(
+          createSystemEvent(
+            SystemEventType.ERROR,
+            `Failed to initialize adapter ${config.id}: ${error instanceof Error ? error.message : String(error)}`,
+            'error',
+            { adapterId: config.id, adapterType: config.type }
+          )
+        );
       }
     });
     
@@ -40,7 +53,7 @@ export class AdapterManager {
    * Create a new adapter from configuration
    */
   async createAdapter(config: AdapterConfig): Promise<ServiceAdapter> {
-    const { id, type, name, options } = config;
+    const { id, type, name, options, enabled } = config;
     
     // Check if adapter with this ID already exists
     if (this.adapters.has(id)) {
@@ -53,20 +66,49 @@ export class AdapterManager {
       throw new Error(`No factory registered for adapter type ${type}`);
     }
     
-    // Create adapter instance
-    const adapter = factory.create(id, name, options, this.eventBus);
-    
-    // Initialize adapter
-    await adapter.initialize();
-    
-    // Store the adapter
-    this.adapters.set(id, adapter);
-    this.adaptersSubject.next(Array.from(this.adapters.values()));
-    
-    // Save configuration
-    this.saveAdapterConfig(adapter);
-    
-    return adapter;
+    try {
+      // Create adapter instance
+      const adapter = factory.create(id, name, options || {}, this.eventBus, enabled);
+      
+      // Initialize adapter
+      await adapter.initialize();
+      
+      // Store the adapter
+      this.adapters.set(id, adapter);
+      this.adaptersSubject.next(Array.from(this.adapters.values()));
+      
+      // Save configuration
+      this.configStore.saveAdapter({
+        id,
+        type,
+        name,
+        enabled: adapter.enabled,
+        options: adapter.options
+      });
+      
+      // Publish adapter created event
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.INFO,
+          `Adapter ${name} (${id}) created`,
+          'info',
+          { adapterId: id, adapterType: type }
+        )
+      );
+      
+      return adapter;
+    } catch (error) {
+      console.error(`Failed to create adapter ${id}:`, error);
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.ERROR,
+          `Failed to create adapter ${name} (${id}): ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+          { adapterId: id, adapterType: type }
+        )
+      );
+      throw error;
+    }
   }
   
   /**
@@ -78,40 +120,47 @@ export class AdapterManager {
       throw new Error(`Adapter with ID ${id} not found`);
     }
     
-    // Update adapter
-    await adapter.updateConfig(config);
-    
-    // Save updated configuration
-    this.saveAdapterConfig(adapter);
-    
-    // Notify observers
-    this.adaptersSubject.next(Array.from(this.adapters.values()));
-    
-    return adapter;
-  }
-  
-  /**
-   * Remove an adapter
-   */
-  async removeAdapter(id: string): Promise<void> {
-    const adapter = this.adapters.get(id);
-    if (!adapter) {
-      throw new Error(`Adapter with ID ${id} not found`);
+    try {
+      // Update adapter
+      await adapter.updateConfig(config);
+      
+      // Update state
+      this.adaptersSubject.next(Array.from(this.adapters.values()));
+      
+      // Save updated configuration
+      const currentConfig = this.configStore.getAdapter(id);
+      if (currentConfig) {
+        this.configStore.saveAdapter({
+          ...currentConfig,
+          ...config,
+          id: currentConfig.id, // ensure ID doesn't change
+          type: currentConfig.type // ensure type doesn't change
+        });
+      }
+      
+      // Publish adapter updated event
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.INFO,
+          `Adapter ${adapter.name} (${id}) updated`,
+          'info',
+          { adapterId: id, adapterType: adapter.type }
+        )
+      );
+      
+      return adapter;
+    } catch (error) {
+      console.error(`Failed to update adapter ${id}:`, error);
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.ERROR,
+          `Failed to update adapter ${adapter.name} (${id}): ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+          { adapterId: id, adapterType: adapter.type }
+        )
+      );
+      throw error;
     }
-    
-    // Dispose adapter resources
-    await adapter.dispose();
-    
-    // Remove from map
-    this.adapters.delete(id);
-    
-    // Update state
-    this.adaptersSubject.next(Array.from(this.adapters.values()));
-    
-    // Remove from config
-    const adapterConfigs = this.configStore.get<Record<string, AdapterConfig>>('adapters', {});
-    delete adapterConfigs[id];
-    this.configStore.set('adapters', adapterConfigs);
   }
   
   /**
@@ -123,7 +172,30 @@ export class AdapterManager {
       throw new Error(`Adapter with ID ${id} not found`);
     }
     
-    await adapter.connect();
+    try {
+      await adapter.connect();
+      
+      // Publish adapter started event
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.INFO,
+          `Adapter ${adapter.name} (${id}) started`,
+          'info',
+          { adapterId: id, adapterType: adapter.type }
+        )
+      );
+    } catch (error) {
+      console.error(`Failed to start adapter ${id}:`, error);
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.ERROR,
+          `Failed to start adapter ${adapter.name} (${id}): ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+          { adapterId: id, adapterType: adapter.type }
+        )
+      );
+      throw error;
+    }
   }
   
   /**
@@ -135,14 +207,73 @@ export class AdapterManager {
       throw new Error(`Adapter with ID ${id} not found`);
     }
     
-    await adapter.disconnect();
+    try {
+      await adapter.disconnect();
+      
+      // Publish adapter stopped event
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.INFO,
+          `Adapter ${adapter.name} (${id}) stopped`,
+          'info',
+          { adapterId: id, adapterType: adapter.type }
+        )
+      );
+    } catch (error) {
+      console.error(`Failed to stop adapter ${id}:`, error);
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.ERROR,
+          `Failed to stop adapter ${adapter.name} (${id}): ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+          { adapterId: id, adapterType: adapter.type }
+        )
+      );
+      throw error;
+    }
   }
   
   /**
    * Delete an adapter by ID
    */
   async deleteAdapter(id: string): Promise<void> {
-    await this.removeAdapter(id);
+    const adapter = this.adapters.get(id);
+    if (!adapter) {
+      throw new Error(`Adapter with ID ${id} not found`);
+    }
+    
+    try {
+      // Dispose adapter resources
+      await adapter.dispose();
+      
+      // Remove from collections
+      this.adapters.delete(id);
+      this.adaptersSubject.next(Array.from(this.adapters.values()));
+      
+      // Remove from config
+      this.configStore.deleteAdapter(id);
+      
+      // Publish adapter deleted event
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.INFO,
+          `Adapter ${adapter.name} (${id}) deleted`,
+          'info',
+          { adapterId: id, adapterType: adapter.type }
+        )
+      );
+    } catch (error) {
+      console.error(`Failed to delete adapter ${id}:`, error);
+      this.eventBus.publish(
+        createSystemEvent(
+          SystemEventType.ERROR,
+          `Failed to delete adapter ${adapter.name} (${id}): ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+          { adapterId: id, adapterType: adapter.type }
+        )
+      );
+      throw error;
+    }
   }
   
   /**
@@ -190,6 +321,25 @@ export class AdapterManager {
   }
   
   /**
+   * Reconnect all adapters
+   */
+  async reconnectAll(): Promise<void> {
+    const promises: Promise<void>[] = [];
+    
+    for (const adapter of this.adapters.values()) {
+      if (adapter.enabled) {
+        promises.push(
+          adapter.reconnect().catch(error => {
+            console.error(`Failed to reconnect adapter ${adapter.id}:`, error);
+          })
+        );
+      }
+    }
+    
+    await Promise.all(promises);
+  }
+  
+  /**
    * Dispose of all adapters
    */
   async dispose(): Promise<void> {
@@ -204,22 +354,5 @@ export class AdapterManager {
     await Promise.all(disposePromises);
     this.adapters.clear();
     this.adaptersSubject.next([]);
-  }
-  
-  /**
-   * Save adapter configuration to store
-   */
-  private saveAdapterConfig(adapter: ServiceAdapter): void {
-    const adapterConfigs = this.configStore.get<Record<string, AdapterConfig>>('adapters', {});
-    
-    adapterConfigs[adapter.id] = {
-      id: adapter.id,
-      type: adapter.type,
-      name: adapter.name,
-      enabled: adapter.enabled,
-      options: adapter.options
-    };
-    
-    this.configStore.set('adapters', adapterConfigs);
   }
 }

@@ -79,12 +79,16 @@ export const EventsDemo: React.FC = () => {
                     {new Date(event.timestamp).toLocaleTimeString()}
                   </div>
                   <div className="text-sm">
-                    {event.payload.message ? (
-                      <span>{event.payload.message}</span>
-                    ) : event.payload.appVersion ? (
-                      <span>System started (v{event.payload.appVersion})</span>
+                    {event.payload && typeof event.payload === 'object' ? (
+                      event.payload.message ? (
+                        <span>{event.payload.message}</span>
+                      ) : event.payload.appVersion ? (
+                        <span>System started (v{event.payload.appVersion})</span>
+                      ) : (
+                        <span>{JSON.stringify(event.payload)}</span>
+                      )
                     ) : (
-                      <span>{JSON.stringify(event.payload)}</span>
+                      <span>{String(event.payload)}</span>
                     )}
                   </div>
                 </li>
@@ -108,9 +112,15 @@ export const EventsDemo: React.FC = () => {
                   </div>
                   <div className="text-sm">
                     <span className="inline-block px-2 py-1 mr-2 bg-gray-100 text-xs rounded">
-                      {event.type}
+                      {event.type || 'unknown'}
                     </span>
-                    <span>{JSON.stringify(event.payload)}</span>
+                    <span>
+                      {event.payload ? (
+                        typeof event.payload === 'object' ? 
+                          JSON.stringify(event.payload) : 
+                          String(event.payload)
+                      ) : 'No payload'}
+                    </span>
                   </div>
                 </li>
               ))}
