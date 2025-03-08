@@ -1,5 +1,5 @@
 import { BehaviorSubject, Observable } from 'rxjs'
-import { map, filter } from 'rxjs/operators'
+import { map } from 'rxjs/operators'
 import { BaseEvent, EventCategory } from '@s/types/events'
 import { ConfigStore } from '@s/core/config/ConfigStore'
 

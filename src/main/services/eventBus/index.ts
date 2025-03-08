@@ -65,15 +65,53 @@ export class MainEventBus implements EventBus {
   /**
    * Get events filtered by category
    */
-  getEventsByCategory$(category: EventCategory): Observable<BaseEvent> {
-    return this.events$.pipe(filter((event) => event.category === category))
+  getEventsByCategory$<T = unknown>(category: EventCategory): Observable<BaseEvent<T>> {
+    return this.events$.pipe(filter((event) => event.category === category)) as Observable<
+      BaseEvent<T>
+    >
   }
 
   /**
    * Get events filtered by type
    */
-  getEventsByType$(type: string): Observable<BaseEvent> {
-    return this.events$.pipe(filter((event) => event.type === type))
+  getEventsByType$<T = unknown>(type: string): Observable<BaseEvent<T>> {
+    return this.events$.pipe(filter((event) => event.type === type)) as Observable<BaseEvent<T>>
+  }
+
+  /**
+   * Get events filtered by category and type
+   */
+  getEventsByCategoryAndType$<T = unknown>(
+    category: EventCategory,
+    type: string
+  ): Observable<BaseEvent<T>> {
+    return this.events$.pipe(
+      filter((event) => event.category === category && event.type === type)
+    ) as Observable<BaseEvent<T>>
+  }
+
+  /**
+   * Get events filtered by category (alias for getEventsByCategory$)
+   */
+  getEventsByCategory<T = unknown>(category: EventCategory): Observable<BaseEvent<T>> {
+    return this.getEventsByCategory$<T>(category)
+  }
+
+  /**
+   * Get events filtered by type (alias for getEventsByType$)
+   */
+  getEventsByType<T = unknown>(type: string): Observable<BaseEvent<T>> {
+    return this.getEventsByType$<T>(type)
+  }
+
+  /**
+   * Get events filtered by category and type (alias for getEventsByCategoryAndType$)
+   */
+  getEventsByCategoryAndType<T = unknown>(
+    category: EventCategory,
+    type: string
+  ): Observable<BaseEvent<T>> {
+    return this.getEventsByCategoryAndType$<T>(category, type)
   }
 
   /**

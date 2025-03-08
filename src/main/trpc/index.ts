@@ -1,6 +1,4 @@
 import { ipcMain } from 'electron'
-import { observable } from '@trpc/server/observable'
-import { appRouter } from '@s/trpc'
 import { ConfigStore } from '@s/core/config'
 import { MainEventBus } from '@m/services/eventBus'
 import { AdapterManager } from '@m/services/adapters'

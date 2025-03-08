@@ -1,7 +1,5 @@
 import { ipcRenderer } from 'electron'
-import { createTRPCProxyClient, loggerLink, TRPCClientError } from '@trpc/client'
 import { observable } from '@trpc/server/observable'
-import type { AppRouter } from '@s/trpc'
 
 // Channel for tRPC requests
 const TRPC_CHANNEL = 'zelan:trpc'
@@ -10,109 +8,6 @@ console.log('Initializing tRPC client with channel:', TRPC_CHANNEL)
 
 // Map of active subscriptions
 const activeSubscriptions = new Map<string, () => void>()
-
-/**
- * Create an Electron IPC link for tRPC
- */
-function createIPCLink() {
-  return () => {
-    return {
-      /**
-       * Handle client requests
-       */
-      async query(opts) {
-        const { type, path, input, id } = opts
-
-        try {
-          // Handle queries and mutations
-          if (type === 'query' || type === 'mutation') {
-            const result = await ipcRenderer.invoke(TRPC_CHANNEL, {
-              id,
-              type,
-              path,
-              input
-            })
-
-            if (result.type === 'error') {
-              const error = new TRPCClientError(result.error.message)
-              error.stack = result.error.stack
-              error.cause = result.error
-              throw error
-            }
-
-            return {
-              result: result.result
-            }
-          }
-
-          // Handle subscriptions
-          if (type === 'subscription') {
-            const subChannelName = `${TRPC_CHANNEL}:${id}`
-
-            // Create an observable for the subscription
-            return {
-              async cancel() {
-                // Notify main process to stop the subscription
-                ipcRenderer.send(`${subChannelName}:stop`)
-                activeSubscriptions.delete(id)
-              },
-
-              subscribe(observer) {
-                // Handle incoming messages from main process
-                const onMessage = (_: any, data: any) => {
-                  if (data.type === 'data') {
-                    observer.next(data.data)
-                  } else if (data.type === 'error') {
-                    const error = new TRPCClientError(data.error.message)
-                    error.stack = data.error.stack
-                    error.cause = data.error
-                    observer.error(error)
-                  } else if (data.type === 'stopped') {
-                    observer.complete()
-                    cleanup()
-                  }
-                }
-
-                // Add listener for subscription updates
-                ipcRenderer.on(subChannelName, onMessage)
-
-                // Start the subscription
-                ipcRenderer.invoke(TRPC_CHANNEL, {
-                  id,
-                  type,
-                  path,
-                  input
-                })
-
-                // Cleanup function
-                const cleanup = () => {
-                  ipcRenderer.removeListener(subChannelName, onMessage)
-                  activeSubscriptions.delete(id)
-                }
-
-                // Store cleanup function
-                activeSubscriptions.set(id, cleanup)
-
-                // Return unsubscribe function
-                return {
-                  unsubscribe() {
-                    ipcRenderer.send(`${subChannelName}:stop`)
-                    cleanup()
-                  }
-                }
-              }
-            }
-          }
-
-          throw new Error(`Unsupported request type: ${type}`)
-        } catch (error) {
-          const err = error instanceof Error ? error : new Error(String(error))
-          throw new TRPCClientError(err.message, { cause: err })
-        }
-      }
-    }
-  }
-}
 
 /**
  * Create the tRPC client

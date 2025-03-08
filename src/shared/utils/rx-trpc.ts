@@ -88,12 +88,21 @@ export interface SerializableAdapter {
  * for sending between processes
  */
 export function createSerializableAdapter(adapter: ServiceAdapter): SerializableAdapter {
-  return toSerializable({
+  // First convert to unknown to avoid direct conversion errors
+  const serialized = toSerializable({
     id: adapter.id,
     name: adapter.name,
     type: adapter.type,
-    status: adapter.status,
+    // Use status$ value if available, else create a default status
+    status: adapter.status$
+      ? undefined
+      : {
+          status: 'unknown',
+          timestamp: Date.now()
+        },
     enabled: adapter.enabled,
     options: adapter.options ? toSerializable(adapter.options) : undefined
-  }) as SerializableAdapter
+  })
+
+  return serialized as unknown as SerializableAdapter
 }

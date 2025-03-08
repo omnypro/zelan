@@ -1,7 +1,7 @@
 import { WebSocket, WebSocketServer as WSServer } from 'ws'
-import { Subscription } from 'rxjs'
 import { EventBus } from '@s/core/bus'
 import { BaseEvent, EventCategory, SystemEventType } from '@s/types/events'
+import { SubscriptionManager } from '@s/utils/subscription-manager'
 
 /**
  * WebSocket server configuration
@@ -25,7 +25,7 @@ const DEFAULT_CONFIG: WebSocketServerConfig = {
 export class WebSocketServer {
   private server: WSServer | null = null
   private clients: Set<WebSocket> = new Set()
-  private eventSubscription: Subscription | null = null
+  private subscriptionManager = new SubscriptionManager()
   private pingInterval: NodeJS.Timeout | null = null
   private config: WebSocketServerConfig
   private isRunning = false
@@ -56,7 +56,9 @@ export class WebSocketServer {
       this.server.on('error', this.handleServerError.bind(this))
 
       // Subscribe to all events
-      this.eventSubscription = this.eventBus.getEvents().subscribe(this.broadcastEvent.bind(this))
+      this.subscriptionManager.add(
+        this.eventBus.events$.subscribe(this.broadcastEvent.bind(this))
+      )
 
       // Set up ping interval
       this.setupPingInterval()
@@ -81,11 +83,8 @@ export class WebSocketServer {
       this.pingInterval = null
     }
 
-    // Unsubscribe from events
-    if (this.eventSubscription) {
-      this.eventSubscription.unsubscribe()
-      this.eventSubscription = null
-    }
+    // Unsubscribe from all events
+    this.subscriptionManager.unsubscribeAll()
 
     // Close all client connections
     for (const client of this.clients) {
@@ -171,12 +170,23 @@ export class WebSocketServer {
     this.sendToClient(client, {
       id: 'welcome',
       timestamp: Date.now(),
-      source: 'websocket-server',
+      source: {
+        id: 'websocket-server',
+        name: 'WebSocket Server',
+        type: 'system'
+      },
       category: EventCategory.SYSTEM,
       type: SystemEventType.INFO,
       payload: {
         message: 'Connected to Zelan WebSocket Server',
         clientCount: this.clients.size
+      },
+      data: {
+        message: 'Connected to Zelan WebSocket Server',
+        clientCount: this.clients.size
+      },
+      metadata: {
+        version: '1.0'
       }
     })
 

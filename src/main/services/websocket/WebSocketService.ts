@@ -40,11 +40,21 @@ export class WebSocketService {
       this.eventBus.publish({
         id: `websocket-start-${Date.now()}`,
         timestamp: Date.now(),
-        source: 'websocket-service',
+        source: {
+          id: 'websocket-service',
+          name: 'WebSocket Service',
+          type: 'system'
+        },
         category: EventCategory.SYSTEM,
         type: SystemEventType.INFO,
         payload: {
           message: `WebSocket server started on port ${this.server.getStatus().port}`
+        },
+        data: {
+          message: `WebSocket server started on port ${this.server.getStatus().port}`
+        },
+        metadata: {
+          version: '1.0'
         }
       })
     }
@@ -62,11 +72,21 @@ export class WebSocketService {
     this.eventBus.publish({
       id: `websocket-stop-${Date.now()}`,
       timestamp: Date.now(),
-      source: 'websocket-service',
+      source: {
+        id: 'websocket-service',
+        name: 'WebSocket Service',
+        type: 'system'
+      },
       category: EventCategory.SYSTEM,
       type: SystemEventType.INFO,
       payload: {
         message: 'WebSocket server stopped'
+      },
+      data: {
+        message: 'WebSocket server stopped'
+      },
+      metadata: {
+        version: '1.0'
       }
     })
   }

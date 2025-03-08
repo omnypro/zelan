@@ -63,7 +63,8 @@ export class TestAdapter extends BaseAdapter {
    * Get the options with proper typing
    */
   private getTypedOptions(): TestAdapterOptions {
-    return this.options as TestAdapterOptions
+    // Use type assertion with unknown first to avoid direct conversion
+    return this.options as unknown as TestAdapterOptions
   }
 
   /**

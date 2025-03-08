@@ -1,6 +1,5 @@
 import { initTRPC } from '@trpc/server'
 import { z } from 'zod'
-import { AppConfig, ConfigChangeEvent } from '@s/core/config'
 
 /**
  * tRPC initialization point
@@ -45,7 +44,7 @@ export const appRouter = router({
   // WebSocket server procedures
   websocket: router({
     // Get WebSocket server status
-    getStatus: procedure.query(({ ctx }) => {
+    getStatus: procedure.query(() => {
       // This will be implemented later in the server
       return {
         running: false,
@@ -55,13 +54,13 @@ export const appRouter = router({
     }),
 
     // Start WebSocket server
-    start: procedure.mutation(({ ctx }) => {
+    start: procedure.mutation(() => {
       // This will be implemented later in the server
       return true
     }),
 
     // Stop WebSocket server
-    stop: procedure.mutation(({ ctx }) => {
+    stop: procedure.mutation(() => {
       // This will be implemented later in the server
       return true
     })
@@ -77,9 +76,9 @@ export const appRouter = router({
           defaultValue: configValueSchema.optional()
         })
       )
-      .query(({ input, ctx }) => {
+      .query(() => {
         // This will be implemented later in the server
-        return {} as any
+        return {} as Record<string, unknown>
       }),
 
     // Set configuration value
@@ -90,37 +89,37 @@ export const appRouter = router({
           value: configValueSchema
         })
       )
-      .mutation(({ input, ctx }) => {
+      .mutation(() => {
         // This will be implemented later in the server
         return true
       }),
 
     // Update multiple configuration values
-    update: procedure.input(configUpdatesSchema).mutation(({ input, ctx }) => {
+    update: procedure.input(configUpdatesSchema).mutation(() => {
       // This will be implemented later in the server
       return true
     }),
 
     // Delete configuration key
-    delete: procedure.input(configPathSchema).mutation(({ input, ctx }) => {
+    delete: procedure.input(configPathSchema).mutation(() => {
       // This will be implemented later in the server
       return true
     }),
 
     // Check if configuration key exists
-    has: procedure.input(configPathSchema).query(({ input, ctx }) => {
+    has: procedure.input(configPathSchema).query(() => {
       // This will be implemented later in the server
       return true
     }),
 
     // Get all configuration
-    getAll: procedure.query(({ ctx }) => {
+    getAll: procedure.query(() => {
       // This will be implemented later in the server
-      return {} as AppConfig
+      return {} as any
     }),
 
     // Get configuration path
-    getPath: procedure.query(({ ctx }) => {
+    getPath: procedure.query(() => {
       // This will be implemented later in the server
       return ''
     }),
@@ -132,7 +131,7 @@ export const appRouter = router({
     }),
 
     // Subscribe to specific configuration path changes
-    onPathChange: procedure.input(configPathSchema).subscription(({ input }) => {
+    onPathChange: procedure.input(configPathSchema).subscription(() => {
       // This will be implemented later in the server
       return {} as any
     })
@@ -141,7 +140,7 @@ export const appRouter = router({
   // Event procedures
   events: router({
     // Send event to main process
-    send: procedure.input(z.any()).mutation(({ input, ctx }) => {
+    send: procedure.input(z.any()).mutation(() => {
       // This will be implemented later in the server
       return true
     }),
@@ -156,31 +155,31 @@ export const appRouter = router({
   // Adapter procedures
   adapters: router({
     // Get all adapters
-    getAll: procedure.query(({ ctx }) => {
+    getAll: procedure.query(() => {
       // This will be implemented later in the server
       return [] as any[]
     }),
 
     // Get adapter by id
-    getById: procedure.input(adapterIdSchema).query(({ input, ctx }) => {
+    getById: procedure.input(adapterIdSchema).query(() => {
       // This will be implemented later in the server
       return {} as any
     }),
 
     // Create adapter
-    create: procedure.input(adapterConfigSchema).mutation(({ input, ctx }) => {
+    create: procedure.input(adapterConfigSchema).mutation(() => {
       // This will be implemented later in the server
       return {} as any
     }),
 
     // Start adapter
-    start: procedure.input(adapterIdSchema).mutation(({ input, ctx }) => {
+    start: procedure.input(adapterIdSchema).mutation(() => {
       // This will be implemented later in the server
       return true
     }),
 
     // Stop adapter
-    stop: procedure.input(adapterIdSchema).mutation(({ input, ctx }) => {
+    stop: procedure.input(adapterIdSchema).mutation(() => {
       // This will be implemented later in the server
       return true
     }),
@@ -193,19 +192,19 @@ export const appRouter = router({
           config: z.record(z.string(), z.any())
         })
       )
-      .mutation(({ input, ctx }) => {
+      .mutation(() => {
         // This will be implemented later in the server
         return true
       }),
 
     // Delete adapter
-    delete: procedure.input(adapterIdSchema).mutation(({ input, ctx }) => {
+    delete: procedure.input(adapterIdSchema).mutation(() => {
       // This will be implemented later in the server
       return true
     }),
 
     // Get available adapter types
-    getTypes: procedure.query(({ ctx }) => {
+    getTypes: procedure.query(() => {
       // This will be implemented later in the server
       return [] as string[]
     })

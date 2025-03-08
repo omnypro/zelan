@@ -28,6 +28,14 @@ const AdapterConfigSchema = z.object({
 export type AdapterConfig = z.infer<typeof AdapterConfigSchema>
 
 /**
+ * Export AppConfig type for use elsewhere in the application
+ */
+export type AppConfig = {
+  adapters: Record<string, AdapterConfig>
+  settings: AppSettings
+}
+
+/**
  * Application settings schema
  */
 const AppSettingsSchema = z.object({
@@ -404,7 +412,7 @@ export class ConfigStore {
   update(updates: Record<string, unknown>): void {
     // Track if we need to save
     let needsSave = false
-    const timestamp = Date.now()
+    // We'll use a timestamp for each specific change event instead of here
 
     // Batch all updates
     for (const [key, value] of Object.entries(updates)) {

@@ -1,4 +1,4 @@
-import { BaseEvent as IBaseEvent, EventCategory } from '@s/types/events'
+import { BaseEvent as IBaseEvent, EventCategory, EventSource } from '@s/types/events'
 
 /**
  * Create a new event with the given parameters
@@ -12,14 +12,22 @@ export function createEvent<T>(
   category: EventCategory,
   type: string,
   payload: T,
-  source = 'system'
+  source: EventSource | string = 'system'
 ): IBaseEvent<T> {
+  // Create standardized source object
+  const eventSource: EventSource =
+    typeof source === 'string' ? { id: 'system', name: 'System', type: 'system' } : source
+
   return {
     id: crypto.randomUUID(),
     timestamp: Date.now(),
-    source,
+    source: eventSource,
     category,
     type,
-    payload
+    payload,
+    data: payload, // For compatibility with API spec
+    metadata: {
+      version: '1.0'
+    }
   }
 }

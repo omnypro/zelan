@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { Observable, fromEvent } from 'rxjs'
+import { fromEvent } from 'rxjs'
 import { map, filter, share } from 'rxjs/operators'
-import { AppConfig, ConfigChangeEvent } from '@s/core/config'
+import { ConfigChangeEvent, AppConfig } from '@s/core/config'
 import { trpcClient } from './trpc'
 
 // IPC channels

@@ -2,7 +2,6 @@ import OBSWebSocket from 'obs-websocket-js'
 import { EventEmitter } from 'events'
 import { BaseAdapter } from '@s/adapters/base'
 import { EventBus } from '@s/core/bus'
-import { EventCategory } from '@s/types/events'
 import { createObsEvent, ObsEventType } from '@s/core/events'
 import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
 
@@ -77,7 +76,8 @@ export class ObsAdapter extends BaseAdapter {
    * Get the options with proper typing
    */
   private getTypedOptions(): ObsAdapterOptions {
-    return this.options as ObsAdapterOptions
+    // Use type assertion with unknown first to avoid direct conversion
+    return this.options as unknown as ObsAdapterOptions
   }
 
   protected async connectImplementation(): Promise<void> {
@@ -98,7 +98,7 @@ export class ObsAdapter extends BaseAdapter {
       // Log the connection
       console.log(`Connected to OBS WebSocket v${obsWebSocketVersion}`)
 
-      // Set up event listeners
+      // Set up event listeners with proper subscriptions
       this.setupEventListeners()
 
       // Get initial state
@@ -136,12 +136,19 @@ export class ObsAdapter extends BaseAdapter {
 
     // Reset reconnection state
     this.isReconnecting = false
+    this.consecutiveReconnectAttempts = 0
 
     // Remove event listeners
     this.removeEventListeners()
 
-    // Disconnect from OBS
-    this.obs.disconnect()
+    try {
+      // Disconnect from OBS - only if we have an active connection
+      if (this.connectionState === 'connected') {
+        this.obs.disconnect()
+      }
+    } catch (error) {
+      // Ignore errors during disconnect
+    }
 
     // Update status to disconnected explicitly
     this.updateStatus(AdapterStatus.DISCONNECTED, 'Disconnected from OBS')
@@ -151,9 +158,23 @@ export class ObsAdapter extends BaseAdapter {
     // Clean up event emitter
     this.eventEmitter.removeAllListeners()
 
-    // Make sure we're disconnected
-    if (this.obs) {
-      this.obs.disconnect()
+    // Clear any reconnect timer
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = undefined
+    }
+
+    // Reset reconnection state
+    this.isReconnecting = false
+    this.consecutiveReconnectAttempts = 0
+
+    try {
+      // Make sure we're disconnected
+      if (this.obs) {
+        this.obs.disconnect()
+      }
+    } catch (error) {
+      // Ignore errors during disposal
     }
   }
 
@@ -161,6 +182,9 @@ export class ObsAdapter extends BaseAdapter {
    * Set up event listeners for OBS WebSocket
    */
   private setupEventListeners(): void {
+    // Remove any existing listeners first to prevent duplicates
+    this.removeEventListeners();
+    
     // Connection events
     this.obs.on('ConnectionOpened', this.handleConnectionOpened.bind(this))
     this.obs.on('ConnectionClosed', this.handleConnectionClosed.bind(this))
@@ -256,39 +280,79 @@ export class ObsAdapter extends BaseAdapter {
   /**
    * Set up reconnection logic
    */
-  private setupReconnection(): void {
-    const options = this.getTypedOptions()
+  /**
+   * Maximum number of consecutive reconnection attempts before backing off
+   */
+  private static MAX_CONSECUTIVE_ATTEMPTS = 5;
 
+  /**
+   * Count of consecutive reconnection attempts
+   */
+  private consecutiveReconnectAttempts = 0;
+
+  /**
+   * Set up reconnection logic with exponential backoff
+   */
+  private setupReconnection(): void {
+    // Clean up any existing reconnection timer
     if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
     }
 
+    // If we've exceeded the maximum consecutive attempts, stop aggressive reconnection
+    if (this.consecutiveReconnectAttempts >= ObsAdapter.MAX_CONSECUTIVE_ATTEMPTS) {
+      console.log(`Maximum reconnection attempts reached. Backing off to longer interval.`);
+      
+      // Use a much longer interval for subsequent attempts
+      this.reconnectTimer = setTimeout(() => {
+        // Reset the counter to allow for fresh attempts if this one fails
+        this.consecutiveReconnectAttempts = 0;
+        this.attemptReconnection();
+      }, 30000); // 30 seconds
+      
+      return;
+    }
+
+    // Calculate backoff delay: 1s, 2s, 4s, 8s, 16s
+    const delay = Math.min(1000 * Math.pow(2, this.consecutiveReconnectAttempts), 16000);
+
     // Set the reconnecting flag
-    this.isReconnecting = true
+    this.isReconnecting = true;
 
-    this.reconnectTimer = setTimeout(async () => {
-      try {
-        // Only log the first reconnection attempt to avoid spam
-        if (options.reconnectInterval === DEFAULT_OPTIONS.reconnectInterval) {
-          console.log(`Attempting to reconnect to OBS...`)
-        }
+    this.reconnectTimer = setTimeout(() => {
+      this.attemptReconnection();
+    }, delay);
+  }
 
-        await this.connect()
-        // Connection succeeded, reset the reconnecting flag
-        this.isReconnecting = false
-      } catch (error) {
-        // Only log detailed error in development mode to avoid spam
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Reconnection attempt failed:', error)
-        }
+  /**
+   * Attempt a single reconnection
+   */
+  private async attemptReconnection(): Promise<void> {
+    try {
+      // Increment the attempt counter
+      this.consecutiveReconnectAttempts++;
 
-        // Increase the interval for next retry (exponential backoff)
-        options.reconnectInterval = Math.min(options.reconnectInterval * 1.5, 30000)
-
-        // Try again with increasing interval (exponential backoff)
-        this.setupReconnection()
+      // Only log every few attempts to avoid spam
+      if (this.consecutiveReconnectAttempts === 1 || 
+          this.consecutiveReconnectAttempts % 5 === 0) {
+        console.log(`Attempting to reconnect to OBS... (attempt ${this.consecutiveReconnectAttempts})`);
       }
-    }, options.reconnectInterval)
+
+      await this.connect();
+      
+      // Connection succeeded
+      this.isReconnecting = false;
+      this.consecutiveReconnectAttempts = 0;
+    } catch (error) {
+      // Only log detailed errors in development mode to reduce log spam
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Reconnection attempt failed:', error);
+      }
+
+      // Schedule next reconnection attempt
+      this.setupReconnection();
+    }
   }
 
   /**
@@ -321,9 +385,16 @@ export class ObsAdapter extends BaseAdapter {
       console.log('OBS WebSocket connection closed')
       this.connectionState = 'disconnected'
 
-      // Set up reconnection if enabled and not already reconnecting
+      // If we have a pending reconnection, don't schedule another one
+      if (this.reconnectTimer) {
+        console.log('Reconnection already scheduled, skipping additional reconnect');
+        return;
+      }
+
+      // Set up reconnection if enabled and not already in the process of reconnecting
       const options = this.getTypedOptions()
       if (options.autoReconnect && !this.isReconnecting) {
+        console.log('Scheduling reconnection after connection closed');
         this.setupReconnection()
       }
     }
@@ -344,9 +415,17 @@ export class ObsAdapter extends BaseAdapter {
     )
     this.connectionState = 'error'
 
+    // If we already have a reconnection scheduled, don't create another one
+    if (this.reconnectTimer) {
+      console.log('Reconnection already scheduled after error, skipping additional reconnect');
+      return;
+    }
+
     // Set up reconnection if enabled and not already reconnecting
-    if (this.options.autoReconnect && !this.isReconnecting) {
-      this.setupReconnection()
+    const options = this.getTypedOptions();
+    if (options.autoReconnect && !this.isReconnecting) {
+      console.log('Scheduling reconnection after error');
+      this.setupReconnection();
     }
   }
 

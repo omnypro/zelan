@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { AppRouter } from '@s/trpc'
 import { inferRouterOutputs, inferRouterInputs } from '@trpc/server'
-import { useObservable } from './useObservable'
-import { Observable } from 'rxjs'
 
 // Get inferred types from the AppRouter
 type RouterOutput = inferRouterOutputs<AppRouter>

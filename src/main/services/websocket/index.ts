@@ -1,9 +1,9 @@
 import WebSocket, { WebSocketServer } from 'ws'
-import { Subscription } from 'rxjs'
 import { BaseEvent, EventCategory, SystemEventType } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
 import { EventBus } from '@s/core/bus'
 import { ConfigStore } from '@s/core/config/ConfigStore'
+import { SubscriptionManager } from '@s/utils/subscription-manager'
 
 interface WebSocketClient extends WebSocket {
   isAlive: boolean
@@ -35,7 +35,7 @@ export class WebSocketService {
   private isRunning = false
   private port: number
   private startTime: number = 0
-  private eventSubscription?: Subscription
+  private subscriptionManager = new SubscriptionManager()
 
   private static instance: WebSocketService
 
@@ -54,23 +54,25 @@ export class WebSocketService {
    */
   private constructor(
     private eventBus: EventBus,
-    private configStore: ConfigStore
+    configStore: ConfigStore
   ) {
     this.port = configStore.getSettings().webSocketPort
 
     // Listen for settings changes
-    configStore.settings$().subscribe((settings) => {
-      const newPort = settings.webSocketPort
-      if (this.port !== newPort) {
-        this.port = newPort
+    this.subscriptionManager.add(
+      configStore.settings$().subscribe((settings) => {
+        const newPort = settings.webSocketPort
+        if (this.port !== newPort) {
+          this.port = newPort
 
-        // Restart server if running
-        if (this.isRunning) {
-          this.stop()
-          this.start()
+          // Restart server if running
+          if (this.isRunning) {
+            this.stop()
+            this.start()
+          }
         }
-      }
-    })
+      })
+    )
 
     // Handle app exit
     process.on('exit', () => {
@@ -111,9 +113,11 @@ export class WebSocketService {
       this.isRunning = true
 
       // Subscribe to events
-      this.eventSubscription = this.eventBus.events$.subscribe((event) => {
-        this.broadcastEvent(event)
-      })
+      this.subscriptionManager.add(
+        this.eventBus.events$.subscribe((event) => {
+          this.broadcastEvent(event)
+        })
+      )
 
       // Publish started event
       this.eventBus.publish(
@@ -141,10 +145,8 @@ export class WebSocketService {
    * Stop the WebSocket server
    */
   stop(): void {
-    if (this.eventSubscription) {
-      this.eventSubscription.unsubscribe()
-      this.eventSubscription = undefined
-    }
+    // Unsubscribe from all event subscriptions
+    this.subscriptionManager.unsubscribeAll()
 
     if (this.pingInterval) {
       clearInterval(this.pingInterval)

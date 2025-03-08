@@ -53,7 +53,7 @@ export class AdapterManager {
    * Create a new adapter from configuration
    */
   async createAdapter(config: AdapterConfig): Promise<ServiceAdapter> {
-    const { id, type, name, options, enabled } = config
+    const { id, type, name, options } = config
 
     // Check if adapter with this ID already exists
     if (this.adapters.has(id)) {
@@ -67,8 +67,9 @@ export class AdapterManager {
     }
 
     try {
-      // Create adapter instance
-      const adapter = factory.create(id, name, options || {}, this.eventBus, enabled)
+      // Create adapter instance with correct number of arguments
+      // Last parameter (enabled) is optional, so we pass only 4 arguments
+      const adapter = factory.create(id, name, options || {}, this.eventBus)
 
       // Initialize adapter
       await adapter.initialize()

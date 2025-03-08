@@ -1,9 +1,10 @@
-import { BehaviorSubject, Observable, Subscription } from 'rxjs'
+import { BehaviorSubject, Observable } from 'rxjs'
 import { AdapterConfig, ServiceAdapter } from '../interfaces/ServiceAdapter'
 import { AdapterStatus, AdapterStatusInfo } from '../interfaces/AdapterStatus'
 import { EventBus } from '@s/core/bus/EventBus'
 import { EventCategory, AdapterEventType } from '@s/types/events'
 import { createEvent } from '@s/core/events'
+import { SubscriptionManager } from '@s/utils/subscription-manager'
 
 /**
  * Abstract base class for all service adapters
@@ -21,7 +22,7 @@ export abstract class BaseAdapter implements ServiceAdapter {
     timestamp: Date.now()
   })
 
-  protected subscriptions: Subscription[] = []
+  protected subscriptionManager = new SubscriptionManager()
 
   constructor(
     id: string,
@@ -191,8 +192,7 @@ export abstract class BaseAdapter implements ServiceAdapter {
    */
   async dispose(): Promise<void> {
     // Clean up subscriptions
-    this.subscriptions.forEach((sub) => sub.unsubscribe())
-    this.subscriptions = []
+    this.subscriptionManager.unsubscribeAll()
 
     // Disconnect if connected
     if (this._status$.value.status !== AdapterStatus.DISCONNECTED) {

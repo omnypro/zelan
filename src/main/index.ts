@@ -170,7 +170,8 @@ async function initializeServices(): Promise<void> {
     webSocketService = WebSocketService.getInstance(mainEventBus, configStore)
 
     // Get WebSocket settings from config or use defaults
-    const wsSettings = configStore.getSettings()
+    // We don't need to assign this value since it's retrieved automatically in the WebSocketService
+    configStore.getSettings()
 
     // Start WebSocket server automatically
     if (webSocketService) {
