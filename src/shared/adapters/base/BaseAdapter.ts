@@ -5,6 +5,7 @@ import { EventBus } from '@s/core/bus/EventBus'
 import { EventCategory, AdapterEventType } from '@s/types/events'
 import { createEvent } from '@s/core/events'
 import { SubscriptionManager } from '@s/utils/subscription-manager'
+import { isObject, isString, isBoolean } from '@s/utils/type-guards'
 
 /**
  * Abstract base class for all service adapters
@@ -160,6 +161,9 @@ export abstract class BaseAdapter implements ServiceAdapter {
   async updateConfig(config: Partial<AdapterConfig>): Promise<void> {
     const wasEnabled = this._enabled
 
+    // Validate the config before applying it
+    this.validateConfigUpdate(config)
+
     // Update properties
     if (config.name !== undefined) {
       this._name = config.name
@@ -201,6 +205,27 @@ export abstract class BaseAdapter implements ServiceAdapter {
 
     // Cleanup implementation-specific resources
     await this.disposeImplementation()
+  }
+
+  /**
+   * Validate a configuration update
+   * @throws Error if the configuration is invalid
+   */
+  protected validateConfigUpdate(config: Partial<AdapterConfig>): void {
+    // Basic validation for common properties
+    if (config.name !== undefined && !isString(config.name)) {
+      throw new Error(`Invalid adapter name: ${config.name}, expected string`);
+    }
+
+    if (config.enabled !== undefined && !isBoolean(config.enabled)) {
+      throw new Error(`Invalid adapter enabled value: ${config.enabled}, expected boolean`);
+    }
+
+    if (config.options !== undefined && !isObject(config.options)) {
+      throw new Error(`Invalid adapter options: ${config.options}, expected object`);
+    }
+
+    // Derived classes can override to add more specific validation
   }
 
   /**

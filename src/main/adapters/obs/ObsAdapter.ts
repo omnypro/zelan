@@ -4,6 +4,13 @@ import { BaseAdapter } from '@s/adapters/base'
 import { EventBus } from '@s/core/bus'
 import { createObsEvent, ObsEventType } from '@s/core/events'
 import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
+import {
+  isString,
+  isNumber,
+  isBoolean,
+  createObjectValidator
+} from '@s/utils/type-guards'
+import { AdapterConfig } from '@s/adapters/interfaces/ServiceAdapter'
 
 /**
  * OBS adapter options
@@ -73,11 +80,26 @@ export class ObsAdapter extends BaseAdapter {
   }
 
   /**
+   * Type guard for ObsAdapterOptions
+   */
+  private static isObsAdapterOptions = createObjectValidator<ObsAdapterOptions>({
+    host: isString,
+    port: isNumber,
+    password: (val) => val === undefined || isString(val),
+    reconnectInterval: isNumber,
+    autoReconnect: isBoolean
+  });
+
+  /**
    * Get the options with proper typing
    */
   private getTypedOptions(): ObsAdapterOptions {
-    // Use type assertion with unknown first to avoid direct conversion
-    return this.options as unknown as ObsAdapterOptions
+    // Use type guard to validate options at runtime
+    if (!ObsAdapter.isObsAdapterOptions(this.options)) {
+      console.warn('Invalid ObsAdapter options, using defaults', this.options);
+      return { ...DEFAULT_OPTIONS };
+    }
+    return this.options;
   }
 
   protected async connectImplementation(): Promise<void> {
@@ -352,6 +374,45 @@ export class ObsAdapter extends BaseAdapter {
 
       // Schedule next reconnection attempt
       this.setupReconnection();
+    }
+  }
+
+  /**
+   * Validate a configuration update specifically for OBS adapter
+   * @throws Error if the configuration is invalid
+   */
+  protected override validateConfigUpdate(config: Partial<AdapterConfig>): void {
+    // First validate using the base class implementation
+    super.validateConfigUpdate(config);
+    
+    // Then perform OBS-specific validation
+    if (config.options) {
+      // Validate host if provided
+      if ('host' in config.options && !isString(config.options.host)) {
+        throw new Error(`Invalid OBS host: ${config.options.host}, expected string`);
+      }
+      
+      // Validate port if provided
+      if ('port' in config.options && !isNumber(config.options.port)) {
+        throw new Error(`Invalid OBS port: ${config.options.port}, expected number`);
+      }
+      
+      // Validate password if provided (can be undefined or string)
+      if ('password' in config.options && 
+          config.options.password !== undefined && 
+          !isString(config.options.password)) {
+        throw new Error(`Invalid OBS password, expected string or undefined`);
+      }
+      
+      // Validate reconnect interval if provided
+      if ('reconnectInterval' in config.options && !isNumber(config.options.reconnectInterval)) {
+        throw new Error(`Invalid reconnect interval: ${config.options.reconnectInterval}, expected number`);
+      }
+      
+      // Validate auto reconnect if provided
+      if ('autoReconnect' in config.options && !isBoolean(config.options.autoReconnect)) {
+        throw new Error(`Invalid auto reconnect value: ${config.options.autoReconnect}, expected boolean`);
+      }
     }
   }
 
