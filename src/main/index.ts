@@ -8,6 +8,7 @@ import { MainEventBus } from '@m/services/eventBus'
 import { AdapterManager } from '@m/services/adapters'
 import { WebSocketService } from '@m/services/websocket'
 import { getErrorService } from '@m/services/errors'
+import { getAuthService } from '@m/services/auth'
 import { AdapterRegistry } from '@s/adapters'
 import { EventCache } from '@m/services/events/EventCache'
 import { ConfigStore, getConfigStore } from '@s/core/config'
@@ -28,6 +29,7 @@ let errorService: ErrorService | null = null
 let adapterRegistry: AdapterRegistry | null = null
 let adapterManager: AdapterManager | null = null
 let webSocketService: WebSocketService | null = null
+let authService: any = null // Using 'any' temporarily
 
 function createWindow(): void {
   // Create the browser window.
@@ -195,8 +197,12 @@ async function initializeServices(): Promise<void> {
       webSocketService.start()
     }
 
+    // Initialize the auth service
+    authService = getAuthService(mainEventBus)
+    await authService.initialize()
+
     // Set up tRPC server
-    setupTRPCServer(mainEventBus, adapterManager, configStore)
+    setupTRPCServer(mainEventBus, adapterManager, configStore, authService)
 
     console.log('Services initialized successfully')
   } catch (error) {
@@ -282,6 +288,10 @@ app.on('before-quit', async (event) => {
 
     if (webSocketService) {
       webSocketService.stop()
+    }
+    
+    if (authService) {
+      authService.dispose()
     }
 
     // Wait a moment for cleanup to complete and events to be processed

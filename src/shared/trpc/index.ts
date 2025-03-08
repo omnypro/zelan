@@ -38,6 +38,21 @@ export const adapterConfigSchema = z.object({
 })
 
 /**
+ * Auth input types
+ */
+export const authProviderSchema = z.enum(['twitch'])
+export const authOptionsSchema = z.object({
+  clientId: z.string(),
+  scopes: z.array(z.string()).optional(),
+  redirectUri: z.string().optional(),
+  forceVerify: z.boolean().optional()
+})
+export const authenticateSchema = z.object({
+  provider: authProviderSchema,
+  options: authOptionsSchema
+})
+
+/**
  * Create the root router
  */
 export const appRouter = router({
@@ -207,6 +222,59 @@ export const appRouter = router({
     getTypes: procedure.query(() => {
       // This will be implemented later in the server
       return [] as string[]
+    })
+  }),
+
+  // Auth procedures
+  auth: router({
+    // Get auth status
+    getStatus: procedure.input(authProviderSchema).query(() => {
+      // This will be implemented in the server
+      return {
+        state: 'unauthenticated',
+        provider: 'twitch',
+        isAuthenticated: false
+      }
+    }),
+
+    // Check if authenticated
+    isAuthenticated: procedure.input(authProviderSchema).query(() => {
+      // This will be implemented in the server
+      return false
+    }),
+
+    // Start authentication
+    authenticate: procedure.input(authenticateSchema).mutation(() => {
+      // This will be implemented in the server
+      return {
+        success: false
+      }
+    }),
+
+    // Refresh token
+    refreshToken: procedure.input(authProviderSchema).mutation(() => {
+      // This will be implemented in the server
+      return {
+        success: false
+      }
+    }),
+
+    // Revoke token
+    revokeToken: procedure.input(authProviderSchema).mutation(() => {
+      // This will be implemented in the server
+      return true
+    }),
+
+    // Subscribe to auth status changes
+    onStatusChange: procedure.input(authProviderSchema).subscription(() => {
+      // This will be implemented in the server
+      return {} as any
+    }),
+
+    // Subscribe to device code events
+    onDeviceCode: procedure.subscription(() => {
+      // This will be implemented in the server
+      return {} as any
     })
   })
 })

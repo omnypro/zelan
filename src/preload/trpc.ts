@@ -146,6 +146,18 @@ const createClient = () => {
             start: createProcedureCaller('start', 'mutation'),
             stop: createProcedureCaller('stop', 'mutation')
           }
+        : {}),
+        
+      ...(moduleName === 'auth'
+        ? {
+            getStatus: createProcedureCaller('getStatus', 'query'),
+            isAuthenticated: createProcedureCaller('isAuthenticated', 'query'),
+            authenticate: createProcedureCaller('authenticate', 'mutation'),
+            refreshToken: createProcedureCaller('refreshToken', 'mutation'),
+            revokeToken: createProcedureCaller('revokeToken', 'mutation'),
+            onStatusChange: createProcedureCaller('onStatusChange', 'subscription'),
+            onDeviceCode: createProcedureCaller('onDeviceCode', 'subscription')
+          }
         : {})
     }
   }
@@ -155,7 +167,8 @@ const createClient = () => {
     config: makeModuleWithProcedures('config'),
     events: makeModuleWithProcedures('events'),
     adapters: makeModuleWithProcedures('adapters'),
-    websocket: makeModuleWithProcedures('websocket')
+    websocket: makeModuleWithProcedures('websocket'),
+    auth: makeModuleWithProcedures('auth')
   }
 }
 
@@ -167,6 +180,10 @@ console.log('tRPC client keys:', Object.keys(trpcClient))
 console.log(
   'tRPC config keys:',
   trpcClient.config ? Object.keys(trpcClient.config) : 'No config module'
+)
+console.log(
+  'tRPC auth keys:',
+  trpcClient.auth ? Object.keys(trpcClient.auth) : 'No auth module'
 )
 console.log(
   'tRPC websocket keys:',

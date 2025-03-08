@@ -2,7 +2,9 @@ import { ipcMain } from 'electron'
 import { ConfigStore } from '@s/core/config'
 import { MainEventBus } from '@m/services/eventBus'
 import { AdapterManager } from '@m/services/adapters'
+import { AuthService } from '@m/services/auth'
 import { Subject } from 'rxjs'
+import { filter } from 'rxjs/operators'
 import {
   createSubscriptionHandler,
   toSerializableError,
@@ -12,6 +14,10 @@ import {
 // Import WebSocketService
 import { WebSocketService } from '@m/services/websocket'
 
+// Import auth types
+import { AuthProvider, AuthOptions, AuthState } from '@s/auth/interfaces'
+import { EventCategory } from '@s/types/events'
+
 /**
  * Context for tRPC procedures
  */
@@ -20,6 +26,7 @@ interface TRPCContext {
   adapterManager: AdapterManager
   configStore: ConfigStore
   webSocketService: WebSocketService
+  authService: AuthService
   senderIds: Set<number>
 }
 
@@ -29,13 +36,15 @@ interface TRPCContext {
 function createContext(
   mainEventBus: MainEventBus,
   adapterManager: AdapterManager,
-  configStore: ConfigStore
+  configStore: ConfigStore,
+  authService: AuthService
 ): TRPCContext {
   return {
     mainEventBus,
     adapterManager,
     configStore,
     webSocketService: WebSocketService.getInstance(mainEventBus, configStore),
+    authService,
     senderIds: new Set<number>()
   }
 }
@@ -46,9 +55,10 @@ function createContext(
 export function setupTRPCServer(
   mainEventBus: MainEventBus,
   adapterManager: AdapterManager,
-  configStore: ConfigStore
+  configStore: ConfigStore,
+  authService: AuthService
 ) {
-  const ctx = createContext(mainEventBus, adapterManager, configStore)
+  const ctx = createContext(mainEventBus, adapterManager, configStore, authService)
 
   // Channel for tRPC requests
   const TRPC_CHANNEL = 'zelan:trpc'
@@ -268,6 +278,151 @@ export function setupTRPCServer(
           } else if (procedureName === 'delete') {
             await ctx.adapterManager.deleteAdapter(input)
             return { id, result: true, type: 'data' }
+          }
+        }
+      } else if (moduleName === 'auth') {
+        if (type === 'query') {
+          if (procedureName === 'getStatus') {
+            const provider = input as AuthProvider
+            const status = ctx.authService.getStatus(provider)
+            // Convert status to serializable object
+            const result = {
+              state: status.state,
+              provider: status.provider,
+              lastUpdated: status.lastUpdated,
+              error: status.error ? status.error.message : undefined,
+              expiresAt: status.expiresAt,
+              userId: status.userId,
+              username: status.username,
+              isAuthenticated: status.state === AuthState.AUTHENTICATED
+            }
+            return { id, result, type: 'data' }
+          } else if (procedureName === 'isAuthenticated') {
+            const provider = input as AuthProvider
+            const result = ctx.authService.isAuthenticated(provider)
+            return { id, result, type: 'data' }
+          }
+        } else if (type === 'mutation') {
+          if (procedureName === 'authenticate') {
+            const { provider, options } = input as { provider: AuthProvider; options: AuthOptions }
+            const result = await ctx.authService.authenticate(provider, options)
+            // Return a safe version of the result (without tokens)
+            const safeResult = {
+              success: result.success,
+              error: result.error ? result.error.message : undefined,
+              userId: result.userId,
+              username: result.username
+            }
+            return { id, result: safeResult, type: 'data' }
+          } else if (procedureName === 'refreshToken') {
+            const provider = input as AuthProvider
+            const result = await ctx.authService.refreshToken(provider)
+            // Return a safe version of the result (without tokens)
+            const safeResult = {
+              success: result.success,
+              error: result.error ? result.error.message : undefined,
+              userId: result.userId,
+              username: result.username
+            }
+            return { id, result: safeResult, type: 'data' }
+          } else if (procedureName === 'revokeToken') {
+            const provider = input as AuthProvider
+            await ctx.authService.revokeToken(provider)
+            return { id, result: true, type: 'data' }
+          }
+        } else if (type === 'subscription') {
+          if (procedureName === 'onStatusChange') {
+            const provider = input as AuthProvider
+            const subChannelName = `${TRPC_CHANNEL}:${id}`
+            
+            // Track this client's ID
+            ctx.senderIds.add(event.sender.id)
+            
+            // Subscribe to auth status changes
+            const subscription = ctx.authService.status$(provider).subscribe({
+              next: (status) => {
+                // Convert status to a safe serializable object
+                const safeStatus = {
+                  state: status.state,
+                  provider: status.provider,
+                  lastUpdated: status.lastUpdated,
+                  error: status.error ? status.error.message : undefined,
+                  expiresAt: status.expiresAt,
+                  userId: status.userId,
+                  username: status.username,
+                  isAuthenticated: status.state === AuthState.AUTHENTICATED
+                }
+                
+                // Send to the client
+                event.sender.send(subChannelName, {
+                  id,
+                  result: safeStatus,
+                  type: 'data'
+                })
+              },
+              error: (err) => {
+                // Send error to client
+                console.error('Error in auth status subscription:', err)
+                event.sender.send(subChannelName, {
+                  id,
+                  error: toSerializableError(err),
+                  type: 'error'
+                })
+              }
+            })
+            
+            // Set up cleanup
+            ipcMain.once(`${TRPC_CHANNEL}:${id}:stop`, () => {
+              subscription.unsubscribe()
+              console.log(`Cleaned up auth status subscription for ${id}`)
+            })
+            
+            return { id, type: 'started' }
+          } else if (procedureName === 'onDeviceCode') {
+            // This subscription is for the device code flow
+            const subChannelName = `${TRPC_CHANNEL}:${id}`
+            
+            // Track this client's ID
+            ctx.senderIds.add(event.sender.id)
+            
+            // Subscribe to auth events for device code
+            const subscription = ctx.mainEventBus.events$
+              .pipe(
+                filter((e) => 
+                  e.category === EventCategory.AUTH && 
+                  (e.type === 'device_code_received' || e.type === 'authentication_failed')
+                )
+              )
+              .subscribe({
+                next: (authEvent) => {
+                  // Send to the client
+                  event.sender.send(subChannelName, {
+                    id,
+                    result: {
+                      type: authEvent.type,
+                      ...authEvent.payload
+                    },
+                    type: 'data'
+                  })
+                },
+                error: (err) => {
+                  // Send error to client
+                  console.error('Error in device code subscription:', err)
+                  event.sender.send(subChannelName, {
+                    id,
+                    error: toSerializableError(err),
+                    type: 'error'
+                  })
+                }
+              })
+            
+            // Set up cleanup
+            ipcMain.once(`${TRPC_CHANNEL}:${id}:stop`, () => {
+              subscription.unsubscribe()
+              console.log(`Cleaned up device code subscription for ${id}`)
+            })
+            
+            return { id, type: 'started' }
           }
         }
       }
