@@ -2,6 +2,7 @@ import { BaseAdapter } from '../../../shared/adapters/base';
 import { EventBus } from '../../../shared/core/bus';
 import { EventCategory } from '../../../shared/types/events';
 import { createEvent } from '../../../shared/core/events';
+import { AdapterStatus } from '../../../shared/adapters/interfaces/AdapterStatus';
 
 /**
  * Test adapter options
@@ -81,7 +82,7 @@ export class TestAdapter extends BaseAdapter {
       // Simulate random errors if enabled
       if (options.simulateErrors && Math.random() < 0.1) {
         this.updateStatus(
-          'error' as any,
+          AdapterStatus.ERROR,
           'Simulated random error',
           new Error('Test adapter simulated error')
         );

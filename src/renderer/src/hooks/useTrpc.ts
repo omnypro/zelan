@@ -285,26 +285,66 @@ export function useTrpcAdapters() {
     };
     
     fetchAdapters();
+
+    const unsubscribeCallbacks: (() => void)[] = [];
     
-    // Refresh adapters when config changes (this is a simplification)
+    // Subscribe to event updates for adapter status changes
     try {
-      const subscription = window.trpc.config.onConfigChange.subscribe();
-      const unsubscribe = subscription.subscribe({
-        next: (change) => {
-          if (change.key.startsWith('adapters')) {
+      const eventSubscription = window.trpc.events.onEvent.subscribe();
+      const eventUnsubscribe = eventSubscription.subscribe({
+        next: (event) => {
+          // Check if this is an adapter status event
+          if (
+            event && 
+            event.category === 'adapter' && 
+            (event.type === 'status' || event.type === 'connected' || event.type === 'disconnected')
+          ) {
+            // Refresh to get the updated status
             fetchAdapters();
           }
         },
-        error: (err) => console.error('Error in adapter subscription:', err)
+        error: (err) => console.error('Error in event subscription:', err)
       });
       
-      return () => {
-        unsubscribe.unsubscribe();
-      };
+      unsubscribeCallbacks.push(() => {
+        try {
+          eventUnsubscribe.unsubscribe();
+        } catch (err) {
+          console.error('Error unsubscribing from events:', err);
+        }
+      });
+    } catch (err) {
+      console.error('Failed to subscribe to events for adapter status:', err);
+    }
+    
+    // Refresh adapters when config changes
+    try {
+      const configSubscription = window.trpc.config.onConfigChange.subscribe();
+      const configUnsubscribe = configSubscription.subscribe({
+        next: (change) => {
+          if (change.key.startsWith('adapters')) {
+            console.log('Received adapter config change:', change);
+            fetchAdapters();
+          }
+        },
+        error: (err) => console.error('Error in config subscription:', err)
+      });
+      
+      unsubscribeCallbacks.push(() => {
+        try {
+          configUnsubscribe.unsubscribe();
+        } catch (err) {
+          console.error('Error unsubscribing from config changes:', err);
+        }
+      });
     } catch (err) {
       console.error('Failed to subscribe to config changes for adapters:', err);
-      return () => {};
     }
+    
+    // Clean up all subscriptions
+    return () => {
+      unsubscribeCallbacks.forEach(callback => callback());
+    };
   }, []);
   
   return adapters;

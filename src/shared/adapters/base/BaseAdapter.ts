@@ -43,6 +43,10 @@ export abstract class BaseAdapter implements ServiceAdapter {
     return this._status$.asObservable();
   }
   
+  get status(): AdapterStatusInfo {
+    return this._status$.value;
+  }
+  
   get enabled(): boolean {
     return this._enabled;
   }

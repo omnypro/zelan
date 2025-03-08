@@ -5,7 +5,8 @@ import { BaseEvent, EventCategory } from '../../types/events';
  * Core event bus for publishing and subscribing to events
  */
 export class EventBus {
-  private events$: Subject<BaseEvent<any>>;
+  // Making this public to make it accessible by tRPC
+  public events$: Subject<BaseEvent<any>>;
   
   constructor() {
     // Use ReplaySubject to cache recent events for late subscribers

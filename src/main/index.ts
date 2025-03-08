@@ -8,7 +8,7 @@ import { MainEventBus } from './services/eventBus';
 import { AdapterManager } from './services/adapters';
 import { WebSocketService } from './services/websocket';
 import { AdapterRegistry } from '../shared/adapters';
-import { TestAdapterFactory } from './adapters';
+import { TestAdapterFactory, ObsAdapterFactory } from './adapters';
 import { createConfigStore, getConfigStore } from '../shared/core/config';
 import { SystemStartupEvent } from '../shared/core/events';
 import { setupTRPCServer } from './trpc';
@@ -73,6 +73,7 @@ async function initializeServices(): Promise<void> {
     
     // Register adapter factories
     adapterRegistry.register(new TestAdapterFactory());
+    adapterRegistry.register(new ObsAdapterFactory());
     
     // Initialize adapter manager
     adapterManager = new AdapterManager(adapterRegistry, mainEventBus, configStore);

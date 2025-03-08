@@ -115,6 +115,44 @@ export class AdapterManager {
   }
   
   /**
+   * Start an adapter by ID
+   */
+  async startAdapter(id: string): Promise<void> {
+    const adapter = this.adapters.get(id);
+    if (!adapter) {
+      throw new Error(`Adapter with ID ${id} not found`);
+    }
+    
+    await adapter.connect();
+  }
+  
+  /**
+   * Stop an adapter by ID
+   */
+  async stopAdapter(id: string): Promise<void> {
+    const adapter = this.adapters.get(id);
+    if (!adapter) {
+      throw new Error(`Adapter with ID ${id} not found`);
+    }
+    
+    await adapter.disconnect();
+  }
+  
+  /**
+   * Delete an adapter by ID
+   */
+  async deleteAdapter(id: string): Promise<void> {
+    await this.removeAdapter(id);
+  }
+  
+  /**
+   * Get available adapter types
+   */
+  getAvailableAdapterTypes(): string[] {
+    return this.registry.getAdapterTypes();
+  }
+  
+  /**
    * Get an adapter by ID
    */
   getAdapter(id: string): ServiceAdapter | undefined {

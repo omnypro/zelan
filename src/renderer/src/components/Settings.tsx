@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useSettings, useConfig, useTheme, useConfigChanges } from '../hooks/useConfig';
 import { ConfigChangeEvent } from '../../../shared/core/config';
 import ConfigDebugger from './ConfigDebugger';
+import AdapterCreationForm from './AdapterCreationForm';
+import AdapterList, { Adapter } from './AdapterList';
+import { useTrpcAdapters, useCreateAdapter } from '../hooks/useTrpc';
+import { AdapterStatus } from '../../../shared/adapters/interfaces/AdapterStatus';
 
 /**
  * Component to display and manage application settings
@@ -20,6 +24,28 @@ const Settings: React.FC = () => {
   
   // Get recent settings changes
   const recentChanges = useConfigChanges('settings');
+  
+  // Adapter hooks
+  const adapters = useTrpcAdapters();
+  const { createAdapter, isCreating, error: createError } = useCreateAdapter();
+  
+  // Track loading state for adapter actions
+  const [adapterActionLoading, setAdapterActionLoading] = useState<string | null>(null);
+  
+  // Transform adapters for the AdapterList component
+  const formattedAdapters: Adapter[] = adapters.map(adapter => {
+    return {
+      id: adapter.id || '',
+      type: adapter.type || '',
+      name: adapter.name || '',
+      enabled: adapter.enabled || false,
+      status: adapter.status ? {
+        status: adapter.status.status,
+        message: adapter.status.message
+      } : undefined,
+      options: adapter.options || {}
+    };
+  });
 
   // Get the config file path
   useEffect(() => {
@@ -159,6 +185,77 @@ const Settings: React.FC = () => {
         <ConfigDebugger />
       </div>
 
+      {/* Adapters Section */}
+      <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <h3 className="text-lg font-semibold mb-4">Service Adapters</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Adapters connect to external services like OBS Studio or Twitch to receive and process events.
+        </p>
+        
+        <div className="mb-6">
+          <h4 className="text-md font-medium mb-3">Current Adapters</h4>
+          <AdapterList 
+            adapters={formattedAdapters} 
+            loadingAdapterId={adapterActionLoading}
+            onStartAdapter={async (id) => {
+              setAdapterActionLoading(id);
+              try {
+                await window.trpc.adapters.start.mutate(id);
+                // Wait longer for the status to propagate
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                // Fetch adapters manually to ensure we have the latest state
+                await window.trpc.adapters.getAll.query();
+              } catch (err) {
+                console.error('Failed to start adapter:', err);
+                throw err;
+              } finally {
+                setAdapterActionLoading(null);
+              }
+            }}
+            onStopAdapter={async (id) => {
+              setAdapterActionLoading(id);
+              try {
+                await window.trpc.adapters.stop.mutate(id);
+                // Wait longer for the status to propagate
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                // Fetch adapters manually to ensure we have the latest state
+                await window.trpc.adapters.getAll.query();
+              } catch (err) {
+                console.error('Failed to stop adapter:', err);
+                throw err;
+              } finally {
+                setAdapterActionLoading(null);
+              }
+            }}
+            onDeleteAdapter={async (id) => {
+              setAdapterActionLoading(id);
+              try {
+                await window.trpc.adapters.delete.mutate(id);
+              } catch (err) {
+                console.error('Failed to delete adapter:', err);
+                throw err;
+              } finally {
+                setAdapterActionLoading(null);
+              }
+            }}
+          />
+        </div>
+        
+        <div className="mt-6">
+          <h4 className="text-md font-medium mb-3">Add New Adapter</h4>
+          <AdapterCreationForm 
+            onCreateAdapter={async (config) => {
+              try {
+                await createAdapter(config);
+              } catch (err) {
+                console.error('Failed to create adapter:', err);
+                throw err;
+              }
+            }} 
+          />
+        </div>
+      </div>
+      
       {/* Debug information */}
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-6">
         <h3 className="text-md font-semibold mb-2">Config Location</h3>

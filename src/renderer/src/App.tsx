@@ -14,7 +14,7 @@ function App(): JSX.Element {
   const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
+    <div className="min-h-screen bg-gray-100 text-black flex flex-col">
       {/* Header */}
       <header className="bg-gray-800 text-white p-4 flex items-center shadow-md">
         <img alt="logo" className="h-8 w-8 mr-3" src={electronLogo} />
@@ -30,8 +30,8 @@ function App(): JSX.Element {
             <li>
               <button
                 className={`w-full text-left px-4 py-2 ${
-                  activeTab === 'dashboard' 
-                    ? 'bg-blue-600 text-white' 
+                  activeTab === 'dashboard'
+                    ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-600'
                 }`}
                 onClick={() => setActiveTab('dashboard')}
@@ -42,8 +42,8 @@ function App(): JSX.Element {
             <li>
               <button
                 className={`w-full text-left px-4 py-2 ${
-                  activeTab === 'events' 
-                    ? 'bg-blue-600 text-white' 
+                  activeTab === 'events'
+                    ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-600'
                 }`}
                 onClick={() => setActiveTab('events')}
@@ -54,8 +54,8 @@ function App(): JSX.Element {
             <li>
               <button
                 className={`w-full text-left px-4 py-2 ${
-                  activeTab === 'settings' 
-                    ? 'bg-blue-600 text-white' 
+                  activeTab === 'settings'
+                    ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-600'
                 }`}
                 onClick={() => setActiveTab('settings')}
@@ -66,8 +66,8 @@ function App(): JSX.Element {
             <li>
               <button
                 className={`w-full text-left px-4 py-2 ${
-                  activeTab === 'trpc' 
-                    ? 'bg-blue-600 text-white' 
+                  activeTab === 'trpc'
+                    ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-600'
                 }`}
                 onClick={() => setActiveTab('trpc')}
@@ -78,8 +78,8 @@ function App(): JSX.Element {
             <li>
               <button
                 className={`w-full text-left px-4 py-2 ${
-                  activeTab === 'websocket' 
-                    ? 'bg-blue-600 text-white' 
+                  activeTab === 'websocket'
+                    ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-600'
                 }`}
                 onClick={() => setActiveTab('websocket')}
@@ -88,13 +88,10 @@ function App(): JSX.Element {
               </button>
             </li>
           </ul>
-          
+
           <div className="mt-auto p-4 text-xs text-gray-400">
             <p>
-              <a 
-                className="text-blue-400 hover:underline cursor-pointer" 
-                onClick={ipcHandle}
-              >
+              <a className="text-blue-400 hover:underline cursor-pointer" onClick={ipcHandle}>
                 Send IPC Ping
               </a>
             </p>
@@ -106,36 +103,37 @@ function App(): JSX.Element {
           {activeTab === 'dashboard' && (
             <div className="p-6">
               <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
-              
+
               <div className="mb-8">
                 <AdapterStatus />
               </div>
-              
+
               <div className="bg-white rounded-lg shadow p-6 mb-6">
                 <h3 className="text-lg font-semibold mb-4">Welcome to Zelan</h3>
                 <p className="mb-3">
-                  This is your stream data aggregation service. Connect to various streaming platforms
-                  and merge their data into a unified API.
+                  This is your stream data aggregation service. Connect to various streaming
+                  platforms and merge their data into a unified API.
                 </p>
                 <p className="mb-3">
-                  Check out the <strong>Events</strong> tab to see the reactive event system in action.
+                  Check out the <strong>Events</strong> tab to see the reactive event system in
+                  action.
                 </p>
                 <p>
-                  The <strong>WebSocket</strong> tab allows you to control the WebSocket server that external
-                  applications can connect to for real-time event data.
+                  The <strong>WebSocket</strong> tab allows you to control the WebSocket server that
+                  external applications can connect to for real-time event data.
                 </p>
               </div>
-              
+
               <Versions />
             </div>
           )}
-          
+
           {activeTab === 'events' && <EventsDemo />}
-          
+
           {activeTab === 'settings' && <Settings />}
-          
+
           {activeTab === 'trpc' && <TrpcDemo />}
-          
+
           {activeTab === 'websocket' && (
             <div className="p-6">
               <h2 className="text-2xl font-bold mb-6">WebSocket Server</h2>
