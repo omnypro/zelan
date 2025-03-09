@@ -14,9 +14,9 @@ export const procedure = t.procedure
 export const middleware = t.middleware
 
 /**
- * Export types
+ * Export types from the main implementation
  */
-export type AppRouter = typeof appRouter
+export type AppRouter = ReturnType<typeof router>
 
 /**
  * Configuration input types using Zod
