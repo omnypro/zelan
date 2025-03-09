@@ -6,6 +6,8 @@ import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
 import { AdapterConfig } from '@s/adapters/interfaces/ServiceAdapter'
 import { isNumber, isBoolean, isStringArray, createObjectValidator } from '@s/utils/type-guards'
 import { getLoggingService, ComponentLogger } from '@m/services/logging'
+import { interval } from 'rxjs'
+import { takeUntil } from 'rxjs/operators'
 
 /**
  * Test adapter options
@@ -29,7 +31,6 @@ const DEFAULT_OPTIONS: TestAdapterOptions = {
  * Test adapter for demonstrations and testing
  */
 export class TestAdapter extends BaseAdapter {
-  private intervalId?: NodeJS.Timeout
   private eventCount = 0
   private logger: ComponentLogger
 
@@ -47,15 +48,12 @@ export class TestAdapter extends BaseAdapter {
   }
 
   protected async disconnectImplementation(): Promise<void> {
-    // Stop generating events
-    this.stopEventGeneration()
-
     // Simulate disconnection delay
     await new Promise((resolve) => setTimeout(resolve, 300))
   }
 
   protected async disposeImplementation(): Promise<void> {
-    this.stopEventGeneration()
+    // No additional cleanup needed
   }
 
   /**
@@ -112,35 +110,24 @@ export class TestAdapter extends BaseAdapter {
   private startEventGeneration(): void {
     const options = this.getTypedOptions()
 
-    // Clear any existing interval
-    this.stopEventGeneration()
+    // Set up interval to generate events using RxJS
+    interval(options.eventInterval)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.generateTestEvent()
 
-    // Set up the interval to generate events
-    this.intervalId = setInterval(() => {
-      this.generateTestEvent()
+        // Simulate random errors if enabled
+        if (options.simulateErrors && Math.random() < 0.1) {
+          this.updateStatus(AdapterStatus.ERROR, 'Simulated random error', new Error('Test adapter simulated error'))
 
-      // Simulate random errors if enabled
-      if (options.simulateErrors && Math.random() < 0.1) {
-        this.updateStatus(AdapterStatus.ERROR, 'Simulated random error', new Error('Test adapter simulated error'))
-
-        // Automatically reconnect after a brief delay
-        setTimeout(() => {
-          this.reconnect().catch((error) => {
-            this.logger.error('Failed to reconnect test adapter', error)
-          })
-        }, 3000)
-      }
-    }, options.eventInterval)
-  }
-
-  /**
-   * Stop generating test events
-   */
-  private stopEventGeneration(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId)
-      this.intervalId = undefined
-    }
+          // Automatically reconnect after a brief delay
+          setTimeout(() => {
+            this.reconnect().catch((error) => {
+              this.logger.error('Failed to reconnect test adapter', error)
+            })
+          }, 3000)
+        }
+      })
   }
 
   /**
@@ -190,7 +177,7 @@ export class TestAdapter extends BaseAdapter {
         }
     }
 
-    // Publish the event
+    // Publish the event using the helper method
     this.eventBus.publish(
       createEvent(
         EventCategory.ADAPTER,

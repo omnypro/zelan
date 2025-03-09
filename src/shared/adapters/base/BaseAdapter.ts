@@ -1,10 +1,9 @@
-import { BehaviorSubject, Observable } from 'rxjs'
+import { BehaviorSubject, Observable, Subject } from 'rxjs'
 import { AdapterConfig, ServiceAdapter } from '../interfaces/ServiceAdapter'
 import { AdapterStatus, AdapterStatusInfo } from '../interfaces/AdapterStatus'
 import { EventBus } from '@s/core/bus'
 import { EventCategory, AdapterEventType } from '@s/types/events'
 import { createEvent } from '@s/core/events'
-import { SubscriptionManager } from '@s/utils/subscription-manager'
 import { isObject, isString, isBoolean } from '@s/utils/type-guards'
 
 /**
@@ -23,7 +22,8 @@ export abstract class BaseAdapter implements ServiceAdapter {
     timestamp: Date.now()
   })
 
-  protected subscriptionManager = new SubscriptionManager()
+  // Cleanup subject for managing subscriptions
+  protected destroy$ = new Subject<void>()
 
   constructor(
     id: string,
@@ -86,21 +86,6 @@ export abstract class BaseAdapter implements ServiceAdapter {
       this.updateStatus(AdapterStatus.CONNECTING)
       await this.connectImplementation()
       this.updateStatus(AdapterStatus.CONNECTED)
-
-      // Publish connection event
-      this.eventBus.publish(
-        createEvent(
-          EventCategory.ADAPTER,
-          AdapterEventType.CONNECTED,
-          {
-            status: 'connected',
-            timestamp: Date.now()
-          },
-          this.id,
-          this.name,
-          this.type
-        )
-      )
     } catch (error) {
       this.updateStatus(AdapterStatus.ERROR, 'Connection failed', error as Error)
       throw error
@@ -114,21 +99,6 @@ export abstract class BaseAdapter implements ServiceAdapter {
     try {
       await this.disconnectImplementation()
       this.updateStatus(AdapterStatus.DISCONNECTED)
-
-      // Publish disconnection event
-      this.eventBus.publish(
-        createEvent(
-          EventCategory.ADAPTER,
-          AdapterEventType.DISCONNECTED,
-          {
-            status: 'disconnected',
-            timestamp: Date.now()
-          },
-          this.id,
-          this.name,
-          this.type
-        )
-      )
     } catch (error) {
       this.updateStatus(AdapterStatus.ERROR, 'Disconnection failed', error as Error)
       throw error
@@ -195,8 +165,9 @@ export abstract class BaseAdapter implements ServiceAdapter {
    * Dispose of resources used by the adapter
    */
   async dispose(): Promise<void> {
-    // Clean up subscriptions
-    this.subscriptionManager.unsubscribeAll()
+    // Signal all subscriptions to complete
+    this.destroy$.next()
+    this.destroy$.complete()
 
     // Disconnect if connected
     if (this._status$.value.status !== AdapterStatus.DISCONNECTED) {
@@ -205,6 +176,23 @@ export abstract class BaseAdapter implements ServiceAdapter {
 
     // Cleanup implementation-specific resources
     await this.disposeImplementation()
+  }
+
+  /**
+   * Helper method to create an adapter event
+   */
+  protected createAdapterEvent(
+    eventType: string, 
+    data: unknown
+  ) {
+    return createEvent(
+      EventCategory.ADAPTER,
+      eventType,
+      data,
+      this.id,
+      this.name,
+      this.type
+    )
   }
 
   /**
@@ -241,28 +229,21 @@ export abstract class BaseAdapter implements ServiceAdapter {
 
     this._status$.next(statusInfo)
 
-    // Publish status event
-    this.eventBus.publish(
-      createEvent(EventCategory.ADAPTER, AdapterEventType.STATUS, statusInfo, this.id, this.name, this.type)
-    )
-
-    // Publish error event if there's an error
-    if (error) {
-      this.eventBus.publish(
-        createEvent(
-          EventCategory.ADAPTER,
-          AdapterEventType.ERROR,
-          {
-            message: error.message,
-            stack: error.stack,
-            timestamp: Date.now()
-          },
-          this.id,
-          this.name,
-          this.type
-        )
-      )
+    // Create the event data once
+    const eventData = {
+      status: statusInfo.status,
+      message: statusInfo.message,
+      timestamp: statusInfo.timestamp,
+      error: error ? {
+        message: error.message,
+        stack: error.stack
+      } : undefined
     }
+
+    // Publish a single status event with all information
+    this.eventBus.publish(
+      this.createAdapterEvent(AdapterEventType.STATUS, eventData)
+    )
   }
 
   /**

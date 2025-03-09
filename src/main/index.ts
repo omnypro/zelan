@@ -70,17 +70,17 @@ import { AdapterRegistry } from '@s/adapters'
 import { AuthProvider } from '@s/auth/interfaces'
 import { ConfigStore, getConfigStore } from '@s/core/config'
 import { createSystemEvent } from '@s/core/events'
+import { createObsAdapter } from '@m/adapters/obs'
+import { createTestAdapter } from '@m/adapters/test'
+import { createTwitchAdapter } from '@m/adapters/twitch'
 import { EventCache } from '@m/services/events/EventCache'
 import { getAuthService, type AuthService } from '@m/services/auth'
 import { getErrorService } from '@m/services/errors'
 import { getLoggingService } from '@m/services/logging'
 import { MainEventBus } from '@m/services/eventBus'
-import { ObsAdapterFactory } from '@m/adapters/obs'
 import { setupTRPCServer } from '@m/trpc'
 import { SubscriptionManager } from '@s/utils/subscription-manager'
 import { SystemEventType, EventCategory } from '@s/types/events'
-import { TestAdapterFactory } from '@m/adapters/test'
-import { TwitchAdapterFactory } from '@m/adapters/twitch'
 import { WebSocketService } from '@m/services/websocket'
 import type { ErrorService } from '@m/services/errors'
 
@@ -233,10 +233,11 @@ async function initializeServices(): Promise<void> {
     // Set up adapter registry
     adapterRegistry = new AdapterRegistry()
 
-    // Register adapter factories
-    adapterRegistry.register(new TestAdapterFactory())
-    adapterRegistry.register(new ObsAdapterFactory())
-    adapterRegistry.register(new TwitchAdapterFactory(mainEventBus))
+    // Register adapter creator functions
+    adapterRegistry.register('test', createTestAdapter)
+    adapterRegistry.register('obs', createObsAdapter)
+    adapterRegistry.register('twitch', (id, name, options, eventBus) => 
+      createTwitchAdapter(id, name, options, eventBus))
 
     // Initialize adapter manager
     adapterManager = new AdapterManager(adapterRegistry, mainEventBus, configStore)

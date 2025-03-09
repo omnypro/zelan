@@ -1,46 +1,66 @@
-import { AdapterFactory } from '../interfaces/AdapterFactory'
+import { EventBus } from '@s/core/bus'
+import { ServiceAdapter } from '../interfaces/ServiceAdapter'
 
 /**
- * Registry for adapter factories
+ * Type for adapter creation functions
+ */
+export type AdapterCreator = (
+  id: string, 
+  name: string, 
+  options: Record<string, unknown>, 
+  eventBus: EventBus
+) => ServiceAdapter
+
+/**
+ * Registry for adapter creators
  */
 export class AdapterRegistry {
-  private factories: Map<string, AdapterFactory> = new Map()
+  private creators: Map<string, AdapterCreator> = new Map()
 
   /**
-   * Register an adapter factory
-   * @param factory The factory to register
+   * Register an adapter creator function
+   * @param type The adapter type
+   * @param creator Function to create adapters of this type
    */
-  register(factory: AdapterFactory): void {
-    this.factories.set(factory.type, factory)
+  register(type: string, creator: AdapterCreator): void {
+    this.creators.set(type, creator)
   }
 
   /**
-   * Get an adapter factory by type
+   * Create an adapter of the specified type
+   * @param type The adapter type
+   * @param id Unique adapter ID
+   * @param name Human-readable adapter name
+   * @param options Adapter configuration options
+   * @param eventBus Event bus instance
+   */
+  createAdapter(
+    type: string, 
+    id: string, 
+    name: string, 
+    options: Record<string, unknown>, 
+    eventBus: EventBus
+  ): ServiceAdapter {
+    const creator = this.creators.get(type)
+    if (!creator) {
+      throw new Error(`No creator registered for adapter type ${type}`)
+    }
+    
+    return creator(id, name, options, eventBus)
+  }
+
+  /**
+   * Check if a creator for the given type is registered
    * @param type The adapter type
    */
-  getFactory(type: string): AdapterFactory | undefined {
-    return this.factories.get(type)
-  }
-
-  /**
-   * Get all registered adapter factories
-   */
-  getAllFactories(): AdapterFactory[] {
-    return Array.from(this.factories.values())
+  hasCreator(type: string): boolean {
+    return this.creators.has(type)
   }
 
   /**
    * Get all registered adapter types
    */
   getAdapterTypes(): string[] {
-    return Array.from(this.factories.keys())
-  }
-
-  /**
-   * Check if a factory for the given type is registered
-   * @param type The adapter type
-   */
-  hasFactory(type: string): boolean {
-    return this.factories.has(type)
+    return Array.from(this.creators.keys())
   }
 }

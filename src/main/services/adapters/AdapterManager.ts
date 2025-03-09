@@ -66,16 +66,9 @@ export class AdapterManager {
       throw new Error(`Adapter with ID ${id} already exists`)
     }
 
-    // Find factory for this adapter type
-    const factory = this.registry.getFactory(type)
-    if (!factory) {
-      throw new Error(`No factory registered for adapter type ${type}`)
-    }
-
     try {
-      // Create adapter instance with correct number of arguments
-      // Last parameter (enabled) is optional, so we pass only 4 arguments
-      const adapter = factory.create(id, name, options || {}, this.eventBus)
+      // Create adapter instance directly using the registry
+      const adapter = this.registry.createAdapter(type, id, name, options || {}, this.eventBus)
 
       // Initialize adapter
       await adapter.initialize()
