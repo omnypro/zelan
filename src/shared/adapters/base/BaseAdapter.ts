@@ -1,7 +1,7 @@
 import { BehaviorSubject, Observable } from 'rxjs'
 import { AdapterConfig, ServiceAdapter } from '../interfaces/ServiceAdapter'
 import { AdapterStatus, AdapterStatusInfo } from '../interfaces/AdapterStatus'
-import { EventBus } from '@s/core/bus/EventBus'
+import { EventBus } from '@s/core/bus'
 import { EventCategory, AdapterEventType } from '@s/types/events'
 import { createEvent } from '@s/core/events'
 import { SubscriptionManager } from '@s/utils/subscription-manager'

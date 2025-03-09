@@ -1,11 +1,10 @@
 import { Subject, Observable } from 'rxjs'
-import { share } from 'rxjs/operators'
+import { share, filter } from 'rxjs/operators'
 import { BrowserWindow, WebContents } from 'electron'
 import { BaseEvent, EventCategory, SystemEventType } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
-import { EventBus } from '@s/core/bus/EventBus'
+import { EventBus, EventFilterCriteria } from '@s/core/bus'
 import { EventCache, EventCacheOptions } from '../events/EventCache'
-import { EventFilterCriteria, filterEventStream } from '@s/utils/filters/event-filter'
 
 /**
  * Main process implementation of the EventBus
@@ -68,8 +67,46 @@ export class MainEventBus implements EventBus {
    */
   getFilteredEvents$<T = unknown>(criteria: EventFilterCriteria<T>): Observable<BaseEvent<T>> {
     // Using type assertion to bridge the gap
-    const stream$ = this.events$ as unknown as Observable<BaseEvent<T>>
-    return filterEventStream<T>(criteria)(stream$)
+    const stream$ = this.events$ as Observable<BaseEvent<T>>
+
+    return stream$.pipe(
+      filter(event => {
+        // Skip filtering if no criteria provided
+        if (!criteria || Object.keys(criteria).length === 0) return true
+
+        // Check category
+        if (criteria.category !== undefined && event.category !== criteria.category) {
+          return false
+        }
+
+        // Check type
+        if (criteria.type !== undefined && event.type !== criteria.type) {
+          return false
+        }
+
+        // Check sourceId
+        if (criteria.sourceId !== undefined && event.source?.id !== criteria.sourceId) {
+          return false
+        }
+
+        // Check sourceType
+        if (criteria.sourceType !== undefined && event.source?.type !== criteria.sourceType) {
+          return false
+        }
+
+        // Check timestamp
+        if (criteria.since !== undefined && event.timestamp < criteria.since) {
+          return false
+        }
+
+        // Apply custom predicate if provided
+        if (criteria.predicate && !criteria.predicate(event as BaseEvent<T>)) {
+          return false
+        }
+
+        return true
+      })
+    )
   }
 
   /**

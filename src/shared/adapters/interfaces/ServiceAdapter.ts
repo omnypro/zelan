@@ -1,6 +1,6 @@
 import { Observable } from 'rxjs'
 import { AdapterStatusInfo } from './AdapterStatus'
-import { EventBus } from '@s/core/bus/EventBus'
+import { EventBus } from '@s/core/bus'
 
 /**
  * Basic adapter configuration object

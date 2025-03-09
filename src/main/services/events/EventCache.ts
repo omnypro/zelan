@@ -2,7 +2,7 @@ import { BehaviorSubject, Observable } from 'rxjs'
 import { map } from 'rxjs/operators'
 import { BaseEvent } from '@s/types/events'
 import { ConfigStore } from '@s/core/config/ConfigStore'
-import { EventFilterCriteria, filterEvents } from '@s/utils/filters/event-filter'
+import { EventFilterCriteria, filterEvents } from '@s/core/bus'
 import { getLoggingService, ComponentLogger } from '@m/services/logging'
 
 /**
@@ -21,9 +21,6 @@ export class EventCache {
   private cacheSize: number
   private logger: ComponentLogger
 
-  /**
-   * Create a new event cache
-   */
   constructor(configStore: ConfigStore) {
     // Initialize logger
     this.logger = getLoggingService().createLogger('EventCache')
@@ -60,9 +57,6 @@ export class EventCache {
     }
   }
 
-  /**
-   * Add an event to the cache
-   */
   addEvent(event: BaseEvent): void {
     // Add to front of array (newest first)
     this.events.unshift(event)
@@ -74,18 +68,12 @@ export class EventCache {
     this.eventsSubject.next([...this.events])
   }
 
-  /**
-   * Reduce cache size if it exceeds the limit
-   */
   private pruneCache(): void {
     if (this.events.length > this.cacheSize) {
       this.events = this.events.slice(0, this.cacheSize)
     }
   }
 
-  /**
-   * Get events with optional filtering
-   */
   getEvents(options: EventCacheOptions = {}): BaseEvent[] {
     const { limit = 20, ...filterCriteria } = options
 
@@ -96,23 +84,14 @@ export class EventCache {
     return filtered.slice(0, limit)
   }
 
-  /**
-   * Get all cached events as an observable
-   */
   events$(): Observable<BaseEvent[]> {
     return this.eventsSubject.asObservable()
   }
 
-  /**
-   * Get filtered events as an observable
-   */
   filteredEvents$(filterCriteria: EventFilterCriteria = {}): Observable<BaseEvent[]> {
     return this.eventsSubject.pipe(map((events) => filterEvents(events, filterCriteria)))
   }
 
-  /**
-   * Clear all events from the cache
-   */
   clearCache(): void {
     this.events = []
     this.eventsSubject.next([])

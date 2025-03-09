@@ -234,12 +234,12 @@ export class TwitchAdapter extends BaseAdapter {
 
         // Set up event listener for auth status changes using RxJS observable
         this.authSubscription = this.eventBus
-          .getEventsByType('status_changed')
+          .getEventsByType$('status_changed')
           .pipe(
             // Filter for Twitch auth events
             filter((event) => {
-              if (!event.payload) return false
-              const payload = event.payload as Record<string, any>
+              if (!event.data) return false
+              const payload = event.data as Record<string, any>
               return (
                 event.category === EventCategory.SERVICE &&
                 payload.provider === AuthProvider.TWITCH &&

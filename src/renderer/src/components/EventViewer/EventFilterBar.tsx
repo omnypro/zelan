@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { EventCategory } from '@s/types/events'
-import { EventFilterCriteria } from '@s/utils/filters/event-filter'
+import { EventFilterCriteria } from '@s/core/bus'
 
 interface EventFilterBarProps {
   onFilterChange: (criteria: EventFilterCriteria) => void

@@ -1,5 +1,5 @@
 import { BehaviorSubject, Observable } from 'rxjs'
-import { EventBus } from '@s/core/bus/EventBus'
+import { EventBus } from '@s/core/bus'
 import { EventCategory } from '@s/types/events'
 import { createEvent } from '@s/core/events'
 import { getErrorService } from '@m/services/errors'

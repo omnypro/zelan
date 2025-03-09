@@ -1,11 +1,8 @@
 import { useState, useEffect } from 'react'
 import { EventCategory } from '@s/types/events'
-import { createEventFilter, EventFilterCriteria } from '@s/utils/filters/event-filter'
 import { useFilteredEvents, useEventPublisher } from '@r/hooks/useEventStream'
+import { EventFilterCriteria } from '@s/core/bus'
 
-/**
- * Demo component for the event filtering utility
- */
 export default function EventFilterDemo() {
   // State for filter settings
   const [category, setCategory] = useState<EventCategory>(EventCategory.SYSTEM)
@@ -21,32 +18,31 @@ export default function EventFilterDemo() {
   // Event publisher for testing
   const publishTestEvent = useEventPublisher(EventCategory.TEST, 'filter-demo', 'filter-demo')
 
-  // Build filter criteria when any filter option changes
+  // Update filter criteria when any filter option changes
   useEffect(() => {
-    const builder = createEventFilter()
+    const criteria: EventFilterCriteria = {}
 
     if (category) {
-      builder.byCategory(category)
+      criteria.category = category
     }
 
     if (type) {
-      builder.byType(type)
+      criteria.type = type
     }
 
     if (sourceId) {
-      builder.bySourceId(sourceId)
+      criteria.sourceId = sourceId
     }
 
     if (sourceType) {
-      builder.bySourceType(sourceType)
+      criteria.sourceType = sourceType
     }
 
     if (sinceMinutes > 0) {
-      const timestamp = Date.now() - sinceMinutes * 60 * 1000
-      builder.since(timestamp)
+      criteria.since = Date.now() - sinceMinutes * 60 * 1000
     }
 
-    setFilterCriteria(builder.build())
+    setFilterCriteria(criteria)
   }, [category, type, sourceId, sourceType, sinceMinutes])
 
   // Get filtered events using our new hook

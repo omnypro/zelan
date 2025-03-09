@@ -1,6 +1,6 @@
 import { AdapterFactory } from '../interfaces/AdapterFactory'
 import { ServiceAdapter } from '../interfaces/ServiceAdapter'
-import { EventBus } from '@s/core/bus/EventBus'
+import { EventBus } from '@s/core/bus'
 
 /**
  * Abstract base class for adapter factories

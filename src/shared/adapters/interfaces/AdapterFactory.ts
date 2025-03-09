@@ -1,5 +1,5 @@
 import { ServiceAdapter } from './ServiceAdapter'
-import { EventBus } from '@s/core/bus/EventBus'
+import { EventBus } from '@s/core/bus'
 
 /**
  * Factory interface for creating adapter instances

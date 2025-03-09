@@ -1,122 +1,126 @@
 import { Observable, Subject } from 'rxjs'
+import { filter } from 'rxjs/operators'
 import { BaseEvent, EventCategory } from '@s/types/events'
-import { EventFilterCriteria, filterEventStream } from '@s/utils/filters/event-filter'
 
-/**
- * Interface for the event bus that handles event pub/sub
- */
-export interface EventBus {
-  /**
-   * Observable of all events emitted by the event bus
-   */
-  readonly events$: Observable<BaseEvent>
-
-  /**
-   * Get events filtered by specified criteria
-   */
-  getFilteredEvents$<T = unknown>(criteria: EventFilterCriteria<T>): Observable<BaseEvent<T>>
-
-  /**
-   * Get events filtered by category
-   */
-  getEventsByCategory$<T = unknown>(category: EventCategory): Observable<BaseEvent<T>>
-
-  /**
-   * Get events filtered by type
-   */
-  getEventsByType$<T = unknown>(type: string): Observable<BaseEvent<T>>
-
-  /**
-   * Get events filtered by category and type
-   */
-  getEventsByCategoryAndType$<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>>
-
-  /**
-   * Get events filtered by category (with payload type param)
-   */
-  getEventsByCategory<T = unknown>(category: EventCategory): Observable<BaseEvent<T>>
-
-  /**
-   * Get events filtered by type (with payload type param)
-   */
-  getEventsByType<T = unknown>(type: string): Observable<BaseEvent<T>>
-
-  /**
-   * Get events filtered by category and type (with payload type param)
-   */
-  getEventsByCategoryAndType<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>>
-
-  /**
-   * Publish an event to all subscribers
-   */
-  publish(event: BaseEvent): void
+export interface EventFilterCriteria<T = unknown> {
+  category?: EventCategory
+  type?: string
+  sourceId?: string
+  sourceType?: string
+  since?: number
+  predicate?: (event: BaseEvent<T>) => boolean
 }
 
 /**
- * Base implementation of the EventBus interface
+ * Filters an array of events based on the provided criteria
  */
+export function filterEvents<T = unknown>(events: BaseEvent<T>[], criteria: EventFilterCriteria<T>): BaseEvent<T>[] {
+  if (!criteria || Object.keys(criteria).length === 0) return events
+
+  return events.filter(event => {
+    // Check category
+    if (criteria.category !== undefined && event.category !== criteria.category) {
+      return false
+    }
+
+    // Check type
+    if (criteria.type !== undefined && event.type !== criteria.type) {
+      return false
+    }
+
+    // Check sourceId
+    if (criteria.sourceId !== undefined && event.source?.id !== criteria.sourceId) {
+      return false
+    }
+
+    // Check sourceType
+    if (criteria.sourceType !== undefined && event.source?.type !== criteria.sourceType) {
+      return false
+    }
+
+    // Check timestamp
+    if (criteria.since !== undefined && event.timestamp < criteria.since) {
+      return false
+    }
+
+    // Apply custom predicate if provided
+    if (criteria.predicate && !criteria.predicate(event)) {
+      return false
+    }
+
+    return true
+  })
+}
+
+export interface EventBus {
+  readonly events$: Observable<BaseEvent>
+  getFilteredEvents$<T = unknown>(criteria: EventFilterCriteria<T>): Observable<BaseEvent<T>>
+  getEventsByCategory$<T = unknown>(category: EventCategory): Observable<BaseEvent<T>>
+  getEventsByType$<T = unknown>(type: string): Observable<BaseEvent<T>>
+  getEventsByCategoryAndType$<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>>
+  publish(event: BaseEvent): void
+}
+
 export class BaseEventBus implements EventBus {
   private eventsSubject = new Subject<BaseEvent>()
-
-  /**
-   * Observable of all events emitted by the event bus
-   */
   readonly events$ = this.eventsSubject.asObservable()
 
-  /**
-   * Get events filtered by specified criteria
-   */
   getFilteredEvents$<T = unknown>(criteria: EventFilterCriteria<T>): Observable<BaseEvent<T>> {
-    // Using type assertion to bridge the gap
-    const stream$ = this.events$ as unknown as Observable<BaseEvent<T>>
-    return filterEventStream<T>(criteria)(stream$)
+    // Simple cast - we're assuming T matches the event data type
+    const stream$ = this.events$ as Observable<BaseEvent<T>>
+    
+    return stream$.pipe(
+      filter(event => {
+        // Skip filtering if no criteria provided
+        if (!criteria || Object.keys(criteria).length === 0) return true
+
+        // Check category
+        if (criteria.category !== undefined && event.category !== criteria.category) {
+          return false
+        }
+
+        // Check type
+        if (criteria.type !== undefined && event.type !== criteria.type) {
+          return false
+        }
+
+        // Check sourceId
+        if (criteria.sourceId !== undefined && event.source?.id !== criteria.sourceId) {
+          return false
+        }
+
+        // Check sourceType
+        if (criteria.sourceType !== undefined && event.source?.type !== criteria.sourceType) {
+          return false
+        }
+
+        // Check timestamp
+        if (criteria.since !== undefined && event.timestamp < criteria.since) {
+          return false
+        }
+
+        // Apply custom predicate if provided
+        if (criteria.predicate && !criteria.predicate(event as BaseEvent<T>)) {
+          return false
+        }
+
+        return true
+      })
+    )
   }
 
-  /**
-   * Get events filtered by category
-   */
   getEventsByCategory$<T = unknown>(category: EventCategory): Observable<BaseEvent<T>> {
     return this.getFilteredEvents$<T>({ category })
   }
 
-  /**
-   * Get events filtered by type
-   */
   getEventsByType$<T = unknown>(type: string): Observable<BaseEvent<T>> {
     return this.getFilteredEvents$<T>({ type })
   }
 
-  /**
-   * Get events filtered by category and type
-   */
   getEventsByCategoryAndType$<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>> {
     return this.getFilteredEvents$<T>({ category, type })
   }
 
-  /**
-   * Get events filtered by category (with payload type param)
-   */
-  getEventsByCategory<T = unknown>(category: EventCategory): Observable<BaseEvent<T>> {
-    return this.getEventsByCategory$<T>(category)
-  }
-
-  /**
-   * Get events filtered by type (with payload type param)
-   */
-  getEventsByType<T = unknown>(type: string): Observable<BaseEvent<T>> {
-    return this.getEventsByType$<T>(type)
-  }
-
-  /**
-   * Get events filtered by category and type (with payload type param)
-   */
-  getEventsByCategoryAndType<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>> {
-    return this.getEventsByCategoryAndType$<T>(category, type)
-  }
-
-  /**
-   * Publish an event to all subscribers
-   */
   publish(event: BaseEvent): void {
     this.eventsSubject.next(event)
   }

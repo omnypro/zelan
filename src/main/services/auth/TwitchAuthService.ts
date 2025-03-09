@@ -1,4 +1,4 @@
-import { EventBus } from '@s/core/bus/EventBus'
+import { EventBus } from '@s/core/bus'
 import { BaseAuthService } from './BaseAuthService'
 import { getErrorService } from '@m/services/errors'
 import { getLoggingService } from '@m/services/logging'

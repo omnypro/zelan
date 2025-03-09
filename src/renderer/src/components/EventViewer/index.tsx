@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { EventCategory } from '@s/types/events'
-import { EventFilterCriteria, createEventFilter } from '@s/utils/filters/event-filter'
+import { EventFilterCriteria } from '@s/core/bus'
 import { useFilteredEvents, useEventPublisher } from '@r/hooks/useEventStream'
 import EventFilterBar from './EventFilterBar'
 import EventGroup from './EventGroup'
