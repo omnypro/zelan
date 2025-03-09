@@ -11,7 +11,7 @@ import {
   RefreshFailedError
 } from '@s/auth/errors'
 
-import { AccessToken, RefreshingAuthProvider, revokeToken } from '@twurple/auth'
+import { AccessToken, revokeToken } from '@twurple/auth'
 
 /**
  * Handles authentication with the Twitch API
@@ -432,7 +432,11 @@ export class TwitchAuthService extends BaseAuthService {
   }
 
   /**
-   * Refresh a Twitch auth token using Twurple's RefreshingAuthProvider
+   * Refresh a Twitch auth token using direct OAuth refresh token flow
+   *
+   * This implementation uses the standard OAuth refresh token endpoint directly
+   * instead of using Twurple's RefreshingAuthProvider, which requires a client secret.
+   * Public apps using Device Code Flow don't need (and shouldn't use) a client secret.
    */
   protected async refreshTokenImplementation(provider: AuthProvider, token: AuthToken): Promise<AuthResult> {
     if (provider !== AuthProvider.TWITCH) {
@@ -447,39 +451,76 @@ export class TwitchAuthService extends BaseAuthService {
         throw new RefreshFailedError(provider, { reason: 'No refresh token available' })
       }
 
-      // Create a temporary auth provider for token refresh
-      // For desktop apps using Device Code Flow, we can use an empty string as clientSecret
-      const authProvider = new RefreshingAuthProvider({
-        clientId: process.env.TWITCH_CLIENT_ID || '',
-        clientSecret: '' // Empty string for Device Code Flow
+      // Make sure we have a client ID
+      const clientId = process.env.TWITCH_CLIENT_ID
+      if (!clientId) {
+        throw new RefreshFailedError(provider, { reason: 'TWITCH_CLIENT_ID environment variable is missing' })
+      }
+
+      // Request parameters for token refresh
+      // Note: For Device Code Flow, we don't include client_secret
+      const params = new URLSearchParams()
+      params.append('client_id', clientId)
+      params.append('refresh_token', token.refreshToken)
+      params.append('grant_type', 'refresh_token')
+
+      this.logger.debug('Refreshing token with params', {
+        clientId,
+        grantType: 'refresh_token'
       })
 
-      // Add user to auth provider
-      await authProvider.addUserForToken({
-        accessToken: token.accessToken,
-        refreshToken: token.refreshToken,
-        expiresIn: 0, // Force a refresh
-        obtainmentTimestamp: 0
+      // Make request to Twitch OAuth API
+      const response = await fetch('https://id.twitch.tv/oauth2/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params
       })
 
-      // Get a new token (this will automatically refresh it)
-      const newToken = await authProvider.getAnyAccessToken()
+      if (!response.ok) {
+        const responseText = await response.text()
+        this.logger.error('Token refresh failed', {
+          status: response.status,
+          response: responseText
+        })
+        throw new Error(`Token refresh failed: ${response.status} ${response.statusText} - ${responseText}`)
+      }
+
+      // Parse response
+      const data = await response.json()
+
+      // Handle scope being either a string or an array
+      let scope = data.scope
+      if (typeof scope === 'string') {
+        scope = scope.split(' ')
+      } else if (!Array.isArray(scope)) {
+        // If it's neither a string nor an array, default to an empty array
+        this.logger.warn('Unexpected scope format', { scope })
+        scope = []
+      }
 
       // Convert to our token format, preserving metadata from original token
       const authToken: AuthToken = {
-        accessToken: newToken.accessToken,
-        refreshToken: newToken.refreshToken || '',
-        expiresAt: Date.now() + (newToken.expiresIn || 0) * 1000,
-        scope: newToken.scope,
-        tokenType: 'bearer',
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || '',
+        expiresAt: Date.now() + (data.expires_in || 0) * 1000,
+        scope: scope,
+        tokenType: data.token_type || 'bearer',
         metadata: token.metadata // Preserve metadata from the original token
       }
+
+      this.logger.info('Token refreshed successfully')
 
       return {
         success: true,
         token: authToken
       }
     } catch (error) {
+      this.logger.error('Token refresh failed', {
+        error: error instanceof Error ? error.message : String(error)
+      })
+
       throw new RefreshFailedError(
         provider,
         {
