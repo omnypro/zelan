@@ -37,16 +37,21 @@ import { AdapterManager } from '@m/services/adapters'
 import { WebSocketService } from '@m/services/websocket'
 import { getErrorService } from '@m/services/errors'
 import { getAuthService } from '@m/services/auth'
+import { AuthProvider } from '@s/auth/interfaces'
 import { AdapterRegistry } from '@s/adapters'
 import { EventCache } from '@m/services/events/EventCache'
 import { ConfigStore, getConfigStore } from '@s/core/config'
 import { TestAdapterFactory } from '@m/adapters/test'
 import { ObsAdapterFactory } from '@m/adapters/obs'
+import { TwitchAdapterFactory } from '@m/adapters/twitch'
 import { setupTRPCServer } from '@m/trpc'
-import { SystemEventType } from '@s/types/events'
+import { SystemEventType, EventCategory } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
 // We use these types in our error handling
 import type { ErrorService } from '@m/services/errors'
+
+// Import for subscription management
+import { SubscriptionManager } from '@s/utils/subscription-manager'
 
 // Global references
 let mainWindow: BrowserWindow | null = null
@@ -58,6 +63,7 @@ let adapterRegistry: AdapterRegistry | null = null
 let adapterManager: AdapterManager | null = null
 let webSocketService: WebSocketService | null = null
 let authService: any = null // Using 'any' temporarily
+let subscriptionManager: SubscriptionManager = new SubscriptionManager()
 
 function createWindow(): void {
   // Create the browser window.
@@ -190,8 +196,9 @@ async function initializeServices(): Promise<void> {
     adapterRegistry = new AdapterRegistry()
 
     // Register adapter factories
-    adapterRegistry.register(new TestAdapterFactory())
-    adapterRegistry.register(new ObsAdapterFactory())
+    adapterRegistry.register(new TestAdapterFactory(mainEventBus))
+    adapterRegistry.register(new ObsAdapterFactory(mainEventBus))
+    adapterRegistry.register(new TwitchAdapterFactory(mainEventBus))
 
     // Initialize adapter manager
     adapterManager = new AdapterManager(adapterRegistry, mainEventBus, configStore)
@@ -211,6 +218,42 @@ async function initializeServices(): Promise<void> {
           eventTypes: ['message', 'follow', 'subscription']
         }
       })
+      
+      // Check for existing adapters
+      const existingAdapters = adapterManager.getAllAdapters();
+      const hasTwitchAdapter = existingAdapters.some(adapter => adapter.type === 'twitch');
+      
+      // Create Twitch adapter if authenticated and one doesn't already exist
+      try {
+        const authService = getAuthService(mainEventBus);
+        const twitchAuthStatus = authService.getStatus(AuthProvider.TWITCH);
+        
+        if (twitchAuthStatus.state === 'authenticated' && !hasTwitchAdapter) {
+          console.log('Twitch authenticated at startup, creating Twitch adapter');
+          await adapterManager.createAdapter({
+            id: 'twitch-adapter',
+            type: 'twitch',
+            name: 'Twitch Adapter',
+            enabled: true,
+            options: {
+              channelName: '', // Will use authenticated user's channel by default
+              pollInterval: 60000, // Poll channel info every minute
+              includeSubscriptions: false,
+              eventsToTrack: [
+                'channel.update', 
+                'stream.online', 
+                'stream.offline'
+              ]
+            }
+          });
+        } else if (twitchAuthStatus.state === 'authenticated') {
+          console.log('Twitch adapter already exists');
+        } else {
+          console.log('Twitch not authenticated, skipping Twitch adapter creation');
+        }
+      } catch (error) {
+        console.error('Error creating Twitch adapter:', error);
+      }
     }
 
     // Initialize WebSocket service
@@ -228,6 +271,52 @@ async function initializeServices(): Promise<void> {
     // Initialize the auth service
     authService = getAuthService(mainEventBus)
     await authService.initialize()
+
+    // Listen for authentication events to create adapters dynamically
+    const authEventSubscription = mainEventBus.events$.subscribe(async (event) => {
+      try {
+        // Check for auth events from the TwitchAuthService
+        if (event.category === EventCategory.SERVICE && 
+            event.type === 'authenticated' && 
+            event.payload?.provider === AuthProvider.TWITCH) {
+          console.log('Twitch authentication successful, creating Twitch adapter');
+          
+          // Check if a Twitch adapter already exists
+          const existingAdapter = adapterManager.getAdaptersByType('twitch');
+          if (existingAdapter.length === 0) {
+            try {
+              await adapterManager.createAdapter({
+                id: 'twitch-adapter',
+                type: 'twitch',
+                name: 'Twitch Adapter',
+                enabled: true,
+                options: {
+                  channelName: '',
+                  pollInterval: 60000,
+                  includeSubscriptions: false,
+                  eventsToTrack: [
+                    'channel.update', 
+                    'stream.online', 
+                    'stream.offline'
+                  ]
+                }
+              });
+              
+              console.log('Twitch adapter created successfully');
+            } catch (error) {
+              console.error('Failed to create Twitch adapter:', error);
+            }
+          } else {
+            console.log('Twitch adapter already exists');
+          }
+        }
+      } catch (error) {
+        console.error('Error handling auth event:', error);
+      }
+    });
+    
+    // Store the subscription for cleanup
+    subscriptionManager.add(authEventSubscription);
 
     // Set up tRPC server
     setupTRPCServer(mainEventBus, adapterManager, configStore, authService)
@@ -321,6 +410,9 @@ app.on('before-quit', async (event) => {
     if (authService) {
       authService.dispose()
     }
+    
+    // Clean up subscriptions
+    subscriptionManager.unsubscribeAll();
 
     // Wait a moment for cleanup to complete and events to be processed
     setTimeout(() => {

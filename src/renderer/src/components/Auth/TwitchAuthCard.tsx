@@ -8,23 +8,13 @@ import { useAuth } from '@r/hooks/useAuth'
 export default function TwitchAuthCard() {
   const { status, deviceCode, isLoading, error, login, logout } = useAuth(AuthProvider.TWITCH)
 
-  // Default Twitch scopes for basic integration
-  const scopes = [
-    'user:read:email',
-    'channel:read:subscriptions',
-    'channel:read:redemptions',
-    'channel:read:polls',
-    'channel:read:predictions',
-    'chat:read'
-  ]
-
   // Handle login click
   const handleLogin = async () => {
     // Use the Client ID from the environment
+    // Don't specify scopes here - let the TwitchAuthService use its DEFAULT_SCOPES
     await login({
       // This will be replaced by the server with the actual Client ID from .env
-      clientId: 'FROM_ENV',
-      scopes
+      clientId: 'FROM_ENV'
     })
   }
 

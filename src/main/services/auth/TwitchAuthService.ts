@@ -26,7 +26,7 @@ export class TwitchAuthService extends BaseAuthService {
   /**
    * Default scopes for Twitch authentication
    */
-  private readonly DEFAULT_SCOPES = [
+  public readonly DEFAULT_SCOPES = [
     'analytics:read:extensions',
     'analytics:read:games',
     'bits:read',
@@ -40,6 +40,7 @@ export class TwitchAuthService extends BaseAuthService {
     'channel:read:subscriptions',
     'channel:read:vips',
     'chat:read',
+    'eventsub:version1',  // Required for EventSub WebSocket
     'moderation:read',
     'moderator:read:automod_settings',
     'moderator:read:blocked_terms',
@@ -370,7 +371,10 @@ export class TwitchAuthService extends BaseAuthService {
           }
         } catch (fetchError) {
           console.error('Fetch error during token exchange:', fetchError)
-          throw new Error(`Fetch error: ${fetchError.message}`)
+          const errorMessage = fetchError instanceof Error 
+            ? fetchError.message 
+            : 'Unknown fetch error'
+          throw new Error(`Fetch error: ${errorMessage}`)
         }
       } catch (error) {
         // If it's already a DeviceCodeTimeoutError, just rethrow it
