@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { ConfigStore } from '@s/core/config'
 import { MainEventBus } from '@m/services/eventBus'
-import { AdapterManager } from '@m/services/adapters'
+import { AdapterManager, ReconnectionManager } from '@m/services/adapters'
 import { AuthService } from '@m/services/auth'
 import { Subject } from 'rxjs'
 import { filter } from 'rxjs/operators'
@@ -27,6 +27,7 @@ import { getLoggingService, getLogViewerService } from '@m/services/logging'
 interface TRPCContext {
   mainEventBus: MainEventBus
   adapterManager: AdapterManager
+  reconnectionManager: ReconnectionManager
   configStore: ConfigStore
   webSocketService: WebSocketService
   authService: AuthService
@@ -39,12 +40,14 @@ interface TRPCContext {
 function createContext(
   mainEventBus: MainEventBus,
   adapterManager: AdapterManager,
+  reconnectionManager: ReconnectionManager,
   configStore: ConfigStore,
   authService: AuthService
 ): TRPCContext {
   return {
     mainEventBus,
     adapterManager,
+    reconnectionManager,
     configStore,
     webSocketService: WebSocketService.getInstance(mainEventBus, configStore),
     authService,
@@ -59,9 +62,10 @@ export function setupTRPCServer(
   mainEventBus: MainEventBus,
   adapterManager: AdapterManager,
   configStore: ConfigStore,
-  authService: AuthService
+  authService: AuthService,
+  reconnectionManager: ReconnectionManager
 ) {
-  const ctx = createContext(mainEventBus, adapterManager, configStore, authService)
+  const ctx = createContext(mainEventBus, adapterManager, reconnectionManager, configStore, authService)
 
   // Channel for tRPC requests
   const TRPC_CHANNEL = 'zelan:trpc'
@@ -455,6 +459,33 @@ export function setupTRPCServer(
             })
 
             return { id, type: 'started' }
+          }
+        }
+      } else if (moduleName === 'reconnection') {
+        if (type === 'query') {
+          if (procedureName === 'getState') {
+            const adapterId = input as string
+            const state = ctx.reconnectionManager.getReconnectionState(adapterId)
+            return { id, result: state, type: 'data' }
+          } else if (procedureName === 'getOptions') {
+            // Return current reconnection options
+            return { id, result: ctx.reconnectionManager.options, type: 'data' }
+          }
+        } else if (type === 'mutation') {
+          if (procedureName === 'updateOptions') {
+            ctx.reconnectionManager.updateOptions(input)
+            return { id, result: true, type: 'data' }
+          } else if (procedureName === 'reconnectNow') {
+            const adapterId = input as string
+            await ctx.reconnectionManager.reconnectNow(adapterId)
+            return { id, result: true, type: 'data' }
+          } else if (procedureName === 'reconnectAllNow') {
+            await ctx.reconnectionManager.reconnectAllNow()
+            return { id, result: true, type: 'data' }
+          } else if (procedureName === 'cancelReconnection') {
+            const adapterId = input as string
+            ctx.reconnectionManager.cancelReconnection(adapterId)
+            return { id, result: true, type: 'data' }
           }
         }
       } else if (moduleName === 'logs') {

@@ -67,7 +67,7 @@ try {
 
 // Import our services
 import { MainEventBus } from '@m/services/eventBus'
-import { AdapterManager } from '@m/services/adapters'
+import { AdapterManager, ReconnectionManager } from '@m/services/adapters'
 import { WebSocketService } from '@m/services/websocket'
 import { getErrorService } from '@m/services/errors'
 import { getAuthService } from '@m/services/auth'
@@ -100,6 +100,7 @@ let mainEventBus: MainEventBus | null = null
 let errorService: ErrorService | null = null
 let adapterRegistry: AdapterRegistry | null = null
 let adapterManager: AdapterManager | null = null
+let reconnectionManager: ReconnectionManager | null = null
 let webSocketService: WebSocketService | null = null
 let authService: any = null // Using 'any' temporarily
 let subscriptionManager: SubscriptionManager = new SubscriptionManager()
@@ -242,6 +243,10 @@ async function initializeServices(): Promise<void> {
     // Initialize adapter manager
     adapterManager = new AdapterManager(adapterRegistry, mainEventBus, configStore)
     await adapterManager.initialize()
+    
+    // Initialize reconnection manager
+    reconnectionManager = new ReconnectionManager(adapterManager, mainEventBus, configStore)
+    logger.info('Reconnection manager initialized')
 
     // Create a test adapter if none exists
     const adapters = adapterManager.getAllAdapters()
@@ -377,7 +382,7 @@ async function initializeServices(): Promise<void> {
     subscriptionManager.add(authEventSubscription)
 
     // Set up tRPC server
-    setupTRPCServer(mainEventBus, adapterManager, configStore, authService)
+    setupTRPCServer(mainEventBus, adapterManager, configStore, authService, reconnectionManager)
 
     logger.info('Services initialized successfully')
   } catch (error) {
@@ -459,6 +464,10 @@ app.on('before-quit', async (event) => {
     // Clean up services
     if (adapterManager) {
       await adapterManager.dispose()
+    }
+    
+    if (reconnectionManager) {
+      reconnectionManager.dispose()
     }
 
     if (webSocketService) {
