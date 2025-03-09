@@ -7,6 +7,7 @@ import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 
 export default defineConfig({
   main: {
+    build: { outDir: 'dist/main' },
     plugins: [externalizeDepsPlugin()],
     resolve: {
       alias: {
@@ -17,6 +18,7 @@ export default defineConfig({
     }
   },
   preload: {
+    build: { outDir: 'dist/preload' },
     plugins: [externalizeDepsPlugin()],
     resolve: {
       alias: {
@@ -27,6 +29,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    build: { outDir: 'dist/renderer' },
     resolve: {
       alias: {
         '@r': resolve('src/renderer/src'),
