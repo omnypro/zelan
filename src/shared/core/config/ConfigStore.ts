@@ -16,15 +16,17 @@ interface ComponentLogger {
 let getLoggingService: () => { createLogger: (component: string) => ComponentLogger } | null = () =>
   null
 
-// Only import logging service when in main process (electron is available)
+// Only create a console logger when in web context
+// In the main process, we'll configure it properly during initialization
 if (typeof app !== 'undefined') {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const logging = require('@m/services/logging')
-    getLoggingService = logging.getLoggingService
-  } catch (err) {
-    console.error('Failed to import logging service:', err)
-  }
+  getLoggingService = () => ({
+    createLogger: (component: string) => ({
+      info: (msg: string, meta?: any) => console.info(`[${component}] ${msg}`, meta || ''),
+      error: (msg: string, meta?: any) => console.error(`[${component}] ${msg}`, meta || ''),
+      warn: (msg: string, meta?: any) => console.warn(`[${component}] ${msg}`, meta || ''),
+      debug: (msg: string, meta?: any) => console.debug(`[${component}] ${msg}`, meta || '')
+    })
+  })
 }
 
 /**

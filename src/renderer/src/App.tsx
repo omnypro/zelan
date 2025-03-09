@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import Versions from './components/Versions'
+import { useState, type JSX } from 'react'
+
 import EventsDemo from './components/EventsDemo'
 import EnhancedEventsDemo from './components/EnhancedEventsDemo'
 import AdapterStatus from './components/AdapterStatus'
@@ -7,6 +7,7 @@ import Settings from './components/Settings'
 import AuthDemo from './components/AuthDemo'
 import { TrpcDemo } from './components/TrpcDemo'
 import { WebSocketDemo } from './components/demos/WebSocketDemo'
+
 import electronLogo from './assets/electron.svg'
 import './assets/main.css'
 
@@ -151,8 +152,6 @@ function App(): JSX.Element {
                   external applications can connect to for real-time event data.
                 </p>
               </div>
-
-              <Versions />
             </div>
           )}
 

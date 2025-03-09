@@ -4,16 +4,31 @@ import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
-// Initialize logging service first thing so we can use it to log startup
-const logger = getLoggingService().createLogger('Main')
-logger.info('Zelan application starting up')
+// Create a simple console logger for startup
+// We'll use the full logging service after it's properly imported
+const consoleLogger = {
+  info: (message: string, meta?: Record<string, any>) => {
+    console.info(`[Main] ${message}`, meta || '')
+  },
+  error: (message: string, meta?: Record<string, any>) => {
+    console.error(`[Main] ${message}`, meta || '')
+  },
+  warn: (message: string, meta?: Record<string, any>) => {
+    console.warn(`[Main] ${message}`, meta || '')
+  },
+  debug: (message: string, meta?: Record<string, any>) => {
+    console.debug(`[Main] ${message}`, meta || '')
+  }
+}
+
+consoleLogger.info('Zelan application starting up')
 
 // Load environment variables from .env file manually
 try {
   // __dirname may be relative in dev mode, so use app.getAppPath()
   const appRoot = app.getAppPath()
   const envPath = join(appRoot, '.env')
-  logger.debug('Looking for .env file', { path: envPath })
+  consoleLogger.debug('Looking for .env file', { path: envPath })
   const envContent = readFileSync(envPath, 'utf8')
 
   const loadedVars: Record<string, string> = {}
@@ -43,9 +58,9 @@ try {
     }
   })
 
-  logger.info('Environment variables loaded from .env file', { vars: loadedVars })
+  consoleLogger.info('Environment variables loaded from .env file', { vars: loadedVars })
 } catch (error) {
-  logger.error('Failed to load .env file', {
+  consoleLogger.error('Failed to load .env file', {
     error: error instanceof Error ? error.message : String(error)
   })
 }
@@ -66,12 +81,16 @@ import { TwitchAdapterFactory } from '@m/adapters/twitch'
 import { setupTRPCServer } from '@m/trpc'
 import { SystemEventType, EventCategory } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
-import { getLoggingService } from '@m/services/logging'
 // We use these types in our error handling
 import type { ErrorService } from '@m/services/errors'
 
 // Import for subscription management
 import { SubscriptionManager } from '@s/utils/subscription-manager'
+import { getLoggingService } from '@m/services/logging'
+
+// Initialize the full logging service now that it's imported
+const logger = getLoggingService().createLogger('Main')
+logger.info('Logging service initialized')
 
 // Global references
 let mainWindow: BrowserWindow | null = null
