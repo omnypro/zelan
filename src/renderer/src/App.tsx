@@ -3,6 +3,7 @@ import { useState, type JSX } from 'react'
 import EventsDemo from './components/EventsDemo'
 import EnhancedEventsDemo from './components/EnhancedEventsDemo'
 import AdapterStatus from './components/AdapterStatus'
+import EnhancedAdapterStatus from './components/EnhancedAdapterStatus'
 import Settings from './components/Settings'
 import AuthDemo from './components/AuthDemo'
 import { TrpcDemo } from './components/TrpcDemo'
@@ -133,6 +134,10 @@ function App(): JSX.Element {
             <div className="p-6">
               <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
 
+              <div className="mb-8">
+                <EnhancedAdapterStatus />
+              </div>
+              
               <div className="mb-8">
                 <AdapterStatus />
               </div>
