@@ -44,12 +44,7 @@ export function createEvent<T>(
 /**
  * Create an OBS event with specific metadata
  */
-export function createObsEvent<T>(
-  type: ObsEventType,
-  data: T,
-  adapterId: string,
-  adapterName: string
-): BaseEvent<T> {
+export function createObsEvent<T>(type: ObsEventType, data: T, adapterId: string, adapterName: string): BaseEvent<T> {
   return createEvent(EventCategory.OBS, type, data, adapterId, adapterName, 'obs')
 }
 

@@ -14,7 +14,7 @@ function Dashboard() {
       <div className="mb-8">
         <EnhancedAdapterStatus />
       </div>
-      
+
       <div className="mb-8">
         <AdapterStatus />
       </div>
@@ -22,16 +22,15 @@ function Dashboard() {
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <h3 className="text-lg font-semibold mb-4">Welcome to Zelan</h3>
         <p className="mb-3">
-          This is your stream data aggregation service. Connect to various streaming
-          platforms and merge their data into a unified API.
+          This is your stream data aggregation service. Connect to various streaming platforms and merge their data into
+          a unified API.
         </p>
         <p className="mb-3">
-          Check out the <strong>Events</strong> tab to see the reactive event system in
-          action.
+          Check out the <strong>Events</strong> tab to see the reactive event system in action.
         </p>
         <p>
-          The <strong>WebSocket</strong> tab allows you to control the WebSocket server that
-          external applications can connect to for real-time event data.
+          The <strong>WebSocket</strong> tab allows you to control the WebSocket server that external applications can
+          connect to for real-time event data.
         </p>
       </div>
     </div>

@@ -27,9 +27,7 @@ export const ConnectionStatusIndicator: React.FC<ConnectionStatusIndicatorProps>
     let displayStatus = ''
 
     // Extract the status string from either an enum value or an object
-    const statusValue = typeof status === 'object' && status !== null 
-      ? status.status 
-      : status
+    const statusValue = typeof status === 'object' && status !== null ? status.status : status
 
     // Determine appropriate color and label based on the status value
     switch (statusValue) {
@@ -63,11 +61,7 @@ export const ConnectionStatusIndicator: React.FC<ConnectionStatusIndicatorProps>
         displayStatus = `Unknown (${statusValue})`
     }
 
-    return (
-      <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${color}`}>
-        {displayStatus}
-      </span>
-    )
+    return <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${color}`}>{displayStatus}</span>
   }
 
   // Format time from milliseconds timestamp
@@ -97,11 +91,9 @@ export const ConnectionStatusIndicator: React.FC<ConnectionStatusIndicatorProps>
 
       {/* Status message if it exists */}
       {typeof status === 'object' && status !== null && status.message && (
-        <div className="mt-2 text-sm text-gray-700">
-          {status.message}
-        </div>
+        <div className="mt-2 text-sm text-gray-700">{status.message}</div>
       )}
-  
+
       {/* Reconnection state indicators */}
       {reconnectionState && (
         <div className="mt-2 space-y-1 text-sm">
@@ -127,14 +119,7 @@ export const ConnectionStatusIndicator: React.FC<ConnectionStatusIndicatorProps>
                 fill="none"
                 viewBox="0 0 24 24"
               >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                ></circle>
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path
                   className="opacity-75"
                   fill="currentColor"
@@ -158,45 +143,43 @@ export const ConnectionStatusIndicator: React.FC<ConnectionStatusIndicatorProps>
       <div className="mt-3 flex justify-end space-x-2">
         {/* Extract status value for comparison */}
         {(() => {
-          const statusValue = typeof status === 'object' && status !== null
-            ? status.status
-            : status;
-          
-          return (statusValue === 'error' || statusValue === 'disconnected') ? (
+          const statusValue = typeof status === 'object' && status !== null ? status.status : status
+
+          return statusValue === 'error' || statusValue === 'disconnected' ? (
             <button
               className="px-3 py-1 text-sm font-medium rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
               onClick={handleReconnect}
               disabled={isLoading}
             >
-            {isLoading ? (
-              <span className="flex items-center">
-                <svg
-                  className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                Reconnecting...
-              </span>
-            ) : (
-              'Reconnect'
-            )}
-          </button>
-          ) : null;
+              {isLoading ? (
+                <span className="flex items-center">
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  Reconnecting...
+                </span>
+              ) : (
+                'Reconnect'
+              )}
+            </button>
+          ) : null
         })()}
       </div>
     </div>

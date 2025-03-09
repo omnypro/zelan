@@ -62,13 +62,7 @@ export class ObsAdapter extends BaseAdapter {
   private scenes: string[] = []
   private logger: ComponentLogger
 
-  constructor(
-    id: string,
-    name: string,
-    options: Partial<ObsAdapterOptions>,
-    eventBus: EventBus,
-    enabled = true
-  ) {
+  constructor(id: string, name: string, options: Partial<ObsAdapterOptions>, eventBus: EventBus, enabled = true) {
     super(id, 'obs', name, { ...DEFAULT_OPTIONS, ...options }, eventBus, enabled)
 
     this.obs = new OBSWebSocket()
@@ -127,10 +121,7 @@ export class ObsAdapter extends BaseAdapter {
       await this.getInitialState()
 
       // Update status to connected explicitly
-      this.updateStatus(
-        AdapterStatus.CONNECTED,
-        `Connected to OBS WebSocket v${obsWebSocketVersion}`
-      )
+      this.updateStatus(AdapterStatus.CONNECTED, `Connected to OBS WebSocket v${obsWebSocketVersion}`)
     } catch (error) {
       // Report error through the error service
       try {
@@ -375,9 +366,7 @@ export class ObsAdapter extends BaseAdapter {
 
       // Only log every few attempts to avoid spam
       if (this.consecutiveReconnectAttempts === 1 || this.consecutiveReconnectAttempts % 5 === 0) {
-        this.logger.info(
-          `Attempting to reconnect to OBS... (attempt ${this.consecutiveReconnectAttempts})`
-        )
+        this.logger.info(`Attempting to reconnect to OBS... (attempt ${this.consecutiveReconnectAttempts})`)
       }
 
       await this.connect()
@@ -455,11 +444,7 @@ export class ObsAdapter extends BaseAdapter {
       }
 
       // Validate password if provided (can be undefined or string)
-      if (
-        'password' in config.options &&
-        config.options.password !== undefined &&
-        !isString(config.options.password)
-      ) {
+      if ('password' in config.options && config.options.password !== undefined && !isString(config.options.password)) {
         throw new ApplicationError(
           `Invalid OBS password, expected string or undefined`,
           ErrorCategory.VALIDATION,
@@ -601,11 +586,7 @@ export class ObsAdapter extends BaseAdapter {
     this.eventEmitter.emit('scene_list_changed', { scenes: this.scenes })
   }
 
-  private handleSceneItemChanged(data: {
-    sceneName: string
-    sceneItemId: number
-    sceneItemEnabled: boolean
-  }): void {
+  private handleSceneItemChanged(data: { sceneName: string; sceneItemId: number; sceneItemEnabled: boolean }): void {
     this.eventEmitter.emit('source_changed', {
       sceneName: data.sceneName,
       sourceId: data.sceneItemId,

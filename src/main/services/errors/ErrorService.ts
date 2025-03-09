@@ -130,10 +130,7 @@ export class ErrorService {
   /**
    * Convert any error to an ApplicationError
    */
-  private normalizeError(
-    error: Error | ApplicationError,
-    metadata?: ErrorMetadata
-  ): ApplicationError {
+  private normalizeError(error: Error | ApplicationError, metadata?: ErrorMetadata): ApplicationError {
     // If it's already an ApplicationError, just return it
     if (error instanceof ApplicationError) {
       // Merge additional metadata if provided
@@ -151,11 +148,7 @@ export class ErrorService {
 
     // Determine error category from error name or type
     let category = ErrorCategory.RUNTIME
-    if (
-      error.name === 'NetworkError' ||
-      error.message.includes('network') ||
-      error.message.includes('connection')
-    ) {
+    if (error.name === 'NetworkError' || error.message.includes('network') || error.message.includes('connection')) {
       category = ErrorCategory.NETWORK
     } else if (error.name === 'ValidationError' || error.message.includes('invalid')) {
       category = ErrorCategory.VALIDATION
@@ -173,9 +166,7 @@ export class ErrorService {
 
     // Format the log message
     const metadataStr =
-      metadata && Object.keys(metadata).length > 0
-        ? `\nMetadata: ${JSON.stringify(metadata, null, 2)}`
-        : ''
+      metadata && Object.keys(metadata).length > 0 ? `\nMetadata: ${JSON.stringify(metadata, null, 2)}` : ''
 
     const logMsg = `[${severity.toUpperCase()}] [${category}] ${message}${metadataStr}`
 

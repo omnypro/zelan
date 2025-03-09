@@ -107,11 +107,7 @@ export function EventFilterBar({
         {/* Type Filter */}
         <div className="flex-1 min-w-[150px]">
           <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
-          <select
-            value={selectedType}
-            onChange={handleTypeChange}
-            className="w-full p-1.5 text-sm border rounded"
-          >
+          <select value={selectedType} onChange={handleTypeChange} className="w-full p-1.5 text-sm border rounded">
             <option value="">All Types</option>
             {types.map((type) => (
               <option key={type} value={type}>
@@ -124,11 +120,7 @@ export function EventFilterBar({
         {/* Source Filter */}
         <div className="flex-1 min-w-[150px]">
           <label className="block text-xs font-medium text-gray-500 mb-1">Source</label>
-          <select
-            value={selectedSource}
-            onChange={handleSourceChange}
-            className="w-full p-1.5 text-sm border rounded"
-          >
+          <select value={selectedSource} onChange={handleSourceChange} className="w-full p-1.5 text-sm border rounded">
             <option value="">All Sources</option>
             {sources.map((source) => (
               <option key={`${source.id}|${source.type}`} value={`${source.id}|${source.type}`}>
@@ -141,11 +133,7 @@ export function EventFilterBar({
         {/* Time Range Filter */}
         <div className="flex-1 min-w-[150px]">
           <label className="block text-xs font-medium text-gray-500 mb-1">Time Range</label>
-          <select
-            value={timeRange}
-            onChange={handleTimeRangeChange}
-            className="w-full p-1.5 text-sm border rounded"
-          >
+          <select value={timeRange} onChange={handleTimeRangeChange} className="w-full p-1.5 text-sm border rounded">
             <option value="5">Last 5 minutes</option>
             <option value="15">Last 15 minutes</option>
             <option value="30">Last 30 minutes</option>
@@ -158,10 +146,7 @@ export function EventFilterBar({
 
         {/* Reset Button */}
         <div className="flex items-end">
-          <button
-            onClick={resetFilters}
-            className="p-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded"
-          >
+          <button onClick={resetFilters} className="p-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded">
             Reset Filters
           </button>
         </div>

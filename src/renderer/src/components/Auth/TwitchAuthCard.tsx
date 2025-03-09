@@ -98,23 +98,19 @@ export default function TwitchAuthCard() {
                 </p>
               </div>
 
-              {isLoading && (
-                <div className="text-center text-sm text-gray-600">
-                  Waiting for authorization...
-                </div>
-              )}
+              {isLoading && <div className="text-center text-sm text-gray-600">Waiting for authorization...</div>}
             </div>
           ) : (
             // Simple login button
             <div className="space-y-4">
               <div className="bg-gray-50 p-4 rounded-md border mb-4">
                 <p className="text-sm text-gray-700 mb-2">
-                  Connect your Twitch account to enable streaming features. You'll be prompted to
-                  authorize this app through Twitch's secure authentication.
+                  Connect your Twitch account to enable streaming features. You'll be prompted to authorize this app
+                  through Twitch's secure authentication.
                 </p>
                 <p className="text-xs text-gray-500">
-                  Only the minimum required permissions will be requested, and your credentials are
-                  securely stored locally.
+                  Only the minimum required permissions will be requested, and your credentials are securely stored
+                  locally.
                 </p>
               </div>
 
@@ -136,15 +132,13 @@ export default function TwitchAuthCard() {
 
       {/* Error message */}
       {error && (
-        <div className="mt-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded-md text-sm">
-          {error}
-        </div>
+        <div className="mt-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded-md text-sm">{error}</div>
       )}
 
       <div className="mt-4 text-xs text-gray-500">
         <p>
-          This integration uses the Device Code flow to authenticate with Twitch. Your credentials
-          are securely stored and only the minimum required scopes are requested.
+          This integration uses the Device Code flow to authenticate with Twitch. Your credentials are securely stored
+          and only the minimum required scopes are requested.
         </p>
       </div>
     </div>

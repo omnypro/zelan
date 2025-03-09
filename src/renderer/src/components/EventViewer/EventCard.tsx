@@ -54,11 +54,7 @@ function formatPayload(payload: any, type?: string): React.ReactNode {
   }
 
   // When all else fails, return the stringified object
-  return (
-    <span className="font-mono text-xs whitespace-pre-wrap">
-      {JSON.stringify(payload, null, 2)}
-    </span>
-  )
+  return <span className="font-mono text-xs whitespace-pre-wrap">{JSON.stringify(payload, null, 2)}</span>
 }
 
 /**
@@ -93,9 +89,7 @@ function StatusIndicator({ status }: { status: string }) {
  * Event source badge
  */
 function SourceBadge({ source }: { source: { id: string; type: string } }) {
-  return (
-    <span className="inline-block px-2 py-0.5 text-xs bg-gray-100 rounded-full">{source.id}</span>
-  )
+  return <span className="inline-block px-2 py-0.5 text-xs bg-gray-100 rounded-full">{source.id}</span>
 }
 
 /**

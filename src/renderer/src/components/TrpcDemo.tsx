@@ -7,13 +7,7 @@ import { useTrpcConfig, useTrpcEvents, useTrpcAdapters } from '@r/hooks/useTrpc'
 export function TrpcDemo() {
   // Check if tRPC and required properties are available
   const [isTrpcAvailable] = useState<boolean>(() => {
-    return !!(
-      window.trpc &&
-      window.trpc.config &&
-      window.trpc.config.get &&
-      window.trpc.events &&
-      window.trpc.adapters
-    )
+    return !!(window.trpc && window.trpc.config && window.trpc.config.get && window.trpc.events && window.trpc.adapters)
   })
 
   // Use tRPC hooks for config
@@ -97,8 +91,8 @@ export function TrpcDemo() {
               : 'The tRPC client is not properly initialized'}
           </p>
           <p className="text-sm">
-            This could be because the tRPC server is not running or there was an error during
-            initialization. Check the console for more details.
+            This could be because the tRPC server is not running or there was an error during initialization. Check the
+            console for more details.
           </p>
         </div>
       </div>
@@ -143,10 +137,7 @@ export function TrpcDemo() {
               className="flex-1 rounded-md border-gray-300 shadow-sm bg-background"
               placeholder="Event text..."
             />
-            <button
-              onClick={sendEvent}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md"
-            >
+            <button onClick={sendEvent} className="px-4 py-2 bg-primary text-primary-foreground rounded-md">
               Send
             </button>
           </div>
@@ -158,10 +149,7 @@ export function TrpcDemo() {
                 className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
                 title={isConnected ? 'Connected' : 'Disconnected'}
               />
-              <button
-                onClick={clearEvents}
-                className="px-2 py-1 text-xs bg-slate-500 text-white rounded-md"
-              >
+              <button onClick={clearEvents} className="px-2 py-1 text-xs bg-slate-500 text-white rounded-md">
                 Clear
               </button>
             </div>
@@ -221,9 +209,7 @@ export function TrpcDemo() {
                           // Handle different status values and also handle object status values
                           (() => {
                             const statusStr =
-                              typeof adapter.status === 'object'
-                                ? 'complex'
-                                : String(adapter.status || '')
+                              typeof adapter.status === 'object' ? 'complex' : String(adapter.status || '')
 
                             if (statusStr === 'running' || statusStr === 'connected') {
                               return 'bg-green-200 text-green-800'
@@ -252,10 +238,7 @@ export function TrpcDemo() {
                         disabled={(() => {
                           // Check if status is an object or a simple string
                           if (typeof adapter.status === 'object') {
-                            return (
-                              adapter.status?.status === 'connected' ||
-                              adapter.status?.status === 'running'
-                            )
+                            return adapter.status?.status === 'connected' || adapter.status?.status === 'running'
                           }
                           return adapter.status === 'running' || adapter.status === 'connected'
                         })()}
@@ -268,10 +251,7 @@ export function TrpcDemo() {
                         disabled={(() => {
                           // Check if status is an object or a simple string
                           if (typeof adapter.status === 'object') {
-                            return (
-                              adapter.status?.status !== 'connected' &&
-                              adapter.status?.status !== 'running'
-                            )
+                            return adapter.status?.status !== 'connected' && adapter.status?.status !== 'running'
                           }
                           return adapter.status !== 'running' && adapter.status !== 'connected'
                         })()}

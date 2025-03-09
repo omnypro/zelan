@@ -19,10 +19,7 @@ export class WebSocketService {
   /**
    * Get the WebSocketService singleton instance
    */
-  static getInstance(
-    eventBus: MainEventBus,
-    config?: Partial<WebSocketServerConfig>
-  ): WebSocketService {
+  static getInstance(eventBus: MainEventBus, config?: Partial<WebSocketServerConfig>): WebSocketService {
     if (!WebSocketService.instance) {
       WebSocketService.instance = new WebSocketService(eventBus, config)
     }

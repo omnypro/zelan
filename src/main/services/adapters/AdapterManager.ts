@@ -322,9 +322,7 @@ export class AdapterManager {
    * Observable of adapters by type
    */
   adaptersByType$(type: string): Observable<ServiceAdapter[]> {
-    return this.adaptersSubject.pipe(
-      map((adapters) => adapters.filter((adapter) => adapter.type === type))
-    )
+    return this.adaptersSubject.pipe(map((adapters) => adapters.filter((adapter) => adapter.type === type)))
   }
 
   /**

@@ -13,12 +13,7 @@ export class TestAdapterFactory extends BaseAdapterFactory<TestAdapter> {
   /**
    * Create a new test adapter
    */
-  create(
-    id: string,
-    name: string,
-    options: Partial<TestAdapterOptions>,
-    eventBus: EventBus
-  ): TestAdapter {
+  create(id: string, name: string, options: Partial<TestAdapterOptions>, eventBus: EventBus): TestAdapter {
     return new TestAdapter(id, name, options, eventBus)
   }
 }

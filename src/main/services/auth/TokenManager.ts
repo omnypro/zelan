@@ -76,12 +76,7 @@ export class TokenManager implements ITokenManager {
       await this.writeTokens(tokens)
     } catch (error) {
       getErrorService().reportError(
-        new StorageError(
-          provider,
-          'saveToken',
-          { provider },
-          error instanceof Error ? error : undefined
-        )
+        new StorageError(provider, 'saveToken', { provider }, error instanceof Error ? error : undefined)
       )
       throw error
     }
@@ -100,12 +95,7 @@ export class TokenManager implements ITokenManager {
       return tokens[provider]
     } catch (error) {
       getErrorService().reportError(
-        new StorageError(
-          provider,
-          'loadToken',
-          { provider },
-          error instanceof Error ? error : undefined
-        )
+        new StorageError(provider, 'loadToken', { provider }, error instanceof Error ? error : undefined)
       )
       throw error
     }
@@ -129,12 +119,7 @@ export class TokenManager implements ITokenManager {
       }
     } catch (error) {
       getErrorService().reportError(
-        new StorageError(
-          provider,
-          'deleteToken',
-          { provider },
-          error instanceof Error ? error : undefined
-        )
+        new StorageError(provider, 'deleteToken', { provider }, error instanceof Error ? error : undefined)
       )
       throw error
     }
@@ -153,12 +138,7 @@ export class TokenManager implements ITokenManager {
       return !!tokens[provider]
     } catch (error) {
       getErrorService().reportError(
-        new StorageError(
-          provider,
-          'hasToken',
-          { provider },
-          error instanceof Error ? error : undefined
-        )
+        new StorageError(provider, 'hasToken', { provider }, error instanceof Error ? error : undefined)
       )
       return false
     }
@@ -220,11 +200,7 @@ export class TokenManager implements ITokenManager {
       const encrypted = encryptedData.subarray(32)
 
       // Create a decipher
-      const decipher = crypto.createDecipheriv(
-        this.algorithm,
-        this.encryptionKey,
-        iv
-      ) as crypto.DecipherGCM
+      const decipher = crypto.createDecipheriv(this.algorithm, this.encryptionKey, iv) as crypto.DecipherGCM
 
       // Set the authentication tag
       decipher.setAuthTag(authTag)
@@ -254,10 +230,7 @@ export class TokenManager implements ITokenManager {
     const cipher = crypto.createCipheriv(this.algorithm, this.encryptionKey, iv) as crypto.CipherGCM
 
     // Encrypt the data
-    const encrypted = Buffer.concat([
-      cipher.update(Buffer.from(JSON.stringify(tokens))),
-      cipher.final()
-    ])
+    const encrypted = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(tokens))), cipher.final()])
 
     // Get the authentication tag
     const authTag = cipher.getAuthTag()

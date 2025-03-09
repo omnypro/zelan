@@ -23,12 +23,7 @@ interface TimeSegment {
 /**
  * Visualizes events on a timeline showing frequency by time segment
  */
-export function EventTimeline({
-  events,
-  timeRange,
-  height = 100,
-  onTimeClick
-}: EventTimelineProps) {
+export function EventTimeline({ events, timeRange, height = 100, onTimeClick }: EventTimelineProps) {
   // Calculate time segments and event distribution
   const { timeSegments, maxCount, startTime, endTime } = useMemo(() => {
     if (!events.length) {

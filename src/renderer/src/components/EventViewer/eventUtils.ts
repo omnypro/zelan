@@ -26,10 +26,7 @@ interface GroupedEvents {
 /**
  * Groups events by the specified property
  */
-export function groupEvents(
-  events: BaseEvent[],
-  groupBy: GroupBy = GroupBy.CATEGORY
-): GroupedEvents {
+export function groupEvents(events: BaseEvent[], groupBy: GroupBy = GroupBy.CATEGORY): GroupedEvents {
   if (groupBy === GroupBy.NONE) {
     return { 'All Events': events }
   }

@@ -111,9 +111,7 @@ const Settings: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <label className="font-medium">Minimize to Tray</label>
-              <p className="text-sm text-gray-500">
-                Keep Zelan running in the system tray when closed
-              </p>
+              <p className="text-sm text-gray-500">Keep Zelan running in the system tray when closed</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -174,8 +172,7 @@ const Settings: React.FC = () => {
                 {recentChanges.map((change, index) => (
                   <li key={index} className="mb-2 pb-1 border-b border-gray-100 last:border-b-0">
                     <div>
-                      <strong>{change.key.replace('settings.', '')}</strong>:{' '}
-                      {JSON.stringify(change.value)}
+                      <strong>{change.key.replace('settings.', '')}</strong>: {JSON.stringify(change.value)}
                     </div>
                   </li>
                 ))}
@@ -196,8 +193,7 @@ const Settings: React.FC = () => {
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <h3 className="text-lg font-semibold mb-4">Service Adapters</h3>
         <p className="text-sm text-gray-500 mb-4">
-          Adapters connect to external services like OBS Studio or Twitch to receive and process
-          events.
+          Adapters connect to external services like OBS Studio or Twitch to receive and process events.
         </p>
 
         <div className="mb-6">

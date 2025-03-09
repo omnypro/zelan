@@ -24,43 +24,43 @@ import { Route as IndexImport } from './routes/index'
 const WebsocketRoute = WebsocketImport.update({
   id: '/websocket',
   path: '/websocket',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRoute
 } as any)
 
 const TrpcRoute = TrpcImport.update({
   id: '/trpc',
   path: '/trpc',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRoute
 } as any)
 
 const SettingsRoute = SettingsImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRoute
 } as any)
 
 const EventsRoute = EventsImport.update({
   id: '/events',
   path: '/events',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRoute
 } as any)
 
 const EnhancedEventsRoute = EnhancedEventsImport.update({
   id: '/enhanced-events',
   path: '/enhanced-events',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRoute
 } as any)
 
 const AuthRoute = AuthImport.update({
   id: '/auth',
   path: '/auth',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRoute
 } as any)
 
 const IndexRoute = IndexImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRoute
 } as any)
 
 // Populate the FileRoutesByPath interface
@@ -154,32 +154,10 @@ export interface FileRoutesById {
 
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/auth'
-    | '/enhanced-events'
-    | '/events'
-    | '/settings'
-    | '/trpc'
-    | '/websocket'
+  fullPaths: '/' | '/auth' | '/enhanced-events' | '/events' | '/settings' | '/trpc' | '/websocket'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/auth'
-    | '/enhanced-events'
-    | '/events'
-    | '/settings'
-    | '/trpc'
-    | '/websocket'
-  id:
-    | '__root__'
-    | '/'
-    | '/auth'
-    | '/enhanced-events'
-    | '/events'
-    | '/settings'
-    | '/trpc'
-    | '/websocket'
+  to: '/' | '/auth' | '/enhanced-events' | '/events' | '/settings' | '/trpc' | '/websocket'
+  id: '__root__' | '/' | '/auth' | '/enhanced-events' | '/events' | '/settings' | '/trpc' | '/websocket'
   fileRoutesById: FileRoutesById
 }
 
@@ -200,12 +178,10 @@ const rootRouteChildren: RootRouteChildren = {
   EventsRoute: EventsRoute,
   SettingsRoute: SettingsRoute,
   TrpcRoute: TrpcRoute,
-  WebsocketRoute: WebsocketRoute,
+  WebsocketRoute: WebsocketRoute
 }
 
-export const routeTree = rootRoute
-  ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+export const routeTree = rootRoute._addFileChildren(rootRouteChildren)._addFileTypes<FileRouteTypes>()
 
 /* ROUTE_MANIFEST_START
 {

@@ -133,13 +133,7 @@ export class ApplicationError extends Error {
     metadata?: ErrorMetadata,
     originalError?: Error
   ): ApplicationError {
-    return new ApplicationError(
-      message,
-      ErrorCategory.VALIDATION,
-      severity,
-      metadata,
-      originalError
-    )
+    return new ApplicationError(message, ErrorCategory.VALIDATION, severity, metadata, originalError)
   }
 
   /**

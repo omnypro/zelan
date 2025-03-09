@@ -15,8 +15,8 @@ export default function AuthDemo() {
       <div className="mt-8 p-4 bg-gray-100 rounded-lg max-w-4xl mx-auto">
         <h2 className="text-lg font-medium mb-2">How Authentication Works</h2>
         <p className="mb-2">
-          This demo showcases the authentication system using Twitch as an example. The system uses
-          the Device Code flow, which is recommended for desktop applications.
+          This demo showcases the authentication system using Twitch as an example. The system uses the Device Code
+          flow, which is recommended for desktop applications.
         </p>
 
         <h3 className="font-medium mt-4 mb-1">Authentication Flow:</h3>

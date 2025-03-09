@@ -33,13 +33,7 @@ export class TestAdapter extends BaseAdapter {
   private eventCount = 0
   private logger: ComponentLogger
 
-  constructor(
-    id: string,
-    name: string,
-    options: Partial<TestAdapterOptions>,
-    eventBus: EventBus,
-    enabled = true
-  ) {
+  constructor(id: string, name: string, options: Partial<TestAdapterOptions>, eventBus: EventBus, enabled = true) {
     super(id, 'test', name, { ...DEFAULT_OPTIONS, ...options }, eventBus, enabled)
     this.logger = getLoggingService().createLogger(`TestAdapter:${id}`)
   }
@@ -81,16 +75,12 @@ export class TestAdapter extends BaseAdapter {
 
       // Validate simulate errors if provided
       if ('simulateErrors' in config.options && !isBoolean(config.options.simulateErrors)) {
-        throw new Error(
-          `Invalid simulateErrors value: ${config.options.simulateErrors}, expected boolean`
-        )
+        throw new Error(`Invalid simulateErrors value: ${config.options.simulateErrors}, expected boolean`)
       }
 
       // Validate event types if provided
       if ('eventTypes' in config.options && !isStringArray(config.options.eventTypes)) {
-        throw new Error(
-          `Invalid eventTypes: ${config.options.eventTypes}, expected array of strings`
-        )
+        throw new Error(`Invalid eventTypes: ${config.options.eventTypes}, expected array of strings`)
       }
     }
   }
@@ -131,11 +121,7 @@ export class TestAdapter extends BaseAdapter {
 
       // Simulate random errors if enabled
       if (options.simulateErrors && Math.random() < 0.1) {
-        this.updateStatus(
-          AdapterStatus.ERROR,
-          'Simulated random error',
-          new Error('Test adapter simulated error')
-        )
+        this.updateStatus(AdapterStatus.ERROR, 'Simulated random error', new Error('Test adapter simulated error'))
 
         // Automatically reconnect after a brief delay
         setTimeout(() => {

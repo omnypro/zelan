@@ -5,7 +5,7 @@ export interface ReconnectionOptions {
   /** Maximum reconnection attempts before backing off to long interval */
   maxAttempts: number
   /** Initial delay before first retry (ms) */
-  initialDelay: number 
+  initialDelay: number
   /** Maximum delay between retries (ms) */
   maxDelay: number
   /** Long interval delay after max attempts (ms) */

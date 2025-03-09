@@ -53,11 +53,7 @@ const ConfigDebugger: React.FC = () => {
     <div className="p-4 bg-yellow-50 border border-yellow-300 rounded-lg">
       <h3 className="text-lg font-semibold mb-2">Reactive Config Debugger</h3>
 
-      {error && (
-        <div className="mb-2 p-2 bg-red-100 border border-red-300 rounded text-red-800 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <div className="mb-2 p-2 bg-red-100 border border-red-300 rounded text-red-800 text-sm">{error}</div>}
 
       <div className="flex items-center gap-2 mb-3">
         <input
@@ -74,9 +70,7 @@ const ConfigDebugger: React.FC = () => {
 
       <div className="text-sm">
         <div className="font-medium">Current saved value (reactive):</div>
-        <div className="p-2 bg-white border border-gray-300 rounded mt-1 break-all">
-          {savedValue}
-        </div>
+        <div className="p-2 bg-white border border-gray-300 rounded mt-1 break-all">{savedValue}</div>
       </div>
 
       <div className="mt-3">

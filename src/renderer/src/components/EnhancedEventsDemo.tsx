@@ -62,10 +62,7 @@ export function EnhancedEventsDemo() {
         <h1 className="text-3xl font-bold">Enhanced Event Viewer</h1>
 
         <div className="flex gap-3">
-          <button
-            onClick={generateEvents}
-            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded"
-          >
+          <button onClick={generateEvents} className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded">
             Generate Test Events
           </button>
         </div>

@@ -102,9 +102,8 @@ export const WebSocketDemo: React.FC = () => {
         <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-4">
           <p className="font-medium">tRPC WebSocket endpoints not available</p>
           <p className="text-sm mt-1">
-            The WebSocket server control functionality is not available. This may be because the
-            tRPC client is still initializing or the WebSocket endpoints are not properly
-            registered.
+            The WebSocket server control functionality is not available. This may be because the tRPC client is still
+            initializing or the WebSocket endpoints are not properly registered.
           </p>
           <button
             onClick={fetchStatus}
@@ -157,9 +156,7 @@ export const WebSocketDemo: React.FC = () => {
                   onClick={toggleServer}
                   disabled={loading}
                   className={`px-4 py-2 rounded-md text-white font-medium ${
-                    status.running
-                      ? 'bg-red-500 hover:bg-red-600'
-                      : 'bg-green-500 hover:bg-green-600'
+                    status.running ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'
                   } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   {loading ? (
@@ -207,13 +204,11 @@ export const WebSocketDemo: React.FC = () => {
                   <h3 className="text-sm font-medium mb-2">Connection Information</h3>
                   <div className="bg-gray-100 p-3 rounded font-mono text-sm">
                     <p>
-                      WebSocket URL:{' '}
-                      <span className="text-blue-600">ws://localhost:{status.port}</span>
+                      WebSocket URL: <span className="text-blue-600">ws://localhost:{status.port}</span>
                     </p>
                   </div>
                   <p className="text-xs text-gray-500 mt-2">
-                    See the WebSocket API documentation for more details on how to use the WebSocket
-                    server.
+                    See the WebSocket API documentation for more details on how to use the WebSocket server.
                   </p>
                 </div>
               )}

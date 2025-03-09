@@ -72,10 +72,7 @@ export function createEventFilterPredicate<T = unknown>(
  * @param criteria Filter criteria to apply
  * @returns Filtered array of events
  */
-export function filterEvents<T = unknown>(
-  events: BaseEvent<T>[],
-  criteria?: EventFilterCriteria<T>
-): BaseEvent<T>[] {
+export function filterEvents<T = unknown>(events: BaseEvent<T>[], criteria?: EventFilterCriteria<T>): BaseEvent<T>[] {
   if (!criteria || Object.keys(criteria).length === 0) return events
 
   const predicate = createEventFilterPredicate(criteria)
@@ -93,8 +90,7 @@ export function filterEventStream<T = unknown>(criteria?: EventFilterCriteria<T>
   }
 
   const predicate = createEventFilterPredicate<T>(criteria)
-  return <E extends BaseEvent<T>>(source$: Observable<E>) =>
-    source$.pipe(filter(predicate as (event: E) => boolean))
+  return <E extends BaseEvent<T>>(source$: Observable<E>) => source$.pipe(filter(predicate as (event: E) => boolean))
 }
 
 /**

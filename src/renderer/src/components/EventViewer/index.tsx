@@ -73,11 +73,7 @@ export function EventViewer({
   }, [filteredEvents, groupBy])
 
   // Test event publisher
-  const publishTestEvent = useEventPublisher(
-    EventCategory.TEST,
-    'event-viewer-test',
-    'event-viewer'
-  )
+  const publishTestEvent = useEventPublisher(EventCategory.TEST, 'event-viewer-test', 'event-viewer')
 
   // Generate test event
   const handleGenerateTestEvent = () => {
@@ -115,11 +111,7 @@ export function EventViewer({
         <div className="flex items-center gap-3">
           <div>
             <label className="text-sm mr-2">Group by:</label>
-            <select
-              value={groupBy}
-              onChange={handleGroupingChange}
-              className="p-1.5 text-sm border rounded"
-            >
+            <select value={groupBy} onChange={handleGroupingChange} className="p-1.5 text-sm border rounded">
               <option value={GroupBy.CATEGORY}>Category</option>
               <option value={GroupBy.TYPE}>Type</option>
               <option value={GroupBy.SOURCE}>Source</option>

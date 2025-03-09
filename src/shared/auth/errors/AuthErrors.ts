@@ -54,13 +54,7 @@ export class AuthError extends ApplicationError {
  */
 export class TokenExpiredError extends AuthError {
   constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
-    super(
-      `Token for ${provider} has expired`,
-      provider,
-      AuthErrorCode.TOKEN_EXPIRED,
-      metadata,
-      cause
-    )
+    super(`Token for ${provider} has expired`, provider, AuthErrorCode.TOKEN_EXPIRED, metadata, cause)
   }
 }
 
@@ -69,13 +63,7 @@ export class TokenExpiredError extends AuthError {
  */
 export class TokenInvalidError extends AuthError {
   constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
-    super(
-      `Token for ${provider} is invalid`,
-      provider,
-      AuthErrorCode.TOKEN_INVALID,
-      metadata,
-      cause
-    )
+    super(`Token for ${provider} is invalid`, provider, AuthErrorCode.TOKEN_INVALID, metadata, cause)
   }
 }
 
@@ -84,13 +72,7 @@ export class TokenInvalidError extends AuthError {
  */
 export class TokenRevokedError extends AuthError {
   constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
-    super(
-      `Token for ${provider} has been revoked`,
-      provider,
-      AuthErrorCode.TOKEN_REVOKED,
-      metadata,
-      cause
-    )
+    super(`Token for ${provider} has been revoked`, provider, AuthErrorCode.TOKEN_REVOKED, metadata, cause)
   }
 }
 
@@ -129,13 +111,7 @@ export class DeviceCodeTimeoutError extends AuthError {
  */
 export class RefreshFailedError extends AuthError {
   constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
-    super(
-      `Failed to refresh token for ${provider}`,
-      provider,
-      AuthErrorCode.REFRESH_FAILED,
-      metadata,
-      cause
-    )
+    super(`Failed to refresh token for ${provider}`, provider, AuthErrorCode.REFRESH_FAILED, metadata, cause)
   }
 }
 
@@ -143,12 +119,7 @@ export class RefreshFailedError extends AuthError {
  * Error for token storage issues
  */
 export class StorageError extends AuthError {
-  constructor(
-    provider: AuthProvider,
-    operation: string,
-    metadata?: Record<string, unknown>,
-    cause?: Error
-  ) {
+  constructor(provider: AuthProvider, operation: string, metadata?: Record<string, unknown>, cause?: Error) {
     super(
       `Token storage error for ${provider} during ${operation}`,
       provider,

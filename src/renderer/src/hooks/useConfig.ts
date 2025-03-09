@@ -92,9 +92,7 @@ export function useConfigChanges(key?: string) {
       setChanges((prev) => [event, ...prev].slice(0, 10))
     }
 
-    const unsubscribe = key
-      ? window.api.config.changesFor$(key, callback)
-      : window.api.config.changes$(callback)
+    const unsubscribe = key ? window.api.config.changesFor$(key, callback) : window.api.config.changes$(callback)
 
     return () => {
       unsubscribe()

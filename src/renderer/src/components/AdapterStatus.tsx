@@ -75,8 +75,7 @@ export const AdapterStatus: React.FC = () => {
     let displayStatus = ''
 
     // Handle when status is an object rather than enum string
-    const statusValue =
-      typeof status === 'object' && status !== null ? JSON.stringify(status) : String(status)
+    const statusValue = typeof status === 'object' && status !== null ? JSON.stringify(status) : String(status)
 
     switch (statusValue) {
       case AdapterStatusEnum.CONNECTED:
@@ -104,11 +103,7 @@ export const AdapterStatus: React.FC = () => {
         displayStatus = 'Unknown'
     }
 
-    return (
-      <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${color}`}>
-        {displayStatus}
-      </span>
-    )
+    return <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${color}`}>{displayStatus}</span>
   }
 
   return (

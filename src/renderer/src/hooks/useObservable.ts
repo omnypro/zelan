@@ -8,10 +8,7 @@ import { Observable } from 'rxjs'
  * @param initialValue Optional initial value
  * @returns The current value of the observable
  */
-export function useObservable<T>(
-  observable$: Observable<T> | null | undefined,
-  initialValue?: T
-): T {
+export function useObservable<T>(observable$: Observable<T> | null | undefined, initialValue?: T): T {
   const [value, setValue] = useState<T>(initialValue as T)
 
   useEffect(() => {

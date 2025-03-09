@@ -13,12 +13,7 @@ export class TwitchAdapterFactory extends BaseAdapterFactory<TwitchAdapter> {
     this.eventBus = eventBus
   }
 
-  create(
-    id: string,
-    name: string,
-    options: Partial<TwitchAdapterOptions>,
-    eventBus?: EventBus
-  ): TwitchAdapter {
+  create(id: string, name: string, options: Partial<TwitchAdapterOptions>, eventBus?: EventBus): TwitchAdapter {
     // Use the provided eventBus or the one from constructor
     const bus = eventBus || this.eventBus
     return new TwitchAdapter(id, name, options, bus, true)

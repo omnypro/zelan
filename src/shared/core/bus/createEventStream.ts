@@ -15,11 +15,7 @@ export type EventStream<T> = Observable<BaseEvent<T>>
  * @param type Optional event type to filter by
  * @returns Observable of filtered events
  */
-export function createEventStream<T>(
-  eventBus: EventBus,
-  category: EventCategory,
-  type?: string
-): EventStream<T> {
+export function createEventStream<T>(eventBus: EventBus, category: EventCategory, type?: string): EventStream<T> {
   if (type) {
     return eventBus.getEventsByCategoryAndType<T>(category, type)
   } else {
@@ -33,9 +29,6 @@ export function createEventStream<T>(
  * @param criteria Filter criteria to apply
  * @returns Observable of filtered events
  */
-export function createFilteredEventStream<T>(
-  eventBus: EventBus,
-  criteria: EventFilterCriteria<T>
-): EventStream<T> {
+export function createFilteredEventStream<T>(eventBus: EventBus, criteria: EventFilterCriteria<T>): EventStream<T> {
   return eventBus.getFilteredEvents$<T>(criteria)
 }

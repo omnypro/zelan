@@ -243,14 +243,7 @@ export abstract class BaseAdapter implements ServiceAdapter {
 
     // Publish status event
     this.eventBus.publish(
-      createEvent(
-        EventCategory.ADAPTER,
-        AdapterEventType.STATUS,
-        statusInfo,
-        this.id,
-        this.name,
-        this.type
-      )
+      createEvent(EventCategory.ADAPTER, AdapterEventType.STATUS, statusInfo, this.id, this.name, this.type)
     )
 
     // Publish error event if there's an error

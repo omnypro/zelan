@@ -207,9 +207,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 max={30000}
                 step={500}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                How often test events will be generated (in milliseconds)
-              </p>
+              <p className="text-xs text-gray-500 mt-1">How often test events will be generated (in milliseconds)</p>
             </div>
 
             <div className="flex items-center">
@@ -245,9 +243,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 max={300000}
                 step={30000}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                How often to poll for channel information (in milliseconds)
-              </p>
+              <p className="text-xs text-gray-500 mt-1">How often to poll for channel information (in milliseconds)</p>
             </div>
 
             <div className="flex items-center">
@@ -259,10 +255,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                 disabled={isLoading}
               />
-              <label
-                htmlFor="twitchIncludeSubscriptions"
-                className="ml-2 block text-sm text-gray-900"
-              >
+              <label htmlFor="twitchIncludeSubscriptions" className="ml-2 block text-sm text-gray-900">
                 Include subscription data in polls (requires additional scopes)
               </label>
             </div>
@@ -270,8 +263,8 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
             <div className="mt-4 p-3 bg-blue-50 rounded text-sm text-blue-800 border border-blue-200">
               <p className="font-medium">Note:</p>
               <p>
-                You must authenticate with Twitch before creating this adapter. The adapter will use
-                the authenticated user's channel.
+                You must authenticate with Twitch before creating this adapter. The adapter will use the authenticated
+                user's channel.
               </p>
             </div>
           </div>

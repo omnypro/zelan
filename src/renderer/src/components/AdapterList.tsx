@@ -66,17 +66,15 @@ const AdapterList: React.FC<AdapterListProps> = ({
 
   const getStatusClass = (status?: AdapterStatus) => {
     // Extract the status value from either string or object
-    const statusValue = typeof status === 'object' && status !== null 
-      ? status.toString() 
-      : status
-    
+    const statusValue = typeof status === 'object' && status !== null ? status.toString() : status
+
     // More specific string based matching
     if (statusValue === AdapterStatus.CONNECTED || statusValue === 'connected') {
       return 'bg-green-100 text-green-800'
     } else if (
-      statusValue === AdapterStatus.CONNECTING || 
+      statusValue === AdapterStatus.CONNECTING ||
       statusValue === 'connecting' ||
-      statusValue === AdapterStatus.RECONNECTING || 
+      statusValue === AdapterStatus.RECONNECTING ||
       statusValue === 'reconnecting'
     ) {
       return 'bg-yellow-100 text-yellow-800'
@@ -110,57 +108,58 @@ const AdapterList: React.FC<AdapterListProps> = ({
               <div className="mb-3 sm:mb-0">
                 <div className="flex items-center">
                   <span className="font-medium text-lg">{adapter.name}</span>
-                  <span
-                    className={`ml-2 text-xs px-2 py-1 rounded ${getStatusClass(adapter.status?.status)}`}
-                  >
+                  <span className={`ml-2 text-xs px-2 py-1 rounded ${getStatusClass(adapter.status?.status)}`}>
                     {(() => {
                       // Extract status value for display
-                      const status = adapter.status?.status;
-                      if (!status) return 'Unknown';
-                      
+                      const status = adapter.status?.status
+                      if (!status) return 'Unknown'
+
                       // Map status values to friendly names
                       if (typeof status === 'string') {
                         switch (status) {
-                          case 'connected': return 'Connected';
-                          case 'connecting': return 'Connecting';
-                          case 'reconnecting': return 'Reconnecting';
-                          case 'error': return 'Error';
-                          case 'disconnected': return 'Disconnected';
-                          default: return status.charAt(0).toUpperCase() + status.slice(1);
+                          case 'connected':
+                            return 'Connected'
+                          case 'connecting':
+                            return 'Connecting'
+                          case 'reconnecting':
+                            return 'Reconnecting'
+                          case 'error':
+                            return 'Error'
+                          case 'disconnected':
+                            return 'Disconnected'
+                          default:
+                            return status.charAt(0).toUpperCase() + status.slice(1)
                         }
                       } else if (typeof status === 'object') {
-                        return String(status);
+                        return String(status)
                       }
-                      
-                      return 'Unknown';
+
+                      return 'Unknown'
                     })()}
                   </span>
-                  <span className="ml-2 text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded">
-                    {adapter.type}
-                  </span>
+                  <span className="ml-2 text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded">{adapter.type}</span>
                 </div>
-                {adapter.status?.message && (
-                  <p className="text-sm text-gray-500 mt-1">{adapter.status.message}</p>
-                )}
+                {adapter.status?.message && <p className="text-sm text-gray-500 mt-1">{adapter.status.message}</p>}
               </div>
 
               <div className="flex space-x-2">
                 {(() => {
                   // Extract status for comparison
-                  const statusStr = typeof adapter.status?.status === 'object' 
-                    ? (adapter.status?.status as any)?.status || '' 
-                    : String(adapter.status?.status || '');
-                  
+                  const statusStr =
+                    typeof adapter.status?.status === 'object'
+                      ? (adapter.status?.status as any)?.status || ''
+                      : String(adapter.status?.status || '')
+
                   // Check if connected
-                  const isConnected = statusStr === AdapterStatus.CONNECTED || statusStr === 'connected';
-                  
+                  const isConnected = statusStr === AdapterStatus.CONNECTED || statusStr === 'connected'
+
                   // Check if connecting or reconnecting
-                  const isConnecting = 
-                    statusStr === AdapterStatus.CONNECTING || 
+                  const isConnecting =
+                    statusStr === AdapterStatus.CONNECTING ||
                     statusStr === 'connecting' ||
-                    statusStr === AdapterStatus.RECONNECTING || 
-                    statusStr === 'reconnecting';
-                  
+                    statusStr === AdapterStatus.RECONNECTING ||
+                    statusStr === 'reconnecting'
+
                   return isConnected ? (
                     <button
                       onClick={() => handleStopAdapter(adapter.id)}
@@ -175,13 +174,9 @@ const AdapterList: React.FC<AdapterListProps> = ({
                       disabled={loadingAdapterId === adapter.id || isConnecting}
                       className="px-3 py-1 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
                     >
-                      {loadingAdapterId === adapter.id
-                        ? 'Starting...'
-                        : isConnecting
-                          ? 'Connecting...'
-                          : 'Start'}
+                      {loadingAdapterId === adapter.id ? 'Starting...' : isConnecting ? 'Connecting...' : 'Start'}
                     </button>
-                  );
+                  )
                 })()}
 
                 <button

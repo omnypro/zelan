@@ -46,11 +46,7 @@ try {
       process.env[trimmedKey] = value
 
       // Don't log sensitive values
-      if (
-        trimmedKey.includes('SECRET') ||
-        trimmedKey.includes('KEY') ||
-        trimmedKey.includes('TOKEN')
-      ) {
+      if (trimmedKey.includes('SECRET') || trimmedKey.includes('KEY') || trimmedKey.includes('TOKEN')) {
         loadedVars[trimmedKey] = '******'
       } else {
         loadedVars[trimmedKey] = value
@@ -243,7 +239,7 @@ async function initializeServices(): Promise<void> {
     // Initialize adapter manager
     adapterManager = new AdapterManager(adapterRegistry, mainEventBus, configStore)
     await adapterManager.initialize()
-    
+
     // Initialize reconnection manager
     reconnectionManager = new ReconnectionManager(adapterManager, mainEventBus, configStore)
     logger.info('Reconnection manager initialized')
@@ -456,16 +452,14 @@ app.on('before-quit', async (event) => {
   ;(app as any).isCleaningUp = true
 
   // Publish shutdown event
-  mainEventBus?.publish(
-    createSystemEvent(SystemEventType.SHUTDOWN, 'Zelan application shutting down', 'info')
-  )
+  mainEventBus?.publish(createSystemEvent(SystemEventType.SHUTDOWN, 'Zelan application shutting down', 'info'))
 
   try {
     // Clean up services
     if (adapterManager) {
       await adapterManager.dispose()
     }
-    
+
     if (reconnectionManager) {
       reconnectionManager.dispose()
     }

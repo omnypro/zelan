@@ -13,8 +13,7 @@ interface ComponentLogger {
 }
 
 // Dynamic import for main process
-let getLoggingService: () => { createLogger: (component: string) => ComponentLogger } | null = () =>
-  null
+let getLoggingService: () => { createLogger: (component: string) => ComponentLogger } | null = () => null
 
 // Only create a console logger when in web context
 // In the main process, we'll configure it properly during initialization

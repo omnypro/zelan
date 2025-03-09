@@ -89,10 +89,7 @@ export class MainEventBus implements EventBus {
   /**
    * Get events filtered by category and type
    */
-  getEventsByCategoryAndType$<T = unknown>(
-    category: EventCategory,
-    type: string
-  ): Observable<BaseEvent<T>> {
+  getEventsByCategoryAndType$<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>> {
     return this.getFilteredEvents$<T>({ category, type })
   }
 
@@ -113,10 +110,7 @@ export class MainEventBus implements EventBus {
   /**
    * Get events filtered by category and type (alias for getEventsByCategoryAndType$)
    */
-  getEventsByCategoryAndType<T = unknown>(
-    category: EventCategory,
-    type: string
-  ): Observable<BaseEvent<T>> {
+  getEventsByCategoryAndType<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>> {
     return this.getEventsByCategoryAndType$<T>(category, type)
   }
 

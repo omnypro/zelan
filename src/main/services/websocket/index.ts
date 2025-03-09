@@ -126,12 +126,9 @@ export class WebSocketService {
 
       // Publish started event
       this.eventBus.publish(
-        createSystemEvent(
-          SystemEventType.INFO,
-          `WebSocket server started on port ${this.port}`,
-          'info',
-          { port: this.port }
-        )
+        createSystemEvent(SystemEventType.INFO, `WebSocket server started on port ${this.port}`, 'info', {
+          port: this.port
+        })
       )
 
       return true
@@ -174,9 +171,7 @@ export class WebSocketService {
     this.isRunning = false
 
     // Publish stopped event
-    this.eventBus.publish(
-      createSystemEvent(SystemEventType.INFO, 'WebSocket server stopped', 'info')
-    )
+    this.eventBus.publish(createSystemEvent(SystemEventType.INFO, 'WebSocket server stopped', 'info'))
   }
 
   /**

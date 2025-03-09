@@ -236,10 +236,7 @@ export class WebSocketServer {
       try {
         if (client.readyState === WebSocket.OPEN) {
           this.sendToClient(client, event)
-        } else if (
-          client.readyState === WebSocket.CLOSED ||
-          client.readyState === WebSocket.CLOSING
-        ) {
+        } else if (client.readyState === WebSocket.CLOSED || client.readyState === WebSocket.CLOSING) {
           deadClients.push(client)
         }
       } catch (e) {

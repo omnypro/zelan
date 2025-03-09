@@ -29,10 +29,7 @@ export interface EventBus {
   /**
    * Get events filtered by category and type
    */
-  getEventsByCategoryAndType$<T = unknown>(
-    category: EventCategory,
-    type: string
-  ): Observable<BaseEvent<T>>
+  getEventsByCategoryAndType$<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>>
 
   /**
    * Get events filtered by category (with payload type param)
@@ -47,10 +44,7 @@ export interface EventBus {
   /**
    * Get events filtered by category and type (with payload type param)
    */
-  getEventsByCategoryAndType<T = unknown>(
-    category: EventCategory,
-    type: string
-  ): Observable<BaseEvent<T>>
+  getEventsByCategoryAndType<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>>
 
   /**
    * Publish an event to all subscribers
@@ -95,10 +89,7 @@ export class BaseEventBus implements EventBus {
   /**
    * Get events filtered by category and type
    */
-  getEventsByCategoryAndType$<T = unknown>(
-    category: EventCategory,
-    type: string
-  ): Observable<BaseEvent<T>> {
+  getEventsByCategoryAndType$<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>> {
     return this.getFilteredEvents$<T>({ category, type })
   }
 
@@ -119,10 +110,7 @@ export class BaseEventBus implements EventBus {
   /**
    * Get events filtered by category and type (with payload type param)
    */
-  getEventsByCategoryAndType<T = unknown>(
-    category: EventCategory,
-    type: string
-  ): Observable<BaseEvent<T>> {
+  getEventsByCategoryAndType<T = unknown>(category: EventCategory, type: string): Observable<BaseEvent<T>> {
     return this.getEventsByCategoryAndType$<T>(category, type)
   }
 

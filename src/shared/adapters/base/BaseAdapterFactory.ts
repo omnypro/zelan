@@ -5,9 +5,7 @@ import { EventBus } from '@s/core/bus/EventBus'
 /**
  * Abstract base class for adapter factories
  */
-export abstract class BaseAdapterFactory<T extends ServiceAdapter = ServiceAdapter>
-  implements AdapterFactory<T>
-{
+export abstract class BaseAdapterFactory<T extends ServiceAdapter = ServiceAdapter> implements AdapterFactory<T> {
   readonly type: string
 
   constructor(type: string) {

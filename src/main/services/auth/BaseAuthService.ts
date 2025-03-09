@@ -175,11 +175,7 @@ export abstract class BaseAuthService implements AuthService {
       getErrorService().reportError(
         error instanceof AuthError
           ? error
-          : new RefreshFailedError(
-              provider,
-              { originalError: error },
-              error instanceof Error ? error : undefined
-            )
+          : new RefreshFailedError(provider, { originalError: error }, error instanceof Error ? error : undefined)
       )
 
       // Publish auth error event
@@ -336,10 +332,7 @@ export abstract class BaseAuthService implements AuthService {
   /**
    * Update the authentication status for a provider
    */
-  protected updateStatus(
-    provider: AuthProvider,
-    update: Partial<Omit<AuthStatus, 'provider' | 'lastUpdated'>>
-  ): void {
+  protected updateStatus(provider: AuthProvider, update: Partial<Omit<AuthStatus, 'provider' | 'lastUpdated'>>): void {
     // Get the current status
     const statusSubject = this.getStatusSubject(provider)
     const currentStatus = statusSubject.getValue()
@@ -365,11 +358,7 @@ export abstract class BaseAuthService implements AuthService {
   /**
    * Publish an authentication event
    */
-  protected publishAuthEvent(
-    provider: AuthProvider,
-    type: string,
-    payload: Record<string, unknown> = {}
-  ): void {
+  protected publishAuthEvent(provider: AuthProvider, type: string, payload: Record<string, unknown> = {}): void {
     this.eventBus.publish(
       createEvent(
         EventCategory.SERVICE, // Using SERVICE category for auth events
@@ -465,18 +454,12 @@ export abstract class BaseAuthService implements AuthService {
   /**
    * Abstract method to refresh a token
    */
-  protected abstract refreshTokenImplementation(
-    provider: AuthProvider,
-    token: AuthToken
-  ): Promise<AuthResult>
+  protected abstract refreshTokenImplementation(provider: AuthProvider, token: AuthToken): Promise<AuthResult>
 
   /**
    * Abstract method to revoke a token
    */
-  protected abstract revokeTokenImplementation(
-    provider: AuthProvider,
-    token: AuthToken
-  ): Promise<void>
+  protected abstract revokeTokenImplementation(provider: AuthProvider, token: AuthToken): Promise<void>
 
   /**
    * Cleanup resources

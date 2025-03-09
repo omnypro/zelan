@@ -7,11 +7,7 @@ import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
 import { AdapterConfig } from '@s/adapters/interfaces/ServiceAdapter'
 import { isString, isBoolean, createObjectValidator } from '@s/utils/type-guards'
 import { ApiClient } from '@twurple/api'
-import {
-  AuthProvider as TwurpleAuthProvider,
-  AccessTokenMaybeWithUserId,
-  AccessTokenWithUserId
-} from '@twurple/auth'
+import { AuthProvider as TwurpleAuthProvider, AccessTokenMaybeWithUserId, AccessTokenWithUserId } from '@twurple/auth'
 import { EventSubWsListener } from '@twurple/eventsub-ws'
 import { getTwitchAuthService } from '@m/services/auth/TwitchAuthService'
 import { AuthProvider } from '@s/auth/interfaces'
@@ -116,12 +112,7 @@ class CustomTwitchAuthProvider implements TwurpleAuthProvider {
   /**
    * Update the underlying token
    */
-  updateToken(
-    accessToken: string,
-    refreshToken: string,
-    scopes: string[],
-    expiresIn: number
-  ): void {
+  updateToken(accessToken: string, refreshToken: string, scopes: string[], expiresIn: number): void {
     // Clear any existing refresh timer
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer)
@@ -205,13 +196,7 @@ export class TwitchAdapter extends BaseAdapter {
   private authSubscription?: { unsubscribe: () => void }
   private logger: ComponentLogger
 
-  constructor(
-    id: string,
-    name: string,
-    options: Partial<TwitchAdapterOptions>,
-    eventBus: EventBus,
-    enabled = true
-  ) {
+  constructor(id: string, name: string, options: Partial<TwitchAdapterOptions>, eventBus: EventBus, enabled = true) {
     super(id, 'twitch', name, { ...DEFAULT_OPTIONS, ...options }, eventBus, enabled)
 
     // Initialize component logger
@@ -356,9 +341,7 @@ export class TwitchAdapter extends BaseAdapter {
 
       if (!this.userId) {
         // Fallback - get the user ID from the API
-        const currentUser = await this.apiClient.users.getUserByName(
-          this.getTypedOptions().channelName
-        )
+        const currentUser = await this.apiClient.users.getUserByName(this.getTypedOptions().channelName)
         if (currentUser) {
           this.userId = currentUser.id
         } else {
@@ -485,10 +468,7 @@ export class TwitchAdapter extends BaseAdapter {
       /**
        * Helper to make Twitch API calls safely without causing client credentials errors
        */
-      const callTwitchApiSafely = async <T>(
-        apiCall: () => Promise<T>,
-        errorMessage: string
-      ): Promise<T | null> => {
+      const callTwitchApiSafely = async <T>(apiCall: () => Promise<T>, errorMessage: string): Promise<T | null> => {
         try {
           return await apiCall()
         } catch (err: any) {
@@ -716,9 +696,7 @@ export class TwitchAdapter extends BaseAdapter {
         })
       }
     } else {
-      this.logger.warn(
-        'Chat message subscription not available. This might require additional scopes.'
-      )
+      this.logger.warn('Chat message subscription not available. This might require additional scopes.')
     }
 
     // Subscribe to cheer events (bits)
@@ -764,9 +742,7 @@ export class TwitchAdapter extends BaseAdapter {
         })
       }
     } else {
-      this.logger.warn(
-        'Subscription event handler not available. This might require additional scopes.'
-      )
+      this.logger.warn('Subscription event handler not available. This might require additional scopes.')
     }
 
     // Subscribe to raid events
@@ -819,13 +795,8 @@ export class TwitchAdapter extends BaseAdapter {
       }
 
       // Validate includeSubscriptions if provided
-      if (
-        'includeSubscriptions' in config.options &&
-        !isBoolean(config.options.includeSubscriptions)
-      ) {
-        throw new Error(
-          `Invalid includeSubscriptions value: ${config.options.includeSubscriptions}, expected boolean`
-        )
+      if ('includeSubscriptions' in config.options && !isBoolean(config.options.includeSubscriptions)) {
+        throw new Error(`Invalid includeSubscriptions value: ${config.options.includeSubscriptions}, expected boolean`)
       }
     }
   }
@@ -836,8 +807,7 @@ export class TwitchAdapter extends BaseAdapter {
   private static isTwitchAdapterOptions = createObjectValidator<TwitchAdapterOptions>({
     channelName: isString,
     includeSubscriptions: isBoolean,
-    eventsToTrack: (value): value is string[] =>
-      Array.isArray(value) && value.every((item) => typeof item === 'string')
+    eventsToTrack: (value): value is string[] => Array.isArray(value) && value.every((item) => typeof item === 'string')
   })
 
   /**

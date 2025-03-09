@@ -46,10 +46,9 @@ const AdapterStatusCard: React.FC<AdapterStatusCardProps> = ({ adapterId }) => {
   // Handle manual reconnection
   const handleReconnect = async () => {
     // Extract status value, handling both string and object formats
-    const statusValue = typeof adapter.status === 'object' && adapter.status !== null
-      ? adapter.status.status
-      : adapter.status
-      
+    const statusValue =
+      typeof adapter.status === 'object' && adapter.status !== null ? adapter.status.status : adapter.status
+
     if (statusValue === 'disconnected' || statusValue === 'error') {
       await startAdapter()
     }

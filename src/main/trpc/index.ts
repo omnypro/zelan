@@ -5,11 +5,7 @@ import { AdapterManager, ReconnectionManager } from '@m/services/adapters'
 import { AuthService } from '@m/services/auth'
 import { Subject } from 'rxjs'
 import { filter } from 'rxjs/operators'
-import {
-  createSubscriptionHandler,
-  toSerializableError,
-  createSerializableAdapter
-} from '@s/utils/rx-trpc'
+import { createSubscriptionHandler, toSerializableError, createSerializableAdapter } from '@s/utils/rx-trpc'
 
 // Import WebSocketService
 import { WebSocketService } from '@m/services/websocket'
@@ -434,9 +430,7 @@ export function setupTRPCServer(
                     id,
                     result: {
                       type: authEvent.type,
-                      ...(typeof authEvent.payload === 'object' && authEvent.payload !== null
-                        ? authEvent.payload
-                        : {})
+                      ...(typeof authEvent.payload === 'object' && authEvent.payload !== null ? authEvent.payload : {})
                     },
                     type: 'data'
                   })

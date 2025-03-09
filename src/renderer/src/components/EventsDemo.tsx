@@ -68,9 +68,7 @@ export const EventsDemo: React.FC = () => {
             <ul className="divide-y divide-gray-200">
               {systemEvents.map((event) => (
                 <li key={event.id} className="p-3 hover:bg-gray-50">
-                  <div className="text-xs text-gray-500">
-                    {new Date(event.timestamp).toLocaleTimeString()}
-                  </div>
+                  <div className="text-xs text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</div>
                   <div className="text-sm">
                     {event.payload && typeof event.payload === 'object' ? (
                       event.payload.message ? (
@@ -86,9 +84,7 @@ export const EventsDemo: React.FC = () => {
                   </div>
                 </li>
               ))}
-              {systemEvents.length === 0 && (
-                <li className="p-3 text-sm text-gray-500">No events yet</li>
-              )}
+              {systemEvents.length === 0 && <li className="p-3 text-sm text-gray-500">No events yet</li>}
             </ul>
           </div>
         </div>
@@ -117,9 +113,7 @@ export const EventsDemo: React.FC = () => {
                   </div>
                 </li>
               ))}
-              {adapterEvents.length === 0 && (
-                <li className="p-3 text-sm text-gray-500">No events yet</li>
-              )}
+              {adapterEvents.length === 0 && <li className="p-3 text-sm text-gray-500">No events yet</li>}
             </ul>
           </div>
         </div>

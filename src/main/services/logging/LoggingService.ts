@@ -25,10 +25,7 @@ const consoleFormat = format.combine(
 )
 
 // Define custom format for file output (JSON)
-const fileFormat = format.combine(
-  format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }),
-  format.json()
-)
+const fileFormat = format.combine(format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }), format.json())
 
 /**
  * Logging service for the application

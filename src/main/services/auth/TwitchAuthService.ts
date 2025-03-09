@@ -2,14 +2,7 @@ import { EventBus } from '@s/core/bus/EventBus'
 import { BaseAuthService } from './BaseAuthService'
 import { getErrorService } from '@m/services/errors'
 import { getLoggingService } from '@m/services/logging'
-import {
-  AuthProvider,
-  AuthOptions,
-  AuthResult,
-  AuthToken,
-  DeviceCodeResponse,
-  AuthState
-} from '@s/auth/interfaces'
+import { AuthProvider, AuthOptions, AuthResult, AuthToken, DeviceCodeResponse, AuthState } from '@s/auth/interfaces'
 import {
   AuthError,
   AuthErrorCode,
@@ -240,10 +233,7 @@ export class TwitchAuthService extends BaseAuthService {
    * Implementation of Device Code Flow for Twitch API since Twurple
    * doesn't natively support it.
    */
-  private async pollForAccessToken(
-    deviceCode: DeviceCodeResponse,
-    options: AuthOptions
-  ): Promise<AccessToken> {
+  private async pollForAccessToken(deviceCode: DeviceCodeResponse, options: AuthOptions): Promise<AccessToken> {
     const { clientId } = options
     const startTime = Date.now()
     const timeout = deviceCode.expires_in * 1000
@@ -332,10 +322,9 @@ export class TwitchAuthService extends BaseAuthService {
             }
 
             if (data.error === 'slow_down') {
-              this.logger.info(
-                'Received slow_down error (error field), increasing polling interval',
-                { newInterval: pollInterval + 5000 }
-              )
+              this.logger.info('Received slow_down error (error field), increasing polling interval', {
+                newInterval: pollInterval + 5000
+              })
               pollInterval += 5000
               continue
             }
@@ -352,11 +341,7 @@ export class TwitchAuthService extends BaseAuthService {
             }
 
             // Other errors
-            const errorMessage =
-              data.message ||
-              data.error_description ||
-              data.error ||
-              `HTTP error ${response.status}`
+            const errorMessage = data.message || data.error_description || data.error || `HTTP error ${response.status}`
             this.logger.error('Token exchange error', { error: errorMessage })
             throw new Error(errorMessage)
           }
@@ -385,8 +370,7 @@ export class TwitchAuthService extends BaseAuthService {
           this.logger.error('Fetch error during token exchange', {
             error: fetchError instanceof Error ? fetchError.message : String(fetchError)
           })
-          const errorMessage =
-            fetchError instanceof Error ? fetchError.message : 'Unknown fetch error'
+          const errorMessage = fetchError instanceof Error ? fetchError.message : 'Unknown fetch error'
           throw new Error(`Fetch error: ${errorMessage}`)
         }
       } catch (error) {
@@ -410,9 +394,7 @@ export class TwitchAuthService extends BaseAuthService {
   /**
    * Get user information from Twitch API
    */
-  private async getUserInfo(token: {
-    accessToken: string
-  }): Promise<{ id: string; login: string }> {
+  private async getUserInfo(token: { accessToken: string }): Promise<{ id: string; login: string }> {
     try {
       const response = await fetch('https://api.twitch.tv/helix/users', {
         headers: {
@@ -452,10 +434,7 @@ export class TwitchAuthService extends BaseAuthService {
   /**
    * Refresh a Twitch auth token using Twurple's RefreshingAuthProvider
    */
-  protected async refreshTokenImplementation(
-    provider: AuthProvider,
-    token: AuthToken
-  ): Promise<AuthResult> {
+  protected async refreshTokenImplementation(provider: AuthProvider, token: AuthToken): Promise<AuthResult> {
     if (provider !== AuthProvider.TWITCH) {
       throw new RefreshFailedError(provider, {
         reason: `Provider ${provider} is not supported by TwitchAuthService`
@@ -515,10 +494,7 @@ export class TwitchAuthService extends BaseAuthService {
   /**
    * Revoke a Twitch auth token using Twurple's revokeToken function
    */
-  protected async revokeTokenImplementation(
-    provider: AuthProvider,
-    token: AuthToken
-  ): Promise<void> {
+  protected async revokeTokenImplementation(provider: AuthProvider, token: AuthToken): Promise<void> {
     if (provider !== AuthProvider.TWITCH) {
       throw new AuthError(
         `Provider ${provider} is not supported by TwitchAuthService`,

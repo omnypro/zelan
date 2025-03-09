@@ -5,7 +5,7 @@ import electronLogo from '../assets/electron.svg'
 function NavLink({ to, label }: { to: string; label: string }) {
   const matchRoute = useMatchRoute()
   const isActive = matchRoute({ to, fuzzy: to !== '/' })
-  
+
   return (
     <li>
       <Link
@@ -51,8 +51,8 @@ function Layout() {
 
           <div className="mt-auto p-4 text-xs text-gray-400">
             <p>
-              <a 
-                className="text-blue-400 hover:underline cursor-pointer" 
+              <a
+                className="text-blue-400 hover:underline cursor-pointer"
                 onClick={() => window.electron.ipcRenderer.send('ping')}
               >
                 Send IPC Ping

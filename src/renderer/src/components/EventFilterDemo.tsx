@@ -65,10 +65,7 @@ export default function EventFilterDemo() {
     <div className="p-4 space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Event Filter Demo</h2>
-        <button
-          onClick={handleTestEvent}
-          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
-        >
+        <button onClick={handleTestEvent} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
           Generate Test Event
         </button>
       </div>
@@ -117,10 +114,7 @@ export default function EventFilterDemo() {
           </div>
 
           <div>
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-blue-500 text-sm"
-            >
+            <button onClick={() => setShowAdvanced(!showAdvanced)} className="text-blue-500 text-sm">
               {showAdvanced ? 'Hide' : 'Show'} Advanced Filters
             </button>
           </div>
@@ -161,18 +155,12 @@ export default function EventFilterDemo() {
 
           <div className="h-96 overflow-auto border rounded p-2">
             {filteredEvents.length === 0 ? (
-              <div className="text-gray-500 p-4 text-center">
-                No events match the current filters
-              </div>
+              <div className="text-gray-500 p-4 text-center">No events match the current filters</div>
             ) : (
               filteredEvents.map((event) => (
                 <div key={event.id} className="p-2 mb-2 border-b">
-                  <div className="text-sm font-medium">
-                    {new Date(event.timestamp).toLocaleTimeString()}
-                  </div>
-                  <pre className="text-xs mt-1 overflow-auto max-h-32">
-                    {JSON.stringify(event.payload, null, 2)}
-                  </pre>
+                  <div className="text-sm font-medium">{new Date(event.timestamp).toLocaleTimeString()}</div>
+                  <pre className="text-xs mt-1 overflow-auto max-h-32">{JSON.stringify(event.payload, null, 2)}</pre>
                 </div>
               ))
             )}

@@ -13,12 +13,7 @@ export class ObsAdapterFactory extends BaseAdapterFactory<ObsAdapter> {
   /**
    * Create a new OBS adapter
    */
-  create(
-    id: string,
-    name: string,
-    options: Partial<ObsAdapterOptions>,
-    eventBus: EventBus
-  ): ObsAdapter {
+  create(id: string, name: string, options: Partial<ObsAdapterOptions>, eventBus: EventBus): ObsAdapter {
     return new ObsAdapter(id, name, options, eventBus)
   }
 }

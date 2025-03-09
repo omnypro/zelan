@@ -13,7 +13,7 @@ export interface ReconnectionOptions {
   /** Maximum reconnection attempts before backing off to long interval */
   maxAttempts: number
   /** Initial delay before first retry (ms) */
-  initialDelay: number 
+  initialDelay: number
   /** Maximum delay between retries (ms) */
   maxDelay: number
   /** Long interval delay after max attempts (ms) */
@@ -47,7 +47,7 @@ interface ReconnectionState {
 
 /**
  * Manages reconnection for adapters with exponential backoff
- * 
+ *
  * The ReconnectionManager listens for adapter connection errors and
  * automatically schedules reconnection attempts using an exponential
  * backoff strategy to avoid overwhelming services during outages.
@@ -57,14 +57,14 @@ export class ReconnectionManager {
   private subscriptionManager = new SubscriptionManager()
   private logger: ComponentLogger
   private _options: ReconnectionOptions
-  
+
   /**
    * Get current reconnection options
    */
   get options(): ReconnectionOptions {
     return { ...this._options }
   }
-  
+
   /**
    * Create a new reconnection manager
    */
@@ -74,22 +74,22 @@ export class ReconnectionManager {
     private configStore: ConfigStore
   ) {
     this.logger = getLoggingService().createLogger('ReconnectionManager')
-    
+
     // Load options from config or use defaults
     this._options = {
       ...DEFAULT_OPTIONS,
       ...this.loadOptionsFromConfig()
     }
-    
+
     this.logger.info('ReconnectionManager initialized', { options: this._options })
-    
+
     // Subscribe to adapter error events
     this.setupErrorListener()
-    
+
     // Subscribe to adapter status changes for successful connections
     this.setupStatusListener()
   }
-  
+
   /**
    * Load reconnection options from config
    */
@@ -103,53 +103,43 @@ export class ReconnectionManager {
       return {}
     }
   }
-  
+
   /**
    * Setup listener for adapter error events
    */
   private setupErrorListener(): void {
     const subscription = this.eventBus.events$
-      .pipe(
-        filter(event => 
-          event.category === EventCategory.ADAPTER && 
-          event.type === AdapterEventType.ERROR
-        )
-      )
-      .subscribe(event => {
+      .pipe(filter((event) => event.category === EventCategory.ADAPTER && event.type === AdapterEventType.ERROR))
+      .subscribe((event) => {
         // Extract adapter info from event
         const adapterId = event.source.id
-        
+
         // Check if the adapter exists and is enabled
         const adapter = this.adapterManager.getAdapter(adapterId)
         if (!adapter || !adapter.enabled) return
-        
+
         this.logger.info(`Detected error in adapter ${adapterId}, scheduling reconnection`, {
           adapterId,
           adapterType: adapter.type,
           adapterName: adapter.name
         })
-        
+
         // Schedule reconnection
         this.scheduleReconnect(adapterId, adapter.name, adapter.type)
       })
-      
+
     this.subscriptionManager.add(subscription)
   }
-  
+
   /**
    * Setup listener for successful connections to reset attempt counters
    */
   private setupStatusListener(): void {
     const subscription = this.eventBus.events$
-      .pipe(
-        filter(event => 
-          event.category === EventCategory.ADAPTER && 
-          event.type === AdapterEventType.CONNECTED
-        )
-      )
-      .subscribe(event => {
+      .pipe(filter((event) => event.category === EventCategory.ADAPTER && event.type === AdapterEventType.CONNECTED))
+      .subscribe((event) => {
         const adapterId = event.source.id
-        
+
         // Reset reconnection attempts on successful connection if enabled
         if (this._options.resetCountOnSuccess) {
           const state = this.states.get(adapterId)
@@ -158,28 +148,23 @@ export class ReconnectionManager {
               adapterId,
               previousAttempts: state.attempts
             })
-            
+
             state.attempts = 0
             state.lastAttempt = Date.now()
           }
         }
       })
-      
+
     this.subscriptionManager.add(subscription)
   }
-  
+
   /**
    * Schedule reconnection for an adapter with exponential backoff
    */
-  public scheduleReconnect(
-    adapterId: string, 
-    adapterName: string,
-    adapterType: string,
-    forceNow = false
-  ): void {
+  public scheduleReconnect(adapterId: string, adapterName: string, adapterType: string, forceNow = false): void {
     // Get current state or create new one
     let state = this.states.get(adapterId)
-    
+
     if (!state) {
       state = {
         attempts: 0,
@@ -191,54 +176,54 @@ export class ReconnectionManager {
       }
       this.states.set(adapterId, state)
     }
-    
+
     // Clear any existing timer
     this.clearTimer(adapterId)
-    
+
     if (forceNow) {
       // Immediately attempt reconnection if forced
       this.attemptReconnection(adapterId)
       return
     }
-    
+
     // Calculate delay based on attempts with exponential backoff
     let delay: number
-    
+
     if (state.attempts >= this._options.maxAttempts) {
       // Use long interval delay after max attempts
       delay = this._options.longIntervalDelay
-      this.logger.info(`Maximum reconnection attempts reached for ${adapterName} (${adapterId}). Using long interval.`, {
-        adapterId,
-        attempts: state.attempts,
-        delay
-      })
+      this.logger.info(
+        `Maximum reconnection attempts reached for ${adapterName} (${adapterId}). Using long interval.`,
+        {
+          adapterId,
+          attempts: state.attempts,
+          delay
+        }
+      )
     } else {
       // Calculate exponential backoff: initialDelay * 2^attempts
-      delay = Math.min(
-        this._options.initialDelay * Math.pow(2, state.attempts),
-        this._options.maxDelay
-      )
-      
+      delay = Math.min(this._options.initialDelay * Math.pow(2, state.attempts), this._options.maxDelay)
+
       this.logger.info(`Scheduling reconnection for ${adapterName} (${adapterId})`, {
         adapterId,
         attempts: state.attempts,
         delay
       })
     }
-    
+
     // Schedule reconnection
     state.timer = setTimeout(() => {
       this.attemptReconnection(adapterId)
     }, delay)
   }
-  
+
   /**
    * Attempt to reconnect an adapter
    */
   private async attemptReconnection(adapterId: string): Promise<void> {
     const state = this.states.get(adapterId)
     if (!state) return
-    
+
     // Get adapter
     const adapter = this.adapterManager.getAdapter(adapterId)
     if (!adapter || !adapter.enabled) {
@@ -246,25 +231,25 @@ export class ReconnectionManager {
       this.clearState(adapterId)
       return
     }
-    
+
     // Increment attempt counter
     state.attempts++
     state.lastAttempt = Date.now()
-    
+
     this.logger.info(`Attempting reconnection for ${adapter.name} (${adapterId})`, {
       adapterId,
       attempt: state.attempts,
       maxAttempts: this._options.maxAttempts
     })
-    
+
     try {
       // Attempt reconnection
       await adapter.reconnect()
-      
+
       this.logger.info(`Successfully reconnected ${adapter.name} (${adapterId})`, {
         adapterId
       })
-      
+
       // Reset attempts if successful and reset is enabled
       if (this._options.resetCountOnSuccess) {
         state.attempts = 0
@@ -276,12 +261,12 @@ export class ReconnectionManager {
         attempt: state.attempts,
         maxAttempts: this._options.maxAttempts
       })
-      
+
       // Schedule next attempt
       this.scheduleReconnect(adapterId, adapter.name, adapter.type)
     }
   }
-  
+
   /**
    * Clear any pending reconnection timer for an adapter
    */
@@ -292,7 +277,7 @@ export class ReconnectionManager {
       state.timer = null
     }
   }
-  
+
   /**
    * Clear all state for an adapter
    */
@@ -300,7 +285,7 @@ export class ReconnectionManager {
     this.clearTimer(adapterId)
     this.states.delete(adapterId)
   }
-  
+
   /**
    * Update reconnection options
    */
@@ -309,13 +294,13 @@ export class ReconnectionManager {
       ...this._options,
       ...options
     }
-    
+
     // Save to config
     this.configStore.set('settings.reconnection', this._options)
-    
+
     this.logger.info('Updated reconnection options', { options: this._options })
   }
-  
+
   /**
    * Force immediate reconnection of an adapter
    */
@@ -324,18 +309,18 @@ export class ReconnectionManager {
     if (!adapter || !adapter.enabled) {
       throw new Error(`Adapter ${adapterId} not found or disabled`)
     }
-    
+
     this.clearTimer(adapterId)
     return adapter.reconnect()
   }
-  
+
   /**
    * Force immediate reconnection of all enabled adapters
    */
   public reconnectAllNow(): Promise<void> {
     return this.adapterManager.reconnectAll()
   }
-  
+
   /**
    * Cancel pending reconnections for an adapter
    */
@@ -343,37 +328,37 @@ export class ReconnectionManager {
     this.clearTimer(adapterId)
     this.logger.info(`Cancelled reconnection for ${adapterId}`, { adapterId })
   }
-  
+
   /**
    * Get current reconnection state for an adapter
    */
   public getReconnectionState(adapterId: string): {
-    pending: boolean,
-    attempts: number,
+    pending: boolean
+    attempts: number
     lastAttempt: number
   } | null {
     const state = this.states.get(adapterId)
     if (!state) return null
-    
+
     return {
       pending: state.timer !== null,
       attempts: state.attempts,
       lastAttempt: state.lastAttempt
     }
   }
-  
+
   /**
    * Dispose of all resources
    */
   public dispose(): void {
     // Clean up subscriptions
     this.subscriptionManager.unsubscribeAll()
-    
+
     // Clear all timers
     for (const adapterId of this.states.keys()) {
       this.clearTimer(adapterId)
     }
-    
+
     this.states.clear()
     this.logger.info('ReconnectionManager disposed')
   }

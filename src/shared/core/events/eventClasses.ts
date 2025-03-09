@@ -49,20 +49,9 @@ export class Event<T> implements BaseEvent<T> {
  * System information event class
  */
 export class SystemInfoEvent extends Event<SystemInfoPayload> {
-  constructor(
-    message: string,
-    level: 'info' | 'warning' | 'error' = 'info',
-    details?: Record<string, unknown>
-  ) {
+  constructor(message: string, level: 'info' | 'warning' | 'error' = 'info', details?: Record<string, unknown>) {
     const event = createSystemEvent(SystemEventType.INFO, message, level, details)
-    super(
-      event.category,
-      event.type,
-      event.data,
-      event.source.id,
-      event.source.name,
-      event.source.type
-    )
+    super(event.category, event.type, event.data, event.source.id, event.source.name, event.source.type)
   }
 }
 
@@ -72,14 +61,7 @@ export class SystemInfoEvent extends Event<SystemInfoPayload> {
 export class SystemErrorEvent extends Event<SystemInfoPayload> {
   constructor(message: string, details?: Record<string, unknown>) {
     const event = createSystemEvent(SystemEventType.ERROR, message, 'error', details)
-    super(
-      event.category,
-      event.type,
-      event.data,
-      event.source.id,
-      event.source.name,
-      event.source.type
-    )
+    super(event.category, event.type, event.data, event.source.id, event.source.name, event.source.type)
   }
 }
 
@@ -89,14 +71,7 @@ export class SystemErrorEvent extends Event<SystemInfoPayload> {
 export class ObsEvent<T> extends Event<T> {
   constructor(type: ObsEventType, data: T, adapterId: string, adapterName: string) {
     const event = createObsEvent(type, data, adapterId, adapterName)
-    super(
-      event.category,
-      event.type,
-      event.data,
-      event.source.id,
-      event.source.name,
-      event.source.type
-    )
+    super(event.category, event.type, event.data, event.source.id, event.source.name, event.source.type)
   }
 }
 
