@@ -4,6 +4,9 @@ import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
+// Set app name
+app.setName('Zelan')
+
 // Create a simple console logger for startup
 // We'll use the full logging service after it's properly imported
 const consoleLogger = {
@@ -439,16 +442,18 @@ app.on('window-all-closed', () => {
   }
 })
 
+let isCleaningUp = false
+
 // Handle app exit
 app.on('before-quit', async (event) => {
   // If we're already cleaning up, don't prevent the quit
-  if ((app as any).isCleaningUp) return
+  if (isCleaningUp) return
 
   // Prevent the app from quitting immediately
   event.preventDefault()
 
   // Set a flag to indicate we're cleaning up
-  ;(app as any).isCleaningUp = true
+  isCleaningUp = true
 
   // Publish shutdown event
   mainEventBus?.publish(createSystemEvent(SystemEventType.SHUTDOWN, 'Zelan application shutting down', 'info'))
