@@ -1,10 +1,10 @@
 import { AdapterManager } from './AdapterManager'
-import { SubscriptionManager } from '@s/utils/subscription-manager'
 import { getLoggingService, ComponentLogger } from '@m/services/logging'
 import { EventBus } from '@s/core/bus'
-import { filter } from 'rxjs/operators'
+import { filter, map, takeUntil } from 'rxjs/operators'
 import { AdapterEventType, EventCategory } from '@s/types/events'
 import { ConfigStore } from '@s/core/config'
+import { Subject } from 'rxjs'
 
 /**
  * Reconnection options
@@ -46,17 +46,13 @@ interface ReconnectionState {
 }
 
 /**
- * Manages reconnection for adapters with exponential backoff
- *
- * The ReconnectionManager listens for adapter connection errors and
- * automatically schedules reconnection attempts using an exponential
- * backoff strategy to avoid overwhelming services during outages.
+ * Manages adapter reconnection with exponential backoff
  */
 export class ReconnectionManager {
   private states = new Map<string, ReconnectionState>()
-  private subscriptionManager = new SubscriptionManager()
   private logger: ComponentLogger
   private _options: ReconnectionOptions
+  private destroy$ = new Subject<void>()
 
   /**
    * Get current reconnection options
@@ -83,11 +79,8 @@ export class ReconnectionManager {
 
     this.logger.info('ReconnectionManager initialized', { options: this._options })
 
-    // Subscribe to adapter error events
-    this.setupErrorListener()
-
-    // Subscribe to adapter status changes for successful connections
-    this.setupStatusListener()
+    // Setup event listeners using RxJS pipeline
+    this.setupEventListeners()
   }
 
   /**
@@ -105,57 +98,52 @@ export class ReconnectionManager {
   }
 
   /**
-   * Setup listener for adapter error events
+   * Setup listeners for adapter events
    */
-  private setupErrorListener(): void {
-    const subscription = this.eventBus.events$
-      .pipe(filter((event) => event.category === EventCategory.ADAPTER && event.type === AdapterEventType.ERROR))
-      .subscribe((event) => {
-        // Extract adapter info from event
-        const adapterId = event.source.id
+  private setupEventListeners(): void {
+    // Listen for adapter error events
+    this.eventBus.events$.pipe(
+      takeUntil(this.destroy$),
+      filter(event => event.category === EventCategory.ADAPTER),
+      filter(event => event.type === AdapterEventType.ERROR)
+    ).subscribe(event => {
+      const adapterId = event.source.id
 
-        // Check if the adapter exists and is enabled
-        const adapter = this.adapterManager.getAdapter(adapterId)
-        if (!adapter || !adapter.enabled) return
+      // Check if the adapter exists and is enabled
+      const adapter = this.adapterManager.getAdapter(adapterId)
+      if (!adapter || !adapter.enabled) return
 
-        this.logger.info(`Detected error in adapter ${adapterId}, scheduling reconnection`, {
-          adapterId,
-          adapterType: adapter.type,
-          adapterName: adapter.name
-        })
-
-        // Schedule reconnection
-        this.scheduleReconnect(adapterId, adapter.name, adapter.type)
+      this.logger.info(`Detected error in adapter ${adapterId}, scheduling reconnection`, {
+        adapterId,
+        adapterType: adapter.type,
+        adapterName: adapter.name
       })
 
-    this.subscriptionManager.add(subscription)
-  }
+      // Schedule reconnection
+      this.scheduleReconnect(adapterId, adapter.name, adapter.type)
+    });
 
-  /**
-   * Setup listener for successful connections to reset attempt counters
-   */
-  private setupStatusListener(): void {
-    const subscription = this.eventBus.events$
-      .pipe(filter((event) => event.category === EventCategory.ADAPTER && event.type === AdapterEventType.CONNECTED))
-      .subscribe((event) => {
-        const adapterId = event.source.id
+    // Listen for successful connections to reset attempt counters
+    this.eventBus.events$.pipe(
+      takeUntil(this.destroy$),
+      filter(event => event.category === EventCategory.ADAPTER),
+      filter(event => event.type === AdapterEventType.CONNECTED),
+      map(event => event.source.id)
+    ).subscribe(adapterId => {
+      // Reset reconnection attempts on successful connection if enabled
+      if (this._options.resetCountOnSuccess) {
+        const state = this.states.get(adapterId)
+        if (state) {
+          this.logger.debug(`Resetting reconnection attempts for ${adapterId}`, {
+            adapterId,
+            previousAttempts: state.attempts
+          })
 
-        // Reset reconnection attempts on successful connection if enabled
-        if (this._options.resetCountOnSuccess) {
-          const state = this.states.get(adapterId)
-          if (state) {
-            this.logger.debug(`Resetting reconnection attempts for ${adapterId}`, {
-              adapterId,
-              previousAttempts: state.attempts
-            })
-
-            state.attempts = 0
-            state.lastAttempt = Date.now()
-          }
+          state.attempts = 0
+          state.lastAttempt = Date.now()
         }
-      })
-
-    this.subscriptionManager.add(subscription)
+      }
+    });
   }
 
   /**
@@ -351,8 +339,9 @@ export class ReconnectionManager {
    * Dispose of all resources
    */
   public dispose(): void {
-    // Clean up subscriptions
-    this.subscriptionManager.unsubscribeAll()
+    // Signal all subscriptions to complete
+    this.destroy$.next()
+    this.destroy$.complete()
 
     // Clear all timers
     for (const adapterId of this.states.keys()) {
