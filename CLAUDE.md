@@ -31,7 +31,7 @@ The project has a functional reactive architecture and is ready for extension wi
 - RxDB for reactive, observable database with secure persistent storage
 - Zod for runtime type validation
 - Tailwind CSS and shadcn/ui for component styling
-- @tanstack/store (in development dependencies)
+- @tanstack/react-router for type-safe routing
 
 ## Build Commands
 
@@ -193,12 +193,7 @@ The following libraries are our agreed-upon standard stack for the project:
 
 - **RxJS**: Foundation for reactive programming throughout the application
 - **RxDB**: Reactive, observable NoSQL database for persistence
-- **@tanstack/store**: Atomic state management with fine-grained reactivity
-- **@tanstack/react-query**: Data fetching, caching, and synchronization
-- **@tanstack/react-query-devtools**: Visual debugging for queries and cache
 - **@tanstack/react-router**: Type-safe routing with first-class search params
-- **@tanstack/react-table**: Headless UI for complex data tables
-- **@tanstack/virtual**: Virtualized lists for optimal performance
 - **tRPC**: Type-safe API calls between main and renderer processes
 - **dotenv**: Environment variable management
 - **zod**: Runtime validation for type safety
