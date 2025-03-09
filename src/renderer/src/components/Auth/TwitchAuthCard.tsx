@@ -33,9 +33,7 @@ export default function TwitchAuthCard() {
               status?.isAuthenticated ? 'bg-green-500' : 'bg-red-500'
             }`}
           />
-          <span className="text-sm">
-            {status?.isAuthenticated ? 'Connected' : 'Disconnected'}
-          </span>
+          <span className="text-sm">{status?.isAuthenticated ? 'Connected' : 'Disconnected'}</span>
         </div>
       </div>
 
@@ -46,22 +44,20 @@ export default function TwitchAuthCard() {
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="text-gray-500">Username:</div>
               <div className="font-medium">{status?.username || 'Unknown'}</div>
-              
+
               <div className="text-gray-500">User ID:</div>
               <div className="font-medium">{status?.userId || 'Unknown'}</div>
-              
+
               <div className="text-gray-500">Status:</div>
               <div className="font-medium">{status?.state || 'Unknown'}</div>
-              
+
               <div className="text-gray-500">Expires:</div>
               <div className="font-medium">
-                {status?.expiresAt 
-                  ? new Date(status.expiresAt).toLocaleString() 
-                  : 'Unknown'}
+                {status?.expiresAt ? new Date(status.expiresAt).toLocaleString() : 'Unknown'}
               </div>
             </div>
           </div>
-          
+
           <div>
             <button
               onClick={handleLogout}
@@ -86,20 +82,22 @@ export default function TwitchAuthCard() {
                   {deviceCode.user_code}
                 </div>
                 <p className="text-sm text-gray-600 mt-2">
-                  Go to <a
+                  Go to{' '}
+                  <a
                     href={deviceCode.verification_uri_complete || deviceCode.verification_uri}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-500 underline"
                   >
                     {deviceCode.verification_uri}
-                  </a> to authorize this application.
+                  </a>{' '}
+                  to authorize this application.
                 </p>
                 <p className="text-xs text-gray-500 mt-2">
                   Code expires in {Math.round(deviceCode.expires_in / 60)} minutes
                 </p>
               </div>
-              
+
               {isLoading && (
                 <div className="text-center text-sm text-gray-600">
                   Waiting for authorization...
@@ -111,13 +109,15 @@ export default function TwitchAuthCard() {
             <div className="space-y-4">
               <div className="bg-gray-50 p-4 rounded-md border mb-4">
                 <p className="text-sm text-gray-700 mb-2">
-                  Connect your Twitch account to enable streaming features. You'll be prompted to authorize this app through Twitch's secure authentication.
+                  Connect your Twitch account to enable streaming features. You'll be prompted to
+                  authorize this app through Twitch's secure authentication.
                 </p>
                 <p className="text-xs text-gray-500">
-                  Only the minimum required permissions will be requested, and your credentials are securely stored locally.
+                  Only the minimum required permissions will be requested, and your credentials are
+                  securely stored locally.
                 </p>
               </div>
-              
+
               <div>
                 <button
                   onClick={handleLogin}
@@ -140,12 +140,11 @@ export default function TwitchAuthCard() {
           {error}
         </div>
       )}
-      
+
       <div className="mt-4 text-xs text-gray-500">
         <p>
-          This integration uses the Device Code flow to authenticate with Twitch.
-          Your credentials are securely stored and only the minimum required scopes
-          are requested.
+          This integration uses the Device Code flow to authenticate with Twitch. Your credentials
+          are securely stored and only the minimum required scopes are requested.
         </p>
       </div>
     </div>

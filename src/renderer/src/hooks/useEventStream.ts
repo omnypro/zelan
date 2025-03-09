@@ -9,7 +9,7 @@ import { EventFilterCriteria } from '@s/utils/filters/event-filter'
 
 /**
  * Create an event stream for a specific category and type
- * 
+ *
  * @param category Event category
  * @param type Optional event type
  * @returns Event stream
@@ -22,7 +22,7 @@ export function useEventStreamSource<T = unknown>(category: EventCategory, type?
 
 /**
  * Create an event stream with custom filter criteria
- * 
+ *
  * @param filterCriteria Filter criteria to apply
  * @returns Filtered event stream
  */
@@ -34,7 +34,7 @@ export function useFilteredEventStream<T = unknown>(filterCriteria: EventFilterC
 
 /**
  * Subscribe to an event stream and get the events
- * 
+ *
  * @param category Event category
  * @param type Optional event type
  * @param limit Maximum number of events to keep
@@ -82,7 +82,7 @@ export function useEvents<T = unknown>(
 
 /**
  * Subscribe to events with custom filter criteria
- * 
+ *
  * @param filterCriteria Filter criteria to apply
  * @param limit Maximum number of events to keep
  * @returns Array of filtered events
@@ -128,7 +128,7 @@ export function useFilteredEvents<T = unknown>(
 
 /**
  * Subscribe to event payloads
- * 
+ *
  * @param category Event category
  * @param type Optional event type
  * @param initialValue Initial value to use before first event
@@ -157,7 +157,7 @@ export function useEventPayload<T = unknown>(
 
 /**
  * Subscribe to event payloads with custom filter criteria
- * 
+ *
  * @param filterCriteria Filter criteria to apply
  * @param initialValue Initial value to use before first event
  * @returns Current event payload with loading and error status
@@ -184,7 +184,7 @@ export function useFilteredEventPayload<T = unknown>(
 
 /**
  * Create a function to publish events of a specific category and type
- * 
+ *
  * @param category Event category
  * @param type Event type
  * @param source Source identifier

@@ -1,10 +1,17 @@
 import { ipcRenderer } from 'electron'
 import { observable } from '@trpc/server/observable'
 
+// Simple logger for trpc preload
+const logger = {
+  info: (...args: any[]) => console.log('[tRPC Preload]', ...args),
+  error: (...args: any[]) => console.error('[tRPC Preload]', ...args),
+  warn: (...args: any[]) => console.warn('[tRPC Preload]', ...args)
+}
+
 // Channel for tRPC requests
 const TRPC_CHANNEL = 'zelan:trpc'
 
-console.log('Initializing tRPC client with channel:', TRPC_CHANNEL)
+logger.info('Initializing tRPC client with channel:', TRPC_CHANNEL)
 
 // Map of active subscriptions
 const activeSubscriptions = new Map<string, () => void>()
@@ -22,7 +29,7 @@ const createClient = () => {
     const createProcedureCaller = (procedureName, type) => {
       return {
         query: async (input) => {
-          console.log(`Calling ${moduleName}.${procedureName} (${type}) with:`, input)
+          logger.info(`Calling ${moduleName}.${procedureName} (${type}) with:`, input)
           const result = await ipcRenderer.invoke(TRPC_CHANNEL, {
             id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
             type,
@@ -31,14 +38,14 @@ const createClient = () => {
           })
 
           if (result.type === 'error') {
-            console.error(`Error in ${moduleName}.${procedureName}:`, result.error)
+            logger.error(`Error in ${moduleName}.${procedureName}:`, result.error)
             throw new Error(result.error.message)
           }
 
           return result.result
         },
         mutate: async (input) => {
-          console.log(`Calling ${moduleName}.${procedureName} (${type}) with:`, input)
+          logger.info(`Calling ${moduleName}.${procedureName} (${type}) with:`, input)
           const result = await ipcRenderer.invoke(TRPC_CHANNEL, {
             id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
             type,
@@ -47,14 +54,14 @@ const createClient = () => {
           })
 
           if (result.type === 'error') {
-            console.error(`Error in ${moduleName}.${procedureName}:`, result.error)
+            logger.error(`Error in ${moduleName}.${procedureName}:`, result.error)
             throw new Error(result.error.message)
           }
 
           return result.result
         },
         subscribe: (input) => {
-          console.log(`Subscribing to ${moduleName}.${procedureName} with:`, input)
+          logger.info(`Subscribing to ${moduleName}.${procedureName} with:`, input)
           const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
           const subChannelName = `${TRPC_CHANNEL}:${id}`
 
@@ -147,7 +154,7 @@ const createClient = () => {
             stop: createProcedureCaller('stop', 'mutation')
           }
         : {}),
-        
+
       ...(moduleName === 'auth'
         ? {
             getStatus: createProcedureCaller('getStatus', 'query'),
@@ -175,20 +182,30 @@ const createClient = () => {
 // Use our custom client
 export const trpcClient = createClient()
 
-console.log('tRPC client created:', !!trpcClient)
-console.log('tRPC client keys:', Object.keys(trpcClient))
-console.log(
-  'tRPC config keys:',
-  trpcClient.config ? Object.keys(trpcClient.config) : 'No config module'
-)
-console.log(
-  'tRPC auth keys:',
-  trpcClient.auth ? Object.keys(trpcClient.auth) : 'No auth module'
-)
-console.log(
-  'tRPC websocket keys:',
-  trpcClient.websocket ? Object.keys(trpcClient.websocket) : 'No websocket module'
-)
+logger.info('tRPC client created:', !!trpcClient)
+
+// Add proper null checks for logging
+if (trpcClient) {
+  logger.info('tRPC client keys:', Object.keys(trpcClient))
+
+  if (trpcClient.config) {
+    logger.info('tRPC config keys:', Object.keys(trpcClient.config))
+  } else {
+    logger.info('tRPC config keys: No config module')
+  }
+
+  if (trpcClient.auth) {
+    logger.info('tRPC auth keys:', Object.keys(trpcClient.auth))
+  } else {
+    logger.info('tRPC auth keys: No auth module')
+  }
+
+  if (trpcClient.websocket) {
+    logger.info('tRPC websocket keys:', Object.keys(trpcClient.websocket))
+  } else {
+    logger.info('tRPC websocket keys: No websocket module')
+  }
+}
 
 /**
  * Helper function to create an observable from a tRPC subscription

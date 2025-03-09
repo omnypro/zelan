@@ -5,10 +5,7 @@ import { BaseEvent, EventCategory, SystemEventType } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
 import { EventBus } from '@s/core/bus/EventBus'
 import { EventCache, EventCacheOptions } from '../events/EventCache'
-import { 
-  EventFilterCriteria, 
-  filterEventStream 
-} from '@s/utils/filters/event-filter'
+import { EventFilterCriteria, filterEventStream } from '@s/utils/filters/event-filter'
 
 /**
  * Main process implementation of the EventBus

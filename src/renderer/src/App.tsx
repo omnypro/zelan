@@ -157,7 +157,7 @@ function App(): JSX.Element {
           )}
 
           {activeTab === 'events' && <EventsDemo />}
-          
+
           {activeTab === 'enhanced-events' && <EnhancedEventsDemo />}
 
           {activeTab === 'settings' && <Settings />}

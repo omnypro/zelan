@@ -7,14 +7,15 @@ import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
 import { AdapterConfig } from '@s/adapters/interfaces/ServiceAdapter'
 import { isString, isBoolean, createObjectValidator } from '@s/utils/type-guards'
 import { ApiClient } from '@twurple/api'
-import { 
-  AuthProvider as TwurpleAuthProvider, 
-  AccessTokenMaybeWithUserId, 
+import {
+  AuthProvider as TwurpleAuthProvider,
+  AccessTokenMaybeWithUserId,
   AccessTokenWithUserId
 } from '@twurple/auth'
 import { EventSubWsListener } from '@twurple/eventsub-ws'
 import { getTwitchAuthService } from '@m/services/auth/TwitchAuthService'
 import { AuthProvider } from '@s/auth/interfaces'
+import { getLoggingService, ComponentLogger } from '@m/services/logging'
 
 /**
  * Twitch adapter options
@@ -53,37 +54,39 @@ const DEFAULT_OPTIONS: TwitchAdapterOptions = {
  * our own token management.
  */
 class CustomTwitchAuthProvider implements TwurpleAuthProvider {
-  public readonly clientId: string;
-  private accessToken: string;
-  private refreshToken: string;
-  private scopes: string[];
-  private userId: string;
-  private expiresIn: number;
-  private obtainmentTimestamp: number;
-  private refreshCallback?: () => Promise<void>;
-  private refreshTimer?: NodeJS.Timeout;
+  public readonly clientId: string
+  private accessToken: string
+  private refreshToken: string
+  private scopes: string[]
+  private userId: string
+  private expiresIn: number
+  private obtainmentTimestamp: number
+  private refreshCallback?: () => Promise<void>
+  private refreshTimer?: NodeJS.Timeout
+  private logger: ComponentLogger
 
   constructor(
     clientId: string,
-    accessToken: string, 
+    accessToken: string,
     refreshToken: string,
-    userId: string, 
-    scopes: string[], 
+    userId: string,
+    scopes: string[],
     expiresIn: number
   ) {
-    this.clientId = clientId;
-    this.accessToken = accessToken;
-    this.refreshToken = refreshToken;
-    this.userId = userId;
-    this.scopes = scopes;
-    this.expiresIn = expiresIn;
-    this.obtainmentTimestamp = Date.now();
-    
+    this.clientId = clientId
+    this.accessToken = accessToken
+    this.refreshToken = refreshToken
+    this.userId = userId
+    this.scopes = scopes
+    this.expiresIn = expiresIn
+    this.obtainmentTimestamp = Date.now()
+    this.logger = getLoggingService().createLogger('CustomTwitchAuthProvider')
+
     // Set up refresh timer if we have an expiration
     if (expiresIn > 0) {
       // Schedule refresh for 10 minutes before expiration
-      const refreshTime = Math.max(expiresIn - 600, 0) * 1000;
-      this.refreshTimer = setTimeout(() => this.handleRefresh(), refreshTime);
+      const refreshTime = Math.max(expiresIn - 600, 0) * 1000
+      this.refreshTimer = setTimeout(() => this.handleRefresh(), refreshTime)
     }
   }
 
@@ -91,7 +94,7 @@ class CustomTwitchAuthProvider implements TwurpleAuthProvider {
    * Set callback for token refresh
    */
   onRefresh(callback: () => Promise<void>): void {
-    this.refreshCallback = callback;
+    this.refreshCallback = callback
   }
 
   /**
@@ -100,11 +103,13 @@ class CustomTwitchAuthProvider implements TwurpleAuthProvider {
   private async handleRefresh(): Promise<void> {
     try {
       if (this.refreshCallback) {
-        await this.refreshCallback();
-        console.log('[CustomTwitchAuthProvider] Token refreshed through callback');
+        await this.refreshCallback()
+        this.logger.info('Token refreshed through callback')
       }
     } catch (error) {
-      console.error('[CustomTwitchAuthProvider] Failed to refresh token:', error);
+      this.logger.error('Failed to refresh token', {
+        error: error instanceof Error ? error.message : String(error)
+      })
     }
   }
 
@@ -112,29 +117,29 @@ class CustomTwitchAuthProvider implements TwurpleAuthProvider {
    * Update the underlying token
    */
   updateToken(
-    accessToken: string, 
+    accessToken: string,
     refreshToken: string,
-    scopes: string[], 
+    scopes: string[],
     expiresIn: number
   ): void {
     // Clear any existing refresh timer
     if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = undefined;
+      clearTimeout(this.refreshTimer)
+      this.refreshTimer = undefined
     }
 
     // Update the token
-    this.accessToken = accessToken;
-    this.refreshToken = refreshToken;
-    this.scopes = scopes;
-    this.expiresIn = expiresIn;
-    this.obtainmentTimestamp = Date.now();
-    
+    this.accessToken = accessToken
+    this.refreshToken = refreshToken
+    this.scopes = scopes
+    this.expiresIn = expiresIn
+    this.obtainmentTimestamp = Date.now()
+
     // Set up a new refresh timer
     if (expiresIn > 0) {
       // Schedule refresh for 10 minutes before expiration
-      const refreshTime = Math.max(expiresIn - 600, 0) * 1000;
-      this.refreshTimer = setTimeout(() => this.handleRefresh(), refreshTime);
+      const refreshTime = Math.max(expiresIn - 600, 0) * 1000
+      this.refreshTimer = setTimeout(() => this.handleRefresh(), refreshTime)
     }
   }
 
@@ -143,23 +148,23 @@ class CustomTwitchAuthProvider implements TwurpleAuthProvider {
    */
   dispose(): void {
     if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = undefined;
+      clearTimeout(this.refreshTimer)
+      this.refreshTimer = undefined
     }
   }
-  
+
   /**
    * Implements required AuthProvider interface methods
    */
   getCurrentScopesForUser(_user: any): string[] {
-    return this.scopes;
+    return this.scopes
   }
 
   /**
    * Get access token with user ID (implements AuthProvider interface)
    */
   async getAccessTokenForUser(
-    _user: any, 
+    _user: any,
     ..._scopeSets: (string[] | undefined)[]
   ): Promise<AccessTokenWithUserId | null> {
     return {
@@ -169,9 +174,9 @@ class CustomTwitchAuthProvider implements TwurpleAuthProvider {
       expiresIn: this.expiresIn,
       obtainmentTimestamp: this.obtainmentTimestamp,
       userId: this.userId
-    };
+    }
   }
-  
+
   /**
    * Get any access token (implements AuthProvider interface)
    */
@@ -183,7 +188,7 @@ class CustomTwitchAuthProvider implements TwurpleAuthProvider {
       expiresIn: this.expiresIn,
       obtainmentTimestamp: this.obtainmentTimestamp,
       userId: this.userId
-    };
+    }
   }
 }
 
@@ -198,6 +203,7 @@ export class TwitchAdapter extends BaseAdapter {
   private channelInfo: Record<string, any> = {}
   private isLive: boolean = false
   private authSubscription?: { unsubscribe: () => void }
+  private logger: ComponentLogger
 
   constructor(
     id: string,
@@ -207,28 +213,32 @@ export class TwitchAdapter extends BaseAdapter {
     enabled = true
   ) {
     super(id, 'twitch', name, { ...DEFAULT_OPTIONS, ...options }, eventBus, enabled)
+
+    // Initialize component logger
+    this.logger = getLoggingService().createLogger(`TwitchAdapter:${id}`)
+    this.logger.debug('Twitch adapter initialized')
   }
 
   // Flag to track if we're in the process of connecting
-  private isConnecting: boolean = false;
+  private isConnecting: boolean = false
 
   protected async connectImplementation(): Promise<void> {
     // Prevent duplicate connection attempts
     if (this.isConnecting) {
-      console.log('[TwitchAdapter] Connection already in progress, skipping duplicate attempt');
-      return;
+      this.logger.info('Connection already in progress, skipping duplicate attempt')
+      return
     }
 
     try {
       // Set the connecting flag
-      this.isConnecting = true;
-      
+      this.isConnecting = true
+
       const authService = getTwitchAuthService(this.eventBus)
       const authStatus = authService.getStatus(AuthProvider.TWITCH)
 
       // If not authenticated, just mark as waiting and set up a listener
       if (authStatus.state !== 'authenticated') {
-        console.log('[TwitchAdapter] Waiting for Twitch authentication')
+        this.logger.info('Waiting for Twitch authentication')
         this.updateStatus(AdapterStatus.CONNECTING, 'Waiting for Twitch authentication')
 
         // Clean up any existing subscription
@@ -253,22 +263,22 @@ export class TwitchAdapter extends BaseAdapter {
             })
           )
           .subscribe(() => {
-            console.log('[TwitchAdapter] Detected Twitch authentication, reconnecting')
+            this.logger.info('Detected Twitch authentication, reconnecting')
             // Attempt to reconnect when auth becomes available
             this.connect().catch((error) => {
-              console.error('[TwitchAdapter] Reconnection error:', error)
+              this.logger.error('Reconnection error', { error: error.message })
             })
           })
 
         // Reset connecting flag
-        this.isConnecting = false;
+        this.isConnecting = false
         return // Exit early, don't try to connect yet
       }
 
       // Get the token from the auth service
       const token = await authService.getToken(AuthProvider.TWITCH)
       if (!token) {
-        console.log('[TwitchAdapter] No Twitch authentication token available')
+        this.logger.warn('No Twitch authentication token available')
         this.updateStatus(AdapterStatus.ERROR, 'No Twitch authentication token available')
         return // Exit early, don't throw error
       }
@@ -278,11 +288,12 @@ export class TwitchAdapter extends BaseAdapter {
       const clientId = process.env.TWITCH_CLIENT_ID || ''
 
       if (!clientId) {
+        this.logger.error('TWITCH_CLIENT_ID environment variable is missing')
         throw new Error('TWITCH_CLIENT_ID environment variable is required')
       }
 
       // Extract user ID from token metadata
-      const userId = token.metadata?.userId;
+      const userId = token.metadata?.userId
       if (!userId) {
         throw new Error('User ID is required but not available in token metadata')
       }
@@ -290,11 +301,11 @@ export class TwitchAdapter extends BaseAdapter {
       // Calculate time until token expiration in seconds
       const expiresIn = Math.floor((token.expiresAt - Date.now()) / 1000)
 
-      // Create our custom auth provider 
+      // Create our custom auth provider
       // This avoids the client_secret requirement of RefreshingAuthProvider
       this.authProvider = new CustomTwitchAuthProvider(
         clientId,
-        accessToken, 
+        accessToken,
         token.refreshToken || '',
         userId,
         token.scope || [],
@@ -306,7 +317,7 @@ export class TwitchAdapter extends BaseAdapter {
         try {
           // Update our token through the auth service
           const result = await authService.refreshToken(AuthProvider.TWITCH)
-          
+
           if (result.success && result.token) {
             // Update the token in our custom provider
             const newExpiresIn = Math.floor((result.token.expiresAt - Date.now()) / 1000)
@@ -316,12 +327,16 @@ export class TwitchAdapter extends BaseAdapter {
               result.token.scope || [],
               newExpiresIn
             )
-            console.log('[TwitchAdapter] Token refreshed successfully')
+            this.logger.info('Token refreshed successfully')
           } else {
-            console.error('[TwitchAdapter] Token refresh failed:', result.error)
+            this.logger.error('Token refresh failed', {
+              error: result.error?.message || 'Unknown error'
+            })
           }
         } catch (error) {
-          console.error('[TwitchAdapter] Error refreshing token:', error)
+          this.logger.error('Error refreshing token', {
+            error: error instanceof Error ? error.message : String(error)
+          })
         }
       })
 
@@ -331,7 +346,7 @@ export class TwitchAdapter extends BaseAdapter {
         // These options help prevent client credential flow errors
         ...({
           disableAutomaticTokenGeneration: true,
-          disableAutomaticAuthentication: true, 
+          disableAutomaticAuthentication: true,
           disableAutoAuthorization: true
         } as any)
       })
@@ -347,7 +362,7 @@ export class TwitchAdapter extends BaseAdapter {
         if (currentUser) {
           this.userId = currentUser.id
         } else {
-          this.isConnecting = false; // Reset flag
+          this.isConnecting = false // Reset flag
           throw new Error('Could not determine user ID from token or username')
         }
       }
@@ -359,18 +374,22 @@ export class TwitchAdapter extends BaseAdapter {
 
         // Then set up EventSub for future updates
         await this.setupEventSub()
-        console.log('[TwitchAdapter] EventSub WebSocket setup successfully')
+        this.logger.info('EventSub WebSocket setup successfully')
       } catch (error) {
-        console.error('[TwitchAdapter] EventSub setup error:', error)
+        this.logger.error('EventSub setup error', {
+          error: error instanceof Error ? error.message : String(error)
+        })
         this.updateStatus(AdapterStatus.ERROR, 'Failed to set up EventSub')
       } finally {
         // Reset connecting flag when finished (success or error)
-        this.isConnecting = false;
+        this.isConnecting = false
       }
     } catch (error) {
       // Reset connecting flag on error
-      this.isConnecting = false;
-      console.error('[TwitchAdapter] Connection error:', error)
+      this.isConnecting = false
+      this.logger.error('Connection error', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw error
     }
   }
@@ -382,14 +401,14 @@ export class TwitchAdapter extends BaseAdapter {
     // Clear cached data
     this.channelInfo = {}
     this.isLive = false
-    this.isConnecting = false;
+    this.isConnecting = false
 
     // We don't unsubscribe from auth events here, as we want to
     // be able to reconnect when authentication becomes available
 
     // Clean up auth provider
     if (this.authProvider) {
-      this.authProvider.dispose();
+      this.authProvider.dispose()
     }
 
     // Clean up API client
@@ -408,12 +427,12 @@ export class TwitchAdapter extends BaseAdapter {
 
     // Clean up auth provider
     if (this.authProvider) {
-      this.authProvider.dispose();
+      this.authProvider.dispose()
     }
 
     this.apiClient = undefined
     this.authProvider = undefined
-    this.isConnecting = false;
+    this.isConnecting = false
   }
 
   /**
@@ -447,7 +466,7 @@ export class TwitchAdapter extends BaseAdapter {
     }
 
     try {
-      console.log('[TwitchAdapter] Fetching initial channel state')
+      this.logger.info('Fetching initial channel state')
 
       // Initialize with basic channel info in case we can't fetch everything
       this.channelInfo = {
@@ -479,13 +498,13 @@ export class TwitchAdapter extends BaseAdapter {
             (err?._body && err?._body.includes('client_secret')) ||
             (err?.status === 400 && err?.message?.includes('Missing params'))
           ) {
-            console.warn(`[TwitchAdapter] ${errorMessage} - Client credentials not supported`, {
+            this.logger.warn(`[TwitchAdapter] ${errorMessage} - Client credentials not supported`, {
               error: err.message || 'Unknown error',
               hint: 'Authorization scopes might be insufficient'
             })
           } else {
             // Other API errors
-            console.warn(`[TwitchAdapter] ${errorMessage}:`, err)
+            this.logger.warn(`[TwitchAdapter] ${errorMessage}:`, err)
           }
           return null
         }
@@ -546,9 +565,11 @@ export class TwitchAdapter extends BaseAdapter {
         })
       }
 
-      console.log('[TwitchAdapter] Initial state fetched successfully')
+      this.logger.info('Initial state fetched successfully')
     } catch (error) {
-      console.error('[TwitchAdapter] Failed to fetch initial state:', error)
+      this.logger.error('Failed to fetch initial state', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       // Continue anyway, EventSub will update the state as events occur
     }
   }
@@ -570,7 +591,7 @@ export class TwitchAdapter extends BaseAdapter {
       }
     })
 
-    console.log('[TwitchAdapter] Starting EventSub WebSocket listener')
+    this.logger.info('Starting EventSub WebSocket listener')
     await this.eventSubListener.start()
 
     // Subscribe to events
@@ -582,11 +603,11 @@ export class TwitchAdapter extends BaseAdapter {
    */
   private subscribeToEvents(): void {
     if (!this.eventSubListener || !this.userId) {
-      console.error('[TwitchAdapter] Cannot subscribe to events: EventSub not initialized')
+      this.logger.error('Cannot subscribe to events: EventSub not initialized')
       return
     }
 
-    console.log('[TwitchAdapter] Subscribing to Twitch events for user', this.userId)
+    this.logger.info('Subscribing to Twitch events for user', { userId: this.userId })
 
     // Helper to safely subscribe to stream & channel events (with 1 parameter)
     const safeSubscribe = <T>(
@@ -596,14 +617,17 @@ export class TwitchAdapter extends BaseAdapter {
     ) => {
       try {
         if (typeof subscriptionFn !== 'function') {
-          console.error(`[TwitchAdapter] Subscription function for ${eventName} is not available`)
+          this.logger.error(`Subscription function for ${eventName} is not available`)
           return
         }
 
         subscriptionFn(this.userId!, handler)
-        console.log(`[TwitchAdapter] Successfully subscribed to ${eventName} events`)
+        this.logger.info(`Successfully subscribed to ${eventName} events`)
       } catch (error) {
-        console.error(`[TwitchAdapter] Failed to subscribe to ${eventName} events:`, error)
+        this.logger.error(`Failed to subscribe to ${eventName} events`, {
+          error: error instanceof Error ? error.message : String(error),
+          eventName
+        })
         // The subscription failed but we can continue with others
       }
     }
@@ -612,7 +636,7 @@ export class TwitchAdapter extends BaseAdapter {
     safeSubscribe(
       this.eventSubListener.onStreamOnline.bind(this.eventSubListener),
       (event) => {
-        console.log('[TwitchAdapter] Stream online event received', event)
+        this.logger.debug('Stream online event received', { event })
         this.isLive = true
         this.emitEvent('stream.online', {
           ...event, // Pass all original fields
@@ -627,7 +651,7 @@ export class TwitchAdapter extends BaseAdapter {
     safeSubscribe(
       this.eventSubListener.onStreamOffline.bind(this.eventSubListener),
       (event) => {
-        console.log('[TwitchAdapter] Stream offline event received', event)
+        this.logger.debug('Stream offline event received', { event })
         this.isLive = false
         this.emitEvent('stream.offline', {
           ...event, // Pass all original fields
@@ -642,7 +666,7 @@ export class TwitchAdapter extends BaseAdapter {
     safeSubscribe(
       this.eventSubListener.onChannelUpdate.bind(this.eventSubListener),
       (event) => {
-        console.log('[TwitchAdapter] Channel update event received', event)
+        this.logger.debug('Channel update event received', { event })
 
         // Update stored channel info with latest values
         this.channelInfo = {
@@ -674,7 +698,7 @@ export class TwitchAdapter extends BaseAdapter {
           this.userId, // broadcaster_user_id - the channel
           this.userId, // user_id - view chat as the broadcaster (sees all messages)
           (event) => {
-            console.log('[TwitchAdapter] Chat message received')
+            this.logger.debug('Chat message received')
 
             // Pass through the original event data with minimal processing
             this.emitEvent('chat.message', {
@@ -685,13 +709,15 @@ export class TwitchAdapter extends BaseAdapter {
           }
         )
 
-        console.log('[TwitchAdapter] Successfully subscribed to chat message events')
+        this.logger.info('Successfully subscribed to chat message events')
       } catch (error) {
-        console.error('[TwitchAdapter] Failed to subscribe to chat message events:', error)
+        this.logger.error('Failed to subscribe to chat message events', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
     } else {
-      console.warn(
-        '[TwitchAdapter] Chat message subscription not available. This might require additional scopes.'
+      this.logger.warn(
+        'Chat message subscription not available. This might require additional scopes.'
       )
     }
 
@@ -699,7 +725,7 @@ export class TwitchAdapter extends BaseAdapter {
     if (this.eventSubListener.onChannelCheer) {
       try {
         this.eventSubListener.onChannelCheer(this.userId, (event) => {
-          console.log('[TwitchAdapter] Cheer received with bits:', event.bits)
+          this.logger.debug('Cheer received with bits', { bits: event.bits })
 
           // Pass through the original event data with minimal processing
           this.emitEvent('chat.cheer', {
@@ -708,21 +734,21 @@ export class TwitchAdapter extends BaseAdapter {
             timestamp: Date.now()
           })
         })
-        console.log('[TwitchAdapter] Successfully subscribed to chat.cheer events')
+        this.logger.info('Successfully subscribed to chat.cheer events')
       } catch (error) {
-        console.error('[TwitchAdapter] Failed to subscribe to chat.cheer events:', error)
+        this.logger.error('Failed to subscribe to chat.cheer events', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
     } else {
-      console.warn(
-        '[TwitchAdapter] Cheer subscription not available. This might require additional scopes.'
-      )
+      this.logger.warn('Cheer subscription not available. This might require additional scopes.')
     }
 
     // Subscribe to subscription events
     if (this.eventSubListener.onChannelSubscription) {
       try {
         this.eventSubListener.onChannelSubscription(this.userId, (event) => {
-          console.log('[TwitchAdapter] Subscription event received')
+          this.logger.debug('Subscription event received')
 
           // Pass through the original event data with minimal processing
           this.emitEvent('chat.subscription', {
@@ -731,13 +757,15 @@ export class TwitchAdapter extends BaseAdapter {
             timestamp: Date.now()
           })
         })
-        console.log('[TwitchAdapter] Successfully subscribed to chat.subscription events')
+        this.logger.info('Successfully subscribed to chat.subscription events')
       } catch (error) {
-        console.error('[TwitchAdapter] Failed to subscribe to chat.subscription events:', error)
+        this.logger.error('Failed to subscribe to chat.subscription events', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
     } else {
-      console.warn(
-        '[TwitchAdapter] Subscription event handler not available. This might require additional scopes.'
+      this.logger.warn(
+        'Subscription event handler not available. This might require additional scopes.'
       )
     }
 
@@ -745,7 +773,7 @@ export class TwitchAdapter extends BaseAdapter {
     if (this.eventSubListener.onChannelRaidTo) {
       try {
         this.eventSubListener.onChannelRaidTo(this.userId, (event) => {
-          console.log('[TwitchAdapter] Raid received with viewers:', event.viewers)
+          this.logger.debug('Raid received with viewers', { viewers: event.viewers })
 
           // Pass through the original event data with minimal processing
           this.emitEvent('chat.raid', {
@@ -754,14 +782,14 @@ export class TwitchAdapter extends BaseAdapter {
             timestamp: Date.now()
           })
         })
-        console.log('[TwitchAdapter] Successfully subscribed to chat.raid events')
+        this.logger.info('Successfully subscribed to chat.raid events')
       } catch (error) {
-        console.error('[TwitchAdapter] Failed to subscribe to chat.raid events:', error)
+        this.logger.error('Failed to subscribe to chat.raid events', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
     } else {
-      console.warn(
-        '[TwitchAdapter] Raid event handler not available. This might require additional scopes.'
-      )
+      this.logger.warn('Raid event handler not available. This might require additional scopes.')
     }
   }
 
@@ -770,7 +798,7 @@ export class TwitchAdapter extends BaseAdapter {
    */
   private async stopEventSub(): Promise<void> {
     if (this.eventSubListener) {
-      console.log('[TwitchAdapter] Stopping EventSub WebSocket listener')
+      this.logger.info('Stopping EventSub WebSocket listener')
       await this.eventSubListener.stop()
       this.eventSubListener = undefined
     }
@@ -818,7 +846,7 @@ export class TwitchAdapter extends BaseAdapter {
   private getTypedOptions(): TwitchAdapterOptions {
     // Use type guard to validate options at runtime
     if (!TwitchAdapter.isTwitchAdapterOptions(this.options)) {
-      console.warn('Invalid TwitchAdapter options, using defaults', this.options)
+      this.logger.warn('Invalid TwitchAdapter options, using defaults', this.options)
       return { ...DEFAULT_OPTIONS }
     }
     return this.options

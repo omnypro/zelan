@@ -15,25 +15,25 @@ This module provides standardized utilities for filtering events across the appl
 ### Basic Filtering
 
 ```typescript
-import { filterEvents, EventFilterCriteria } from '@s/utils/filters/event-filter';
-import { EventCategory } from '@s/types/events';
+import { filterEvents, EventFilterCriteria } from '@s/utils/filters/event-filter'
+import { EventCategory } from '@s/types/events'
 
 // Define filter criteria
 const criteria: EventFilterCriteria = {
   category: EventCategory.ADAPTER,
   type: 'connection',
   sourceId: 'twitch-adapter'
-};
+}
 
 // Filter an array of events
-const filteredEvents = filterEvents(allEvents, criteria);
+const filteredEvents = filterEvents(allEvents, criteria)
 ```
 
 ### Filtering Observable Streams
 
 ```typescript
-import { filterEventStream } from '@s/utils/filters/event-filter';
-import { EventCategory } from '@s/types/events';
+import { filterEventStream } from '@s/utils/filters/event-filter'
+import { EventCategory } from '@s/types/events'
 
 // Create a filtered Observable stream
 const filteredStream$ = sourceStream$.pipe(
@@ -41,14 +41,14 @@ const filteredStream$ = sourceStream$.pipe(
     category: EventCategory.ADAPTER,
     sourceType: 'twitch'
   })
-);
+)
 ```
 
 ### Using the Fluent Builder API
 
 ```typescript
-import { createEventFilter } from '@s/utils/filters/event-filter';
-import { EventCategory } from '@s/types/events';
+import { createEventFilter } from '@s/utils/filters/event-filter'
+import { EventCategory } from '@s/types/events'
 
 // Create filter with builder pattern
 const filter = createEventFilter()
@@ -56,37 +56,34 @@ const filter = createEventFilter()
   .byType('connection')
   .bySourceType('twitch')
   .since(Date.now() - 3600000) // Events from the last hour
-  .where(event => event.payload.status === 'connected')
-  .build();
+  .where((event) => event.payload.status === 'connected')
+  .build()
 
 // Apply to arrays
-const filteredArray = filterEvents(events, filter);
+const filteredArray = filterEvents(events, filter)
 
 // Apply to Observables
-const filteredStream$ = eventStream$.pipe(filterEventStream(filter));
+const filteredStream$ = eventStream$.pipe(filterEventStream(filter))
 ```
 
 ### In React Components
 
 ```typescript
-import { useFilteredEvents, useFilteredEventPayload } from '@r/hooks/useEventStream';
-import { EventCategory } from '@s/types/events';
+import { useFilteredEvents, useFilteredEventPayload } from '@r/hooks/useEventStream'
+import { EventCategory } from '@s/types/events'
 
 function ConnectionStatus() {
   // Get filtered events using the hook
   const connectionEvents = useFilteredEvents({
     category: EventCategory.ADAPTER,
     type: 'connection'
-  });
-  
+  })
+
   // Or use the fluent builder
-  const filter = createEventFilter()
-    .byCategory(EventCategory.ADAPTER)
-    .byType('status')
-    .build();
-    
-  const status = useFilteredEventPayload(filter);
-  
+  const filter = createEventFilter().byCategory(EventCategory.ADAPTER).byType('status').build()
+
+  const status = useFilteredEventPayload(filter)
+
   // ...
 }
 ```

@@ -1,23 +1,23 @@
-import { Observable } from 'rxjs';
-import { filter } from 'rxjs/operators';
-import { EventCategory, BaseEvent } from '../../types/events';
+import { Observable } from 'rxjs'
+import { filter } from 'rxjs/operators'
+import { EventCategory, BaseEvent } from '../../types/events'
 
 /**
  * Type for event filter criteria, supporting filtering by various event properties.
  */
 export interface EventFilterCriteria<T = unknown> {
   /** Filter by event category */
-  category?: EventCategory;
+  category?: EventCategory
   /** Filter by event type */
-  type?: string;
+  type?: string
   /** Filter by source ID */
-  sourceId?: string;
+  sourceId?: string
   /** Filter by source type */
-  sourceType?: string;
+  sourceType?: string
   /** Filter by minimum timestamp (events after this time) */
-  since?: number;
+  since?: number
   /** Custom filter predicate for advanced filtering */
-  predicate?: (event: BaseEvent<T>) => boolean;
+  predicate?: (event: BaseEvent<T>) => boolean
 }
 
 /**
@@ -30,40 +30,40 @@ export function createEventFilterPredicate<T = unknown>(
 ): (event: BaseEvent<T>) => boolean {
   return (event: BaseEvent<T>) => {
     // Skip filtering if no criteria provided
-    if (!criteria || Object.keys(criteria).length === 0) return true;
+    if (!criteria || Object.keys(criteria).length === 0) return true
 
     // Check category
     if (criteria.category !== undefined && event.category !== criteria.category) {
-      return false;
+      return false
     }
 
     // Check type
     if (criteria.type !== undefined && event.type !== criteria.type) {
-      return false;
+      return false
     }
 
     // Check sourceId
     if (criteria.sourceId !== undefined && event.source?.id !== criteria.sourceId) {
-      return false;
+      return false
     }
 
     // Check sourceType
     if (criteria.sourceType !== undefined && event.source?.type !== criteria.sourceType) {
-      return false;
+      return false
     }
 
     // Check timestamp
     if (criteria.since !== undefined && event.timestamp < criteria.since) {
-      return false;
+      return false
     }
 
     // Apply custom predicate if provided
     if (criteria.predicate && !criteria.predicate(event)) {
-      return false;
+      return false
     }
 
-    return true;
-  };
+    return true
+  }
 }
 
 /**
@@ -76,10 +76,10 @@ export function filterEvents<T = unknown>(
   events: BaseEvent<T>[],
   criteria?: EventFilterCriteria<T>
 ): BaseEvent<T>[] {
-  if (!criteria || Object.keys(criteria).length === 0) return events;
-  
-  const predicate = createEventFilterPredicate(criteria);
-  return events.filter(predicate);
+  if (!criteria || Object.keys(criteria).length === 0) return events
+
+  const predicate = createEventFilterPredicate(criteria)
+  return events.filter(predicate)
 }
 
 /**
@@ -87,91 +87,89 @@ export function filterEvents<T = unknown>(
  * @param criteria Filter criteria to apply
  * @returns RxJS operator function
  */
-export function filterEventStream<T = unknown>(
-  criteria?: EventFilterCriteria<T>
-) {
+export function filterEventStream<T = unknown>(criteria?: EventFilterCriteria<T>) {
   if (!criteria || Object.keys(criteria).length === 0) {
-    return <E extends BaseEvent<T>>(source$: Observable<E>) => source$;
+    return <E extends BaseEvent<T>>(source$: Observable<E>) => source$
   }
-  
-  const predicate = createEventFilterPredicate<T>(criteria);
-  return <E extends BaseEvent<T>>(source$: Observable<E>) => 
-    source$.pipe(filter(predicate as (event: E) => boolean));
+
+  const predicate = createEventFilterPredicate<T>(criteria)
+  return <E extends BaseEvent<T>>(source$: Observable<E>) =>
+    source$.pipe(filter(predicate as (event: E) => boolean))
 }
 
 /**
  * Builder class for creating complex filter criteria with a fluent API
  */
 export class EventFilterBuilder<T = unknown> {
-  private criteria: EventFilterCriteria<T> = {};
+  private criteria: EventFilterCriteria<T> = {}
 
   /**
    * Filter by event category
    */
   byCategory(category: EventCategory): EventFilterBuilder<T> {
-    this.criteria.category = category;
-    return this;
+    this.criteria.category = category
+    return this
   }
 
   /**
    * Filter by event type
    */
   byType(type: string): EventFilterBuilder<T> {
-    this.criteria.type = type;
-    return this;
+    this.criteria.type = type
+    return this
   }
 
   /**
    * Filter by source ID
    */
   bySourceId(sourceId: string): EventFilterBuilder<T> {
-    this.criteria.sourceId = sourceId;
-    return this;
+    this.criteria.sourceId = sourceId
+    return this
   }
 
   /**
    * Filter by source type
    */
   bySourceType(sourceType: string): EventFilterBuilder<T> {
-    this.criteria.sourceType = sourceType;
-    return this;
+    this.criteria.sourceType = sourceType
+    return this
   }
 
   /**
    * Filter by minimum timestamp (events after this time)
    */
   since(timestamp: number): EventFilterBuilder<T> {
-    this.criteria.since = timestamp;
-    return this;
+    this.criteria.since = timestamp
+    return this
   }
 
   /**
    * Add a custom filter predicate for advanced filtering
    */
   where(predicate: (event: BaseEvent<T>) => boolean): EventFilterBuilder<T> {
-    this.criteria.predicate = predicate;
-    return this;
+    this.criteria.predicate = predicate
+    return this
   }
 
   /**
    * Get the constructed filter criteria
    */
   build(): EventFilterCriteria<T> {
-    return { ...this.criteria };
+    return { ...this.criteria }
   }
 
   /**
    * Apply the filter to an array of events
    */
   applyToArray(events: BaseEvent<T>[]): BaseEvent<T>[] {
-    return filterEvents(events, this.criteria);
+    return filterEvents(events, this.criteria)
   }
 
   /**
    * Apply the filter to an Observable of events
    */
   applyToStream(stream$: Observable<BaseEvent<T>>): Observable<BaseEvent<T>> {
-    return filterEventStream(this.criteria)(stream$);
+    return filterEventStream(this.criteria)(stream$)
   }
 }
 
@@ -179,5 +177,5 @@ export class EventFilterBuilder<T = unknown> {
  * Create a new event filter builder with a fluent API
  */
 export function createEventFilter<T = unknown>(): EventFilterBuilder<T> {
-  return new EventFilterBuilder<T>();
+  return new EventFilterBuilder<T>()
 }

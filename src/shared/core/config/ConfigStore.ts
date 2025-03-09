@@ -4,6 +4,29 @@ import * as path from 'path'
 import { BehaviorSubject, Observable, Subject } from 'rxjs'
 import { z } from 'zod'
 
+// Define a simple console logger for ConfigStore when running in web context
+interface ComponentLogger {
+  info: (message: string, meta?: any) => void
+  error: (message: string, meta?: any) => void
+  warn: (message: string, meta?: any) => void
+  debug: (message: string, meta?: any) => void
+}
+
+// Dynamic import for main process
+let getLoggingService: () => { createLogger: (component: string) => ComponentLogger } | null = () =>
+  null
+
+// Only import logging service when in main process (electron is available)
+if (typeof app !== 'undefined') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const logging = require('@m/services/logging')
+    getLoggingService = logging.getLoggingService
+  } catch (err) {
+    console.error('Failed to import logging service:', err)
+  }
+}
+
 /**
  * Event emitted when a configuration value changes
  */
@@ -68,6 +91,7 @@ export class ConfigStore {
   private adaptersSubject: BehaviorSubject<Record<string, AdapterConfig>>
   private settingsSubject: BehaviorSubject<AppSettings>
   private changesSubject = new Subject<ConfigChangeEvent>()
+  private logger!: ComponentLogger
 
   /**
    * Create a new config store
@@ -84,9 +108,31 @@ export class ConfigStore {
     this.adaptersSubject = new BehaviorSubject<Record<string, AdapterConfig>>({})
     this.settingsSubject = new BehaviorSubject<AppSettings>(this.data.settings)
 
-    // Load config if in main process where app is available
+    // Initialize logger
     if (app) {
+      const loggingService = getLoggingService()
+      if (loggingService) {
+        this.logger = loggingService.createLogger('ConfigStore')
+      } else {
+        // Fallback console logger
+        this.logger = {
+          info: (msg, meta) => console.info(`[ConfigStore] ${msg}`, meta),
+          error: (msg, meta) => console.error(`[ConfigStore] ${msg}`, meta),
+          warn: (msg, meta) => console.warn(`[ConfigStore] ${msg}`, meta),
+          debug: (msg, meta) => console.debug(`[ConfigStore] ${msg}`, meta)
+        }
+      }
+
+      // Load config if in main process where app is available
       this.loadConfig()
+    } else {
+      // Simple console logger for web context
+      this.logger = {
+        info: (msg, meta) => console.info(`[ConfigStore] ${msg}`, meta),
+        error: (msg, meta) => console.error(`[ConfigStore] ${msg}`, meta),
+        warn: (msg, meta) => console.warn(`[ConfigStore] ${msg}`, meta),
+        debug: (msg, meta) => console.debug(`[ConfigStore] ${msg}`, meta)
+      }
     }
   }
 
@@ -140,7 +186,9 @@ export class ConfigStore {
           try {
             validAdapters[id] = AdapterConfigSchema.parse(adapter)
           } catch (err) {
-            console.error(`Invalid adapter config for ${id}:`, err)
+            this.logger.error(`Invalid adapter config for ${id}`, {
+              error: err instanceof Error ? err.message : String(err)
+            })
           }
         }
 
@@ -157,11 +205,15 @@ export class ConfigStore {
           })
           this.settingsSubject.next({ ...this.data.settings })
         } catch (err) {
-          console.error('Invalid settings:', err)
+          this.logger.error('Invalid settings', {
+            error: err instanceof Error ? err.message : String(err)
+          })
         }
       }
     } catch (err) {
-      console.error('Error loading config:', err)
+      this.logger.error('Error loading config', {
+        error: err instanceof Error ? err.message : String(err)
+      })
       // Use defaults on error
       this.data = { ...DEFAULT_CONFIG }
       this.saveConfig()
@@ -182,7 +234,9 @@ export class ConfigStore {
       // Write the config file
       fs.writeFileSync(this.configPath, JSON.stringify(this.data, null, 2))
     } catch (err) {
-      console.error('Error saving config:', err)
+      this.logger.error('Error saving config', {
+        error: err instanceof Error ? err.message : String(err)
+      })
     }
   }
 

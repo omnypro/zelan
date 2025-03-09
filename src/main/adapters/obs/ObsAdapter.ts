@@ -4,15 +4,11 @@ import { BaseAdapter } from '@s/adapters/base'
 import { EventBus } from '@s/core/bus'
 import { createObsEvent, ObsEventType } from '@s/core/events'
 import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
-import {
-  isString,
-  isNumber,
-  isBoolean,
-  createObjectValidator
-} from '@s/utils/type-guards'
+import { isString, isNumber, isBoolean, createObjectValidator } from '@s/utils/type-guards'
 import { AdapterConfig } from '@s/adapters/interfaces/ServiceAdapter'
 import { getErrorService } from '@m/services/errors'
 import { ApplicationError, ErrorCategory, ErrorSeverity } from '@s/errors'
+import { getLoggingService, ComponentLogger } from '@m/services/logging'
 
 /**
  * OBS adapter options
@@ -64,6 +60,7 @@ export class ObsAdapter extends BaseAdapter {
   private isVirtualCamActive: boolean = false
   private currentScene: string = ''
   private scenes: string[] = []
+  private logger: ComponentLogger
 
   constructor(
     id: string,
@@ -76,6 +73,7 @@ export class ObsAdapter extends BaseAdapter {
 
     this.obs = new OBSWebSocket()
     this.eventEmitter = new EventEmitter()
+    this.logger = getLoggingService().createLogger(`ObsAdapter:${id}`)
 
     // Set up event forwarding
     this.setupForwardedEvents()
@@ -90,7 +88,7 @@ export class ObsAdapter extends BaseAdapter {
     password: (val) => val === undefined || isString(val),
     reconnectInterval: isNumber,
     autoReconnect: isBoolean
-  });
+  })
 
   /**
    * Get the options with proper typing
@@ -98,10 +96,10 @@ export class ObsAdapter extends BaseAdapter {
   private getTypedOptions(): ObsAdapterOptions {
     // Use type guard to validate options at runtime
     if (!ObsAdapter.isObsAdapterOptions(this.options)) {
-      console.warn('Invalid ObsAdapter options, using defaults', this.options);
-      return { ...DEFAULT_OPTIONS };
+      this.logger.warn('Invalid ObsAdapter options, using defaults', this.options)
+      return { ...DEFAULT_OPTIONS }
     }
-    return this.options;
+    return this.options
   }
 
   protected async connectImplementation(): Promise<void> {
@@ -120,7 +118,7 @@ export class ObsAdapter extends BaseAdapter {
       options.reconnectInterval = DEFAULT_OPTIONS.reconnectInterval
 
       // Log the connection
-      console.log(`Connected to OBS WebSocket v${obsWebSocketVersion}`)
+      this.logger.info(`Connected to OBS WebSocket v${obsWebSocketVersion}`)
 
       // Set up event listeners with proper subscriptions
       this.setupEventListeners()
@@ -136,29 +134,28 @@ export class ObsAdapter extends BaseAdapter {
     } catch (error) {
       // Report error through the error service
       try {
-        const errorService = getErrorService();
-        errorService.reportError(
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            component: 'ObsAdapter',
-            operation: 'connect',
-            adapterId: this.id,
-            adapterName: this.name,
-            connectionString,
-            recoverable: options.autoReconnect
-          }
-        );
+        const errorService = getErrorService()
+        errorService.reportError(error instanceof Error ? error : new Error(String(error)), {
+          component: 'ObsAdapter',
+          operation: 'connect',
+          adapterId: this.id,
+          adapterName: this.name,
+          connectionString,
+          recoverable: options.autoReconnect
+        })
       } catch (serviceError) {
         // Fallback to console if error service isn't available
-        console.error('Failed to connect to OBS:', error);
+        this.logger.error('Failed to connect to OBS', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
 
       // Update status to error
-      this.updateStatus(AdapterStatus.ERROR, 'Failed to connect to OBS', error as Error);
+      this.updateStatus(AdapterStatus.ERROR, 'Failed to connect to OBS', error as Error)
 
       // Set up reconnection if enabled and not already reconnecting
       if (options.autoReconnect && !this.isReconnecting) {
-        this.setupReconnection();
+        this.setupReconnection()
       }
 
       throw error
@@ -224,8 +221,8 @@ export class ObsAdapter extends BaseAdapter {
    */
   private setupEventListeners(): void {
     // Remove any existing listeners first to prevent duplicates
-    this.removeEventListeners();
-    
+    this.removeEventListeners()
+
     // Connection events
     this.obs.on('ConnectionOpened', this.handleConnectionOpened.bind(this))
     this.obs.on('ConnectionClosed', this.handleConnectionClosed.bind(this))
@@ -314,7 +311,9 @@ export class ObsAdapter extends BaseAdapter {
         this.publishEvent('virtual_cam_started', { active: true })
       }
     } catch (error) {
-      console.error('Failed to get initial OBS state:', error)
+      this.logger.error('Failed to get initial OBS state', {
+        error: error instanceof Error ? error.message : String(error)
+      })
     }
   }
 
@@ -324,12 +323,12 @@ export class ObsAdapter extends BaseAdapter {
   /**
    * Maximum number of consecutive reconnection attempts before backing off
    */
-  private static MAX_CONSECUTIVE_ATTEMPTS = 5;
+  private static MAX_CONSECUTIVE_ATTEMPTS = 5
 
   /**
    * Count of consecutive reconnection attempts
    */
-  private consecutiveReconnectAttempts = 0;
+  private consecutiveReconnectAttempts = 0
 
   /**
    * Set up reconnection logic with exponential backoff
@@ -337,33 +336,33 @@ export class ObsAdapter extends BaseAdapter {
   private setupReconnection(): void {
     // Clean up any existing reconnection timer
     if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = undefined;
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = undefined
     }
 
     // If we've exceeded the maximum consecutive attempts, stop aggressive reconnection
     if (this.consecutiveReconnectAttempts >= ObsAdapter.MAX_CONSECUTIVE_ATTEMPTS) {
-      console.log(`Maximum reconnection attempts reached. Backing off to longer interval.`);
-      
+      this.logger.info(`Maximum reconnection attempts reached. Backing off to longer interval.`)
+
       // Use a much longer interval for subsequent attempts
       this.reconnectTimer = setTimeout(() => {
         // Reset the counter to allow for fresh attempts if this one fails
-        this.consecutiveReconnectAttempts = 0;
-        this.attemptReconnection();
-      }, 30000); // 30 seconds
-      
-      return;
+        this.consecutiveReconnectAttempts = 0
+        this.attemptReconnection()
+      }, 30000) // 30 seconds
+
+      return
     }
 
     // Calculate backoff delay: 1s, 2s, 4s, 8s, 16s
-    const delay = Math.min(1000 * Math.pow(2, this.consecutiveReconnectAttempts), 16000);
+    const delay = Math.min(1000 * Math.pow(2, this.consecutiveReconnectAttempts), 16000)
 
     // Set the reconnecting flag
-    this.isReconnecting = true;
+    this.isReconnecting = true
 
     this.reconnectTimer = setTimeout(() => {
-      this.attemptReconnection();
-    }, delay);
+      this.attemptReconnection()
+    }, delay)
   }
 
   /**
@@ -372,44 +371,44 @@ export class ObsAdapter extends BaseAdapter {
   private async attemptReconnection(): Promise<void> {
     try {
       // Increment the attempt counter
-      this.consecutiveReconnectAttempts++;
+      this.consecutiveReconnectAttempts++
 
       // Only log every few attempts to avoid spam
-      if (this.consecutiveReconnectAttempts === 1 || 
-          this.consecutiveReconnectAttempts % 5 === 0) {
-        console.log(`Attempting to reconnect to OBS... (attempt ${this.consecutiveReconnectAttempts})`);
+      if (this.consecutiveReconnectAttempts === 1 || this.consecutiveReconnectAttempts % 5 === 0) {
+        this.logger.info(
+          `Attempting to reconnect to OBS... (attempt ${this.consecutiveReconnectAttempts})`
+        )
       }
 
-      await this.connect();
-      
+      await this.connect()
+
       // Connection succeeded
-      this.isReconnecting = false;
-      this.consecutiveReconnectAttempts = 0;
+      this.isReconnecting = false
+      this.consecutiveReconnectAttempts = 0
     } catch (error) {
       // Report error through the error service
       try {
-        const errorService = getErrorService();
-        errorService.reportError(
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            component: 'ObsAdapter',
-            operation: 'reconnect',
-            adapterId: this.id,
-            adapterName: this.name,
-            attemptNumber: this.consecutiveReconnectAttempts,
-            recoverable: true,
-            severity: ErrorSeverity.WARNING
-          }
-        );
+        const errorService = getErrorService()
+        errorService.reportError(error instanceof Error ? error : new Error(String(error)), {
+          component: 'ObsAdapter',
+          operation: 'reconnect',
+          adapterId: this.id,
+          adapterName: this.name,
+          attemptNumber: this.consecutiveReconnectAttempts,
+          recoverable: true,
+          severity: ErrorSeverity.WARNING
+        })
       } catch (serviceError) {
         // Fallback to console if error service isn't available
         if (process.env.NODE_ENV === 'development') {
-          console.error('Reconnection attempt failed:', error);
+          this.logger.error('Reconnection attempt failed', {
+            error: error instanceof Error ? error.message : String(error)
+          })
         }
       }
 
       // Schedule next reconnection attempt
-      this.setupReconnection();
+      this.setupReconnection()
     }
   }
 
@@ -419,8 +418,8 @@ export class ObsAdapter extends BaseAdapter {
    */
   protected override validateConfigUpdate(config: Partial<AdapterConfig>): void {
     // First validate using the base class implementation
-    super.validateConfigUpdate(config);
-    
+    super.validateConfigUpdate(config)
+
     // Then perform OBS-specific validation
     if (config.options) {
       // Validate host if provided
@@ -429,79 +428,81 @@ export class ObsAdapter extends BaseAdapter {
           `Invalid OBS host: ${config.options.host}, expected string`,
           ErrorCategory.VALIDATION,
           ErrorSeverity.ERROR,
-          { 
-            component: 'ObsAdapter', 
-            adapterId: this.id, 
+          {
+            component: 'ObsAdapter',
+            adapterId: this.id,
             fieldName: 'host',
             receivedValue: config.options.host,
             expectedType: 'string'
           }
-        );
+        )
       }
-      
+
       // Validate port if provided
       if ('port' in config.options && !isNumber(config.options.port)) {
         throw new ApplicationError(
           `Invalid OBS port: ${config.options.port}, expected number`,
           ErrorCategory.VALIDATION,
           ErrorSeverity.ERROR,
-          { 
-            component: 'ObsAdapter', 
-            adapterId: this.id, 
+          {
+            component: 'ObsAdapter',
+            adapterId: this.id,
             fieldName: 'port',
             receivedValue: config.options.port,
             expectedType: 'number'
           }
-        );
+        )
       }
-      
+
       // Validate password if provided (can be undefined or string)
-      if ('password' in config.options && 
-          config.options.password !== undefined && 
-          !isString(config.options.password)) {
+      if (
+        'password' in config.options &&
+        config.options.password !== undefined &&
+        !isString(config.options.password)
+      ) {
         throw new ApplicationError(
           `Invalid OBS password, expected string or undefined`,
           ErrorCategory.VALIDATION,
           ErrorSeverity.ERROR,
-          { 
-            component: 'ObsAdapter', 
-            adapterId: this.id, 
+          {
+            component: 'ObsAdapter',
+            adapterId: this.id,
             fieldName: 'password',
             expectedType: 'string or undefined'
           }
-        );
+        )
       }
-      
+
       // Validate reconnect interval if provided
       if ('reconnectInterval' in config.options && !isNumber(config.options.reconnectInterval)) {
         throw new ApplicationError(
           `Invalid reconnect interval: ${config.options.reconnectInterval}, expected number`,
           ErrorCategory.VALIDATION,
           ErrorSeverity.ERROR,
-          { 
-            component: 'ObsAdapter', 
-            adapterId: this.id, 
+          {
+            component: 'ObsAdapter',
+            adapterId: this.id,
             fieldName: 'reconnectInterval',
             receivedValue: config.options.reconnectInterval,
             expectedType: 'number'
           }
-        );
+        )
       }
-      
+
       // Validate auto reconnect if provided
       if ('autoReconnect' in config.options && !isBoolean(config.options.autoReconnect)) {
         throw new ApplicationError(
           `Invalid auto reconnect value: ${config.options.autoReconnect}, expected boolean`,
           ErrorCategory.VALIDATION,
           ErrorSeverity.ERROR,
-          { 
-            component: 'ObsAdapter', 
-            adapterId: this.id, 
+          {
+            component: 'ObsAdapter',
+            adapterId: this.id,
             fieldName: 'autoReconnect',
             receivedValue: config.options.autoReconnect,
             expectedType: 'boolean'
           }
-        );
+        )
       }
     }
   }
@@ -525,7 +526,7 @@ export class ObsAdapter extends BaseAdapter {
   private handleConnectionOpened(): void {
     // Log only if transitioning from a different state
     if (this.connectionState !== 'connected') {
-      console.log('OBS WebSocket connection opened')
+      this.logger.info('OBS WebSocket connection opened')
       this.connectionState = 'connected'
     }
   }
@@ -533,19 +534,19 @@ export class ObsAdapter extends BaseAdapter {
   private handleConnectionClosed(): void {
     // Log only if transitioning from a different state
     if (this.connectionState !== 'disconnected') {
-      console.log('OBS WebSocket connection closed')
+      this.logger.info('OBS WebSocket connection closed')
       this.connectionState = 'disconnected'
 
       // If we have a pending reconnection, don't schedule another one
       if (this.reconnectTimer) {
-        console.log('Reconnection already scheduled, skipping additional reconnect');
-        return;
+        this.logger.info('Reconnection already scheduled, skipping additional reconnect')
+        return
       }
 
       // Set up reconnection if enabled and not already in the process of reconnecting
       const options = this.getTypedOptions()
       if (options.autoReconnect && !this.isReconnecting) {
-        console.log('Scheduling reconnection after connection closed');
+        this.logger.info('Scheduling reconnection after connection closed')
         this.setupReconnection()
       }
     }
@@ -554,9 +555,11 @@ export class ObsAdapter extends BaseAdapter {
   private handleConnectionError(error: Error | unknown): void {
     // Only log detailed error in development mode to avoid log spam
     if (process.env.NODE_ENV === 'development') {
-      console.error('OBS WebSocket connection error:', error)
+      this.logger.error('OBS WebSocket connection error', {
+        error: error instanceof Error ? error.message : String(error)
+      })
     } else {
-      console.error('OBS WebSocket connection error')
+      this.logger.error('OBS WebSocket connection error')
     }
 
     this.updateStatus(
@@ -568,15 +571,15 @@ export class ObsAdapter extends BaseAdapter {
 
     // If we already have a reconnection scheduled, don't create another one
     if (this.reconnectTimer) {
-      console.log('Reconnection already scheduled after error, skipping additional reconnect');
-      return;
+      this.logger.info('Reconnection already scheduled after error, skipping additional reconnect')
+      return
     }
 
     // Set up reconnection if enabled and not already reconnecting
-    const options = this.getTypedOptions();
+    const options = this.getTypedOptions()
     if (options.autoReconnect && !this.isReconnecting) {
-      console.log('Scheduling reconnection after error');
-      this.setupReconnection();
+      this.logger.info('Scheduling reconnection after error')
+      this.setupReconnection()
     }
   }
 
@@ -657,7 +660,9 @@ export class ObsAdapter extends BaseAdapter {
     try {
       await this.obs.call('SetCurrentProgramScene', { sceneName })
     } catch (error) {
-      console.error(`Failed to switch to scene "${sceneName}":`, error)
+      this.logger.error(`Failed to switch to scene "${sceneName}"`, {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw error
     }
   }
@@ -669,7 +674,9 @@ export class ObsAdapter extends BaseAdapter {
     try {
       await this.obs.call('StartStream')
     } catch (error) {
-      console.error('Failed to start streaming:', error)
+      this.logger.error('Failed to start streaming', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw error
     }
   }
@@ -681,7 +688,9 @@ export class ObsAdapter extends BaseAdapter {
     try {
       await this.obs.call('StopStream')
     } catch (error) {
-      console.error('Failed to stop streaming:', error)
+      this.logger.error('Failed to stop streaming', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw error
     }
   }
@@ -693,7 +702,9 @@ export class ObsAdapter extends BaseAdapter {
     try {
       await this.obs.call('StartRecord')
     } catch (error) {
-      console.error('Failed to start recording:', error)
+      this.logger.error('Failed to start recording', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw error
     }
   }
@@ -705,7 +716,9 @@ export class ObsAdapter extends BaseAdapter {
     try {
       await this.obs.call('StopRecord')
     } catch (error) {
-      console.error('Failed to stop recording:', error)
+      this.logger.error('Failed to stop recording', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw error
     }
   }
@@ -717,7 +730,9 @@ export class ObsAdapter extends BaseAdapter {
     try {
       await this.obs.call('StartVirtualCam')
     } catch (error) {
-      console.error('Failed to start virtual camera:', error)
+      this.logger.error('Failed to start virtual camera', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw error
     }
   }
@@ -729,7 +744,9 @@ export class ObsAdapter extends BaseAdapter {
     try {
       await this.obs.call('StopVirtualCam')
     } catch (error) {
-      console.error('Failed to stop virtual camera:', error)
+      this.logger.error('Failed to stop virtual camera', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw error
     }
   }

@@ -1,1 +1,1 @@
-export { default as TwitchAuthCard } from './TwitchAuthCard';
+export { default as TwitchAuthCard } from './TwitchAuthCard'

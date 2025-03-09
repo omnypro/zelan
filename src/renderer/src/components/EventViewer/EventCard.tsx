@@ -94,9 +94,7 @@ function StatusIndicator({ status }: { status: string }) {
  */
 function SourceBadge({ source }: { source: { id: string; type: string } }) {
   return (
-    <span className="inline-block px-2 py-0.5 text-xs bg-gray-100 rounded-full">
-      {source.id}
-    </span>
+    <span className="inline-block px-2 py-0.5 text-xs bg-gray-100 rounded-full">{source.id}</span>
   )
 }
 
@@ -107,7 +105,7 @@ function TypeBadge({ type, category }: { type?: string; category?: EventCategory
   if (!type) return null
 
   let bgColor = 'bg-gray-100'
-  
+
   if (category) {
     switch (category) {
       case EventCategory.SYSTEM:
@@ -128,38 +126,34 @@ function TypeBadge({ type, category }: { type?: string; category?: EventCategory
     }
   }
 
-  return (
-    <span className={`inline-block px-2 py-0.5 text-xs ${bgColor} rounded-md`}>
-      {type}
-    </span>
-  )
+  return <span className={`inline-block px-2 py-0.5 text-xs ${bgColor} rounded-md`}>{type}</span>
 }
 
 /**
  * Event card component displays a single event with expandable details
  */
-export function EventCard({ 
-  id, 
-  timestamp, 
-  category, 
-  type, 
-  source, 
-  payload, 
+export function EventCard({
+  id,
+  timestamp,
+  category,
+  type,
+  source,
+  payload,
   expanded: initialExpanded = false,
   onClick
 }: EventCardProps) {
   const [expanded, setExpanded] = useState(initialExpanded)
-  
+
   const timeFormatted = new Date(timestamp).toLocaleTimeString()
   const relativeTime = formatDistanceToNow(timestamp, { addSuffix: true })
-  
+
   const handleExpand = () => {
     setExpanded(!expanded)
     if (onClick) onClick()
   }
 
   return (
-    <div 
+    <div
       className={`p-3 border-b hover:bg-gray-50 transition-colors cursor-pointer ${expanded ? 'bg-gray-50' : ''}`}
       onClick={handleExpand}
     >
@@ -171,14 +165,12 @@ export function EventCard({
             ({relativeTime})
           </span>
         </div>
-        
+
         {source && <SourceBadge source={source} />}
       </div>
-      
-      <div className="text-sm py-1">
-        {formatPayload(payload, type)}
-      </div>
-      
+
+      <div className="text-sm py-1">{formatPayload(payload, type)}</div>
+
       {expanded && (
         <div className="mt-2 pt-2 border-t border-gray-100">
           <div className="text-xs text-gray-500 mb-1">Event ID: {id}</div>

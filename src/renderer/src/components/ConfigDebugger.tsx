@@ -26,7 +26,7 @@ const ConfigDebugger: React.FC = () => {
     try {
       setError(null)
       await updateSavedValue(testKey)
-      console.log('Saved value to config:', testKey)
+      console.info('Saved value to config:', testKey)
     } catch (e) {
       setError(`Error saving: ${e instanceof Error ? e.message : String(e)}`)
       console.error('Error saving config:', e)

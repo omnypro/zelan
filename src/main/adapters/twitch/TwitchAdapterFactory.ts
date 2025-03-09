@@ -6,8 +6,8 @@ import { TwitchAdapter, TwitchAdapterOptions } from './TwitchAdapter'
  * Factory for creating Twitch adapters
  */
 export class TwitchAdapterFactory extends BaseAdapterFactory<TwitchAdapter> {
-  private eventBus: EventBus;
-  
+  private eventBus: EventBus
+
   constructor(eventBus: EventBus) {
     super('twitch')
     this.eventBus = eventBus

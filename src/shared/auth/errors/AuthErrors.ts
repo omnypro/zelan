@@ -1,5 +1,5 @@
-import { ApplicationError, ErrorCategory, ErrorSeverity } from '@s/errors/ErrorTypes';
-import { AuthProvider } from '../interfaces/AuthTypes';
+import { ApplicationError, ErrorCategory, ErrorSeverity } from '@s/errors/ErrorTypes'
+import { AuthProvider } from '../interfaces/AuthTypes'
 
 /**
  * Error codes specific to authentication
@@ -17,15 +17,15 @@ export enum AuthErrorCode {
   REQUEST_FAILED = 'request_failed',
   DEVICE_CODE_TIMEOUT = 'device_code_timeout',
   REFRESH_FAILED = 'refresh_failed',
-  STORAGE_ERROR = 'storage_error',
+  STORAGE_ERROR = 'storage_error'
 }
 
 /**
  * Base authentication error
  */
 export class AuthError extends ApplicationError {
-  provider: AuthProvider;
-  
+  provider: AuthProvider
+
   constructor(
     message: string,
     provider: AuthProvider,
@@ -43,9 +43,9 @@ export class AuthError extends ApplicationError {
         ...metadata
       },
       cause
-    );
-    
-    this.provider = provider;
+    )
+
+    this.provider = provider
   }
 }
 
@@ -53,18 +53,14 @@ export class AuthError extends ApplicationError {
  * Error for expired authentication tokens
  */
 export class TokenExpiredError extends AuthError {
-  constructor(
-    provider: AuthProvider,
-    metadata?: Record<string, unknown>,
-    cause?: Error
-  ) {
+  constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
     super(
       `Token for ${provider} has expired`,
       provider,
       AuthErrorCode.TOKEN_EXPIRED,
       metadata,
       cause
-    );
+    )
   }
 }
 
@@ -72,18 +68,14 @@ export class TokenExpiredError extends AuthError {
  * Error for invalid authentication tokens
  */
 export class TokenInvalidError extends AuthError {
-  constructor(
-    provider: AuthProvider,
-    metadata?: Record<string, unknown>,
-    cause?: Error
-  ) {
+  constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
     super(
       `Token for ${provider} is invalid`,
       provider,
       AuthErrorCode.TOKEN_INVALID,
       metadata,
       cause
-    );
+    )
   }
 }
 
@@ -91,18 +83,14 @@ export class TokenInvalidError extends AuthError {
  * Error for revoked authentication tokens
  */
 export class TokenRevokedError extends AuthError {
-  constructor(
-    provider: AuthProvider,
-    metadata?: Record<string, unknown>,
-    cause?: Error
-  ) {
+  constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
     super(
       `Token for ${provider} has been revoked`,
       provider,
       AuthErrorCode.TOKEN_REVOKED,
       metadata,
       cause
-    );
+    )
   }
 }
 
@@ -117,13 +105,7 @@ export class AuthenticationFailedError extends AuthError {
     metadata?: Record<string, unknown>,
     cause?: Error
   ) {
-    super(
-      message,
-      provider,
-      code,
-      metadata,
-      cause
-    );
+    super(message, provider, code, metadata, cause)
   }
 }
 
@@ -131,18 +113,14 @@ export class AuthenticationFailedError extends AuthError {
  * Error for device code flow timeout
  */
 export class DeviceCodeTimeoutError extends AuthError {
-  constructor(
-    provider: AuthProvider,
-    metadata?: Record<string, unknown>,
-    cause?: Error
-  ) {
+  constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
     super(
       `Device code authentication timed out for ${provider}`,
       provider,
       AuthErrorCode.DEVICE_CODE_TIMEOUT,
       metadata,
       cause
-    );
+    )
   }
 }
 
@@ -150,18 +128,14 @@ export class DeviceCodeTimeoutError extends AuthError {
  * Error for token refresh failures
  */
 export class RefreshFailedError extends AuthError {
-  constructor(
-    provider: AuthProvider,
-    metadata?: Record<string, unknown>,
-    cause?: Error
-  ) {
+  constructor(provider: AuthProvider, metadata?: Record<string, unknown>, cause?: Error) {
     super(
       `Failed to refresh token for ${provider}`,
       provider,
       AuthErrorCode.REFRESH_FAILED,
       metadata,
       cause
-    );
+    )
   }
 }
 
@@ -181,6 +155,6 @@ export class StorageError extends AuthError {
       AuthErrorCode.STORAGE_ERROR,
       metadata,
       cause
-    );
+    )
   }
 }

@@ -54,7 +54,7 @@ export function useAuth(provider: AuthProvider = AuthProvider.TWITCH) {
     lastUpdated: Date.now(),
     isAuthenticated: false
   })
-  
+
   const [deviceCode, setDeviceCode] = useState<DeviceCodeResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -77,12 +77,12 @@ export function useAuth(provider: AuthProvider = AuthProvider.TWITCH) {
     const statusUnsubscribe = statusSubscription.subscribe({
       next: (updatedStatus) => {
         setStatus(updatedStatus)
-        
+
         // If we get an error in the status, update the error state
         if (updatedStatus.error) {
           setError(updatedStatus.error)
         }
-        
+
         // If we're no longer authenticating, we're done loading
         if (updatedStatus.state !== AuthState.AUTHENTICATING) {
           setIsLoading(false)
@@ -138,14 +138,14 @@ export function useAuth(provider: AuthProvider = AuthProvider.TWITCH) {
           provider,
           options
         })
-        
+
         return result
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err)
         console.error('Authentication error:', errorMessage)
         setError(errorMessage)
         setIsLoading(false)
-        
+
         return {
           success: false,
           error: errorMessage
@@ -197,7 +197,7 @@ export function useAuth(provider: AuthProvider = AuthProvider.TWITCH) {
       const errorMessage = err instanceof Error ? err.message : String(err)
       console.error('Token refresh error:', errorMessage)
       setError(errorMessage)
-      
+
       return {
         success: false,
         error: errorMessage

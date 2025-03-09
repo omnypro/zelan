@@ -1,5 +1,6 @@
 import { WebSocket, WebSocketServer as WSServer } from 'ws'
 import { EventBus } from '@s/core/bus'
+import { getLoggingService, ComponentLogger } from '@m/services/logging'
 import { BaseEvent, EventCategory, SystemEventType } from '@s/types/events'
 import { SubscriptionManager } from '@s/utils/subscription-manager'
 
@@ -29,12 +30,14 @@ export class WebSocketServer {
   private pingInterval: NodeJS.Timeout | null = null
   private config: WebSocketServerConfig
   private isRunning = false
+  private logger: ComponentLogger
 
   constructor(
     private eventBus: EventBus,
     config?: Partial<WebSocketServerConfig>
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config }
+    this.logger = getLoggingService().createLogger('WebSocketServer')
   }
 
   /**
@@ -43,7 +46,7 @@ export class WebSocketServer {
    */
   start(): boolean {
     if (this.isRunning) {
-      console.log('WebSocket server is already running')
+      this.logger.info('WebSocket server is already running')
       return false
     }
 
@@ -56,18 +59,19 @@ export class WebSocketServer {
       this.server.on('error', this.handleServerError.bind(this))
 
       // Subscribe to all events
-      this.subscriptionManager.add(
-        this.eventBus.events$.subscribe(this.broadcastEvent.bind(this))
-      )
+      this.subscriptionManager.add(this.eventBus.events$.subscribe(this.broadcastEvent.bind(this)))
 
       // Set up ping interval
       this.setupPingInterval()
 
       this.isRunning = true
-      console.log(`WebSocket server started on port ${this.config.port}`)
+      this.logger.info(`WebSocket server started on port ${this.config.port}`)
       return true
     } catch (error) {
-      console.error('Failed to start WebSocket server:', error)
+      this.logger.error('Failed to start WebSocket server', {
+        error: error instanceof Error ? error.message : String(error),
+        port: this.config.port
+      })
       this.stop()
       return false
     }
@@ -107,7 +111,7 @@ export class WebSocketServer {
     }
 
     this.isRunning = false
-    console.log('WebSocket server stopped')
+    this.logger.info('WebSocket server stopped')
   }
 
   /**
@@ -190,7 +194,7 @@ export class WebSocketServer {
       }
     })
 
-    console.log(`WebSocket client connected. Total clients: ${this.clients.size}`)
+    this.logger.info(`WebSocket client connected`, { clientCount: this.clients.size })
   }
 
   /**
@@ -204,7 +208,7 @@ export class WebSocketServer {
         // Ignore errors when terminating
       }
       this.clients.delete(client)
-      console.log(`WebSocket client disconnected. Total clients: ${this.clients.size}`)
+      this.logger.info(`WebSocket client disconnected`, { clientCount: this.clients.size })
     }
   }
 
@@ -212,7 +216,10 @@ export class WebSocketServer {
    * Handle server error
    */
   private handleServerError(error: Error): void {
-    console.error('WebSocket server error:', error)
+    this.logger.error('WebSocket server error', {
+      error: error.message,
+      stack: error.stack
+    })
   }
 
   /**
@@ -255,7 +262,9 @@ export class WebSocketServer {
       const message = JSON.stringify(event, this.safeReplacer)
       client.send(message)
     } catch (error) {
-      console.error('Error sending message to client:', error)
+      this.logger.error('Error sending message to client', {
+        error: error instanceof Error ? error.message : String(error)
+      })
     }
   }
 

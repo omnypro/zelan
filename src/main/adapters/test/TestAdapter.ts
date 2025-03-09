@@ -4,12 +4,8 @@ import { EventCategory } from '@s/types/events'
 import { createEvent } from '@s/core/events'
 import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
 import { AdapterConfig } from '@s/adapters/interfaces/ServiceAdapter'
-import {
-  isNumber,
-  isBoolean,
-  isStringArray,
-  createObjectValidator
-} from '@s/utils/type-guards'
+import { isNumber, isBoolean, isStringArray, createObjectValidator } from '@s/utils/type-guards'
+import { getLoggingService, ComponentLogger } from '@m/services/logging'
 
 /**
  * Test adapter options
@@ -35,6 +31,7 @@ const DEFAULT_OPTIONS: TestAdapterOptions = {
 export class TestAdapter extends BaseAdapter {
   private intervalId?: NodeJS.Timeout
   private eventCount = 0
+  private logger: ComponentLogger
 
   constructor(
     id: string,
@@ -44,6 +41,7 @@ export class TestAdapter extends BaseAdapter {
     enabled = true
   ) {
     super(id, 'test', name, { ...DEFAULT_OPTIONS, ...options }, eventBus, enabled)
+    this.logger = getLoggingService().createLogger(`TestAdapter:${id}`)
   }
 
   protected async connectImplementation(): Promise<void> {
@@ -65,30 +63,34 @@ export class TestAdapter extends BaseAdapter {
   protected async disposeImplementation(): Promise<void> {
     this.stopEventGeneration()
   }
-  
+
   /**
    * Validate a configuration update specifically for Test adapter
    * @throws Error if the configuration is invalid
    */
   protected override validateConfigUpdate(config: Partial<AdapterConfig>): void {
     // First validate using the base class implementation
-    super.validateConfigUpdate(config);
-    
+    super.validateConfigUpdate(config)
+
     // Then perform Test-specific validation
     if (config.options) {
       // Validate event interval if provided
       if ('eventInterval' in config.options && !isNumber(config.options.eventInterval)) {
-        throw new Error(`Invalid event interval: ${config.options.eventInterval}, expected number`);
+        throw new Error(`Invalid event interval: ${config.options.eventInterval}, expected number`)
       }
-      
+
       // Validate simulate errors if provided
       if ('simulateErrors' in config.options && !isBoolean(config.options.simulateErrors)) {
-        throw new Error(`Invalid simulateErrors value: ${config.options.simulateErrors}, expected boolean`);
+        throw new Error(
+          `Invalid simulateErrors value: ${config.options.simulateErrors}, expected boolean`
+        )
       }
-      
+
       // Validate event types if provided
       if ('eventTypes' in config.options && !isStringArray(config.options.eventTypes)) {
-        throw new Error(`Invalid eventTypes: ${config.options.eventTypes}, expected array of strings`);
+        throw new Error(
+          `Invalid eventTypes: ${config.options.eventTypes}, expected array of strings`
+        )
       }
     }
   }
@@ -100,7 +102,7 @@ export class TestAdapter extends BaseAdapter {
     eventInterval: isNumber,
     simulateErrors: isBoolean,
     eventTypes: isStringArray
-  });
+  })
 
   /**
    * Get the options with proper typing
@@ -108,10 +110,10 @@ export class TestAdapter extends BaseAdapter {
   private getTypedOptions(): TestAdapterOptions {
     // Use type guard to validate options at runtime
     if (!TestAdapter.isTestAdapterOptions(this.options)) {
-      console.warn('Invalid TestAdapter options, using defaults', this.options);
-      return { ...DEFAULT_OPTIONS };
+      this.logger.warn('Invalid TestAdapter options, using defaults', this.options)
+      return { ...DEFAULT_OPTIONS }
     }
-    return this.options;
+    return this.options
   }
 
   /**
@@ -138,7 +140,7 @@ export class TestAdapter extends BaseAdapter {
         // Automatically reconnect after a brief delay
         setTimeout(() => {
           this.reconnect().catch((error) => {
-            console.error('Failed to reconnect test adapter', error)
+            this.logger.error('Failed to reconnect test adapter', error)
           })
         }, 3000)
       }

@@ -322,7 +322,7 @@ export function useTrpcAdapters() {
       const configUnsubscribe = configSubscription.subscribe({
         next: (change) => {
           if (change.key.startsWith('adapters')) {
-            console.log('Received adapter config change:', change)
+            console.info('Received adapter config change:', change)
             fetchAdapters()
           }
         },

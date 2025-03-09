@@ -1,6 +1,7 @@
-import { EventBus } from '@s/core/bus/EventBus';
-import { BaseAuthService } from './BaseAuthService';
+import { EventBus } from '@s/core/bus/EventBus'
+import { BaseAuthService } from './BaseAuthService'
 import { getErrorService } from '@m/services/errors'
+import { getLoggingService } from '@m/services/logging'
 import {
   AuthProvider,
   AuthOptions,
@@ -8,14 +9,14 @@ import {
   AuthToken,
   DeviceCodeResponse,
   AuthState
-} from '@s/auth/interfaces';
+} from '@s/auth/interfaces'
 import {
   AuthError,
   AuthErrorCode,
   AuthenticationFailedError,
   DeviceCodeTimeoutError,
   RefreshFailedError
-} from '@s/auth/errors';
+} from '@s/auth/errors'
 
 import { AccessToken, RefreshingAuthProvider, revokeToken } from '@twurple/auth'
 
@@ -40,7 +41,7 @@ export class TwitchAuthService extends BaseAuthService {
     'channel:read:subscriptions',
     'channel:read:vips',
     'chat:read',
-    'eventsub:version1',  // Required for EventSub WebSocket
+    'eventsub:version1', // Required for EventSub WebSocket
     'moderation:read',
     'moderator:read:automod_settings',
     'moderator:read:blocked_terms',
@@ -62,6 +63,8 @@ export class TwitchAuthService extends BaseAuthService {
    */
   constructor(eventBus: EventBus) {
     super(eventBus)
+    // Override the base logger with a more specific component name
+    this.logger = getLoggingService().createLogger('TwitchAuthService')
   }
 
   /**
@@ -218,7 +221,9 @@ export class TwitchAuthService extends BaseAuthService {
         interval: data.interval || 5
       }
     } catch (error) {
-      console.error('Error getting device code:', error)
+      this.logger.error('Error getting device code', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw new AuthenticationFailedError(
         AuthProvider.TWITCH,
         `Failed to get device code: ${error instanceof Error ? error.message : String(error)}`,
@@ -266,7 +271,7 @@ export class TwitchAuthService extends BaseAuthService {
         params.append('device_code', deviceCode.device_code)
         params.append('grant_type', 'urn:ietf:params:oauth:grant-type:device_code')
 
-        console.log('Polling for token with params:', {
+        this.logger.info('Polling for token', {
           clientId,
           deviceCode: deviceCode.device_code,
           grantType: 'urn:ietf:params:oauth:grant-type:device_code'
@@ -281,11 +286,11 @@ export class TwitchAuthService extends BaseAuthService {
             body: params
           })
 
-          console.log('Token exchange response status:', response.status)
+          this.logger.info('Token exchange response', { status: response.status })
 
           // Get the response as text first
           const responseText = await response.text()
-          console.log('Token exchange response body:', responseText)
+          this.logger.info('Token exchange response body', { response: responseText })
 
           // Parse the JSON if there's content
           const data = responseText ? JSON.parse(responseText) : {}
@@ -297,20 +302,22 @@ export class TwitchAuthService extends BaseAuthService {
 
             // Authorization is pending (user hasn't completed the flow yet)
             if (data.message === 'authorization_pending') {
-              console.log('Authorization pending, continuing polling...')
+              this.logger.info('Authorization pending, continuing polling')
               continue
             }
 
             // Slow down (we need to increase the polling interval)
             if (data.message === 'slow_down') {
-              console.log('Received slow_down error, increasing polling interval')
+              this.logger.info('Received slow_down error, increasing polling interval', {
+                newInterval: pollInterval + 5000
+              })
               pollInterval += 5000
               continue
             }
 
             // Device code has expired
             if (data.message === 'expired_token') {
-              console.log('Device code has expired')
+              this.logger.info('Device code has expired', { device_code: deviceCode.device_code })
               throw new DeviceCodeTimeoutError(AuthProvider.TWITCH, {
                 originalError: new Error(data.message || data.status),
                 device_code: deviceCode.device_code,
@@ -320,18 +327,23 @@ export class TwitchAuthService extends BaseAuthService {
 
             // For compatibility, also check standard error field
             if (data.error === 'authorization_pending') {
-              console.log('Authorization pending (error field), continuing polling...')
+              this.logger.info('Authorization pending (error field), continuing polling')
               continue
             }
 
             if (data.error === 'slow_down') {
-              console.log('Received slow_down error (error field), increasing polling interval')
+              this.logger.info(
+                'Received slow_down error (error field), increasing polling interval',
+                { newInterval: pollInterval + 5000 }
+              )
               pollInterval += 5000
               continue
             }
 
             if (data.error === 'expired_token') {
-              console.log('Device code has expired (error field)')
+              this.logger.info('Device code has expired (error field)', {
+                device_code: deviceCode.device_code
+              })
               throw new DeviceCodeTimeoutError(AuthProvider.TWITCH, {
                 originalError: new Error(data.error_description || data.error),
                 device_code: deviceCode.device_code,
@@ -345,12 +357,12 @@ export class TwitchAuthService extends BaseAuthService {
               data.error_description ||
               data.error ||
               `HTTP error ${response.status}`
-            console.error('Token exchange error:', errorMessage)
+            this.logger.error('Token exchange error', { error: errorMessage })
             throw new Error(errorMessage)
           }
 
           // Success! Create an AccessToken object in a format compatible with Twurple
-          console.log('Token exchange successful!')
+          this.logger.info('Token exchange successful')
 
           // Handle scope being either a string or an array
           let scope = data.scope
@@ -358,7 +370,7 @@ export class TwitchAuthService extends BaseAuthService {
             scope = scope.split(' ')
           } else if (!Array.isArray(scope)) {
             // If it's neither a string nor an array, default to an empty array
-            console.warn('Unexpected scope format:', scope)
+            this.logger.warn('Unexpected scope format', { scope })
             scope = []
           }
 
@@ -370,10 +382,11 @@ export class TwitchAuthService extends BaseAuthService {
             obtainmentTimestamp: Date.now()
           }
         } catch (fetchError) {
-          console.error('Fetch error during token exchange:', fetchError)
-          const errorMessage = fetchError instanceof Error 
-            ? fetchError.message 
-            : 'Unknown fetch error'
+          this.logger.error('Fetch error during token exchange', {
+            error: fetchError instanceof Error ? fetchError.message : String(fetchError)
+          })
+          const errorMessage =
+            fetchError instanceof Error ? fetchError.message : 'Unknown fetch error'
           throw new Error(`Fetch error: ${errorMessage}`)
         }
       } catch (error) {
@@ -423,7 +436,9 @@ export class TwitchAuthService extends BaseAuthService {
         login: data.data[0].login
       }
     } catch (error) {
-      console.error('Error getting user info:', error)
+      this.logger.error('Error getting user info', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw new AuthenticationFailedError(
         AuthProvider.TWITCH,
         `Failed to get user info: ${error instanceof Error ? error.message : String(error)}`,
@@ -517,7 +532,9 @@ export class TwitchAuthService extends BaseAuthService {
       // Use Twurple's revokeToken function
       await revokeToken(process.env.TWITCH_CLIENT_ID || '', token.accessToken)
     } catch (error) {
-      console.error('Error revoking token:', error)
+      this.logger.error('Error revoking token', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       throw new AuthError(
         `Failed to revoke token: ${error instanceof Error ? error.message : String(error)}`,
         provider,
@@ -532,14 +549,14 @@ export class TwitchAuthService extends BaseAuthService {
 /**
  * Singleton instance of TwitchAuthService
  */
-let twitchAuthServiceInstance: TwitchAuthService | null = null;
+let twitchAuthServiceInstance: TwitchAuthService | null = null
 
 /**
  * Get the Twitch auth service instance
  */
 export function getTwitchAuthService(eventBus: EventBus): TwitchAuthService {
   if (!twitchAuthServiceInstance) {
-    twitchAuthServiceInstance = new TwitchAuthService(eventBus);
+    twitchAuthServiceInstance = new TwitchAuthService(eventBus)
   }
-  return twitchAuthServiceInstance;
+  return twitchAuthServiceInstance
 }

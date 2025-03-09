@@ -1,30 +1,30 @@
-import { EventBus } from '@s/core/bus/EventBus';
-import { getErrorService } from '@m/services/errors';
-import { 
+import { EventBus } from '@s/core/bus/EventBus'
+import { getErrorService } from '@m/services/errors'
+import {
   AuthService as IAuthService,
-  AuthProvider, 
-  AuthOptions, 
-  AuthResult, 
-  AuthStatus, 
-  AuthToken 
-} from '@s/auth/interfaces';
-import { AuthError, AuthErrorCode } from '@s/auth/errors';
-import { getTwitchAuthService } from './TwitchAuthService';
-import { Observable } from 'rxjs';
+  AuthProvider,
+  AuthOptions,
+  AuthResult,
+  AuthStatus,
+  AuthToken
+} from '@s/auth/interfaces'
+import { AuthError, AuthErrorCode } from '@s/auth/errors'
+import { getTwitchAuthService } from './TwitchAuthService'
+import { Observable } from 'rxjs'
 
 /**
  * Main authentication service that manages multiple auth providers
  */
 export class AuthService implements IAuthService {
-  private providerMap: Map<AuthProvider, IAuthService> = new Map();
-  private initialized = false;
-  private eventBus: EventBus;
+  private providerMap: Map<AuthProvider, IAuthService> = new Map()
+  private initialized = false
+  private eventBus: EventBus
 
   /**
    * Create a new AuthService
    */
   constructor(eventBus: EventBus) {
-    this.eventBus = eventBus;
+    this.eventBus = eventBus
   }
 
   /**
@@ -32,29 +32,31 @@ export class AuthService implements IAuthService {
    */
   async initialize(): Promise<void> {
     if (this.initialized) {
-      return;
+      return
     }
 
     try {
       // Initialize Twitch auth service
-      const twitchAuthService = getTwitchAuthService(this.eventBus);
-      await twitchAuthService.initialize();
-      this.providerMap.set(AuthProvider.TWITCH, twitchAuthService);
+      const twitchAuthService = getTwitchAuthService(this.eventBus)
+      await twitchAuthService.initialize()
+      this.providerMap.set(AuthProvider.TWITCH, twitchAuthService)
 
       // Initialize other providers as needed
 
-      this.initialized = true;
+      this.initialized = true
     } catch (error) {
       getErrorService().reportError(
-        error instanceof AuthError ? error : new AuthError(
-          'Failed to initialize authentication service',
-          AuthProvider.TWITCH, // Default provider
-          AuthErrorCode.AUTHENTICATION_FAILED,
-          { originalError: error },
-          error instanceof Error ? error : undefined
-        )
-      );
-      throw error;
+        error instanceof AuthError
+          ? error
+          : new AuthError(
+              'Failed to initialize authentication service',
+              AuthProvider.TWITCH, // Default provider
+              AuthErrorCode.AUTHENTICATION_FAILED,
+              { originalError: error },
+              error instanceof Error ? error : undefined
+            )
+      )
+      throw error
     }
   }
 
@@ -63,11 +65,11 @@ export class AuthService implements IAuthService {
    */
   async authenticate(provider: AuthProvider, options: AuthOptions): Promise<AuthResult> {
     if (!this.initialized) {
-      await this.initialize();
+      await this.initialize()
     }
 
-    const authService = this.getProviderService(provider);
-    return authService.authenticate(provider, options);
+    const authService = this.getProviderService(provider)
+    return authService.authenticate(provider, options)
   }
 
   /**
@@ -75,11 +77,11 @@ export class AuthService implements IAuthService {
    */
   async refreshToken(provider: AuthProvider): Promise<AuthResult> {
     if (!this.initialized) {
-      await this.initialize();
+      await this.initialize()
     }
 
-    const authService = this.getProviderService(provider);
-    return authService.refreshToken(provider);
+    const authService = this.getProviderService(provider)
+    return authService.refreshToken(provider)
   }
 
   /**
@@ -87,11 +89,11 @@ export class AuthService implements IAuthService {
    */
   async revokeToken(provider: AuthProvider): Promise<void> {
     if (!this.initialized) {
-      await this.initialize();
+      await this.initialize()
     }
 
-    const authService = this.getProviderService(provider);
-    return authService.revokeToken(provider);
+    const authService = this.getProviderService(provider)
+    return authService.revokeToken(provider)
   }
 
   /**
@@ -99,10 +101,10 @@ export class AuthService implements IAuthService {
    */
   isAuthenticated(provider: AuthProvider): boolean {
     try {
-      const authService = this.getProviderService(provider);
-      return authService.isAuthenticated(provider);
+      const authService = this.getProviderService(provider)
+      return authService.isAuthenticated(provider)
     } catch (error) {
-      return false;
+      return false
     }
   }
 
@@ -111,11 +113,11 @@ export class AuthService implements IAuthService {
    */
   async getToken(provider: AuthProvider): Promise<AuthToken | undefined> {
     if (!this.initialized) {
-      await this.initialize();
+      await this.initialize()
     }
 
-    const authService = this.getProviderService(provider);
-    return authService.getToken(provider);
+    const authService = this.getProviderService(provider)
+    return authService.getToken(provider)
   }
 
   /**
@@ -123,15 +125,15 @@ export class AuthService implements IAuthService {
    */
   getStatus(provider: AuthProvider): AuthStatus {
     try {
-      const authService = this.getProviderService(provider);
-      return authService.getStatus(provider);
+      const authService = this.getProviderService(provider)
+      return authService.getStatus(provider)
     } catch (error) {
       throw new AuthError(
         `No authentication service available for provider ${provider}`,
         provider,
         AuthErrorCode.AUTHENTICATION_FAILED,
         { availableProviders: Array.from(this.providerMap.keys()) }
-      );
+      )
     }
   }
 
@@ -139,24 +141,24 @@ export class AuthService implements IAuthService {
    * Observable of authentication status changes for a provider
    */
   status$(provider: AuthProvider): Observable<AuthStatus> {
-    const authService = this.getProviderService(provider);
-    return authService.status$(provider);
+    const authService = this.getProviderService(provider)
+    return authService.status$(provider)
   }
 
   /**
    * Get the authentication service for a provider
    */
   private getProviderService(provider: AuthProvider): IAuthService {
-    const authService = this.providerMap.get(provider);
+    const authService = this.providerMap.get(provider)
     if (!authService) {
       throw new AuthError(
         `No authentication service available for provider ${provider}`,
         provider,
         AuthErrorCode.AUTHENTICATION_FAILED,
         { availableProviders: Array.from(this.providerMap.keys()) }
-      );
+      )
     }
-    return authService;
+    return authService
   }
 
   /**
@@ -166,7 +168,7 @@ export class AuthService implements IAuthService {
     // Dispose all provider services
     for (const [, service] of this.providerMap.entries()) {
       if ('dispose' in service && typeof service.dispose === 'function') {
-        service.dispose();
+        service.dispose()
       }
     }
   }
@@ -175,14 +177,14 @@ export class AuthService implements IAuthService {
 /**
  * Singleton instance of AuthService
  */
-let authServiceInstance: AuthService | null = null;
+let authServiceInstance: AuthService | null = null
 
 /**
  * Get the authentication service instance
  */
 export function getAuthService(eventBus: EventBus): AuthService {
   if (!authServiceInstance) {
-    authServiceInstance = new AuthService(eventBus);
+    authServiceInstance = new AuthService(eventBus)
   }
-  return authServiceInstance;
+  return authServiceInstance
 }

@@ -18,6 +18,9 @@ import { WebSocketService } from '@m/services/websocket'
 import { AuthProvider, AuthOptions, AuthState } from '@s/auth/interfaces'
 import { EventCategory } from '@s/types/events'
 
+// Import logging services
+import { getLoggingService, getLogViewerService } from '@m/services/logging'
+
 /**
  * Context for tRPC procedures
  */
@@ -63,13 +66,16 @@ export function setupTRPCServer(
   // Channel for tRPC requests
   const TRPC_CHANNEL = 'zelan:trpc'
 
-  console.log('Setting up tRPC server with channel:', TRPC_CHANNEL)
+  // Create a logger for tRPC
+  const logger = getLoggingService().createLogger('tRPC')
+
+  logger.info('Setting up tRPC server', { channel: TRPC_CHANNEL })
 
   // Set up IPC handler for tRPC requests
   ipcMain.handle(TRPC_CHANNEL, async (event, opts) => {
     const { id, type, path, input } = opts
 
-    console.log(`Received tRPC request: ${type} ${path}`, { id, input })
+    logger.debug(`Received tRPC request: ${type} ${path}`, { id, input })
 
     try {
       // Track sender id for subscription management
@@ -92,7 +98,7 @@ export function setupTRPCServer(
         throw new Error(`Invalid path format: ${path}. Expected "module.procedure"`)
       }
 
-      console.log(`Processing ${moduleName}.${procedureName} (${type})`)
+      logger.debug(`Processing ${moduleName}.${procedureName} (${type})`)
 
       // Handle the request directly based on module and procedure
       if (moduleName === 'config') {
@@ -305,28 +311,29 @@ export function setupTRPCServer(
         } else if (type === 'mutation') {
           if (procedureName === 'authenticate') {
             const { provider, options } = input as { provider: AuthProvider; options: AuthOptions }
-            
+
             // If the client ID is FROM_ENV, replace it with the environment variable
             if (options.clientId === 'FROM_ENV') {
               // Debug logging of environment variables
-              console.log('Environment variables in authenticate:');
-              console.log('TWITCH_CLIENT_ID:', process.env.TWITCH_CLIENT_ID);
-              console.log('All ENV variables:', Object.keys(process.env).filter(key => key.startsWith('TWITCH')));
-              
-              options.clientId = process.env.TWITCH_CLIENT_ID || '';
-              
+              logger.debug('Environment variables in authenticate', {
+                TWITCH_CLIENT_ID: process.env.TWITCH_CLIENT_ID,
+                envVars: Object.keys(process.env).filter((key) => key.startsWith('TWITCH'))
+              })
+
+              options.clientId = process.env.TWITCH_CLIENT_ID || ''
+
               // Log error if client ID is missing
               if (!options.clientId) {
                 // Try to use the hardcoded value from .env that we saw earlier
-                const fallbackClientId = 'rg8nz3eva55vtmltcx5dy3p728ceod';
-                console.log('Using fallback Client ID:', fallbackClientId);
-                options.clientId = fallbackClientId;
-                
+                const fallbackClientId = 'rg8nz3eva55vtmltcx5dy3p728ceod'
+                logger.warn('Using fallback Client ID', { fallbackClientId })
+                options.clientId = fallbackClientId
+
                 // Set the env var for future use
-                process.env.TWITCH_CLIENT_ID = fallbackClientId;
+                process.env.TWITCH_CLIENT_ID = fallbackClientId
               }
             }
-            
+
             const result = await ctx.authService.authenticate(provider, options)
             // Return a safe version of the result (without tokens)
             const safeResult = {
@@ -356,10 +363,10 @@ export function setupTRPCServer(
           if (procedureName === 'onStatusChange') {
             const provider = input as AuthProvider
             const subChannelName = `${TRPC_CHANNEL}:${id}`
-            
+
             // Track this client's ID
             ctx.senderIds.add(event.sender.id)
-            
+
             // Subscribe to auth status changes
             const subscription = ctx.authService.status$(provider).subscribe({
               next: (status) => {
@@ -374,7 +381,7 @@ export function setupTRPCServer(
                   username: status.username,
                   isAuthenticated: status.state === AuthState.AUTHENTICATED
                 }
-                
+
                 // Send to the client
                 event.sender.send(subChannelName, {
                   id,
@@ -384,7 +391,7 @@ export function setupTRPCServer(
               },
               error: (err) => {
                 // Send error to client
-                console.error('Error in auth status subscription:', err)
+                logger.error('Error in auth status subscription', { error: err })
                 event.sender.send(subChannelName, {
                   id,
                   error: toSerializableError(err),
@@ -392,27 +399,28 @@ export function setupTRPCServer(
                 })
               }
             })
-            
+
             // Set up cleanup
             ipcMain.once(`${TRPC_CHANNEL}:${id}:stop`, () => {
               subscription.unsubscribe()
-              console.log(`Cleaned up auth status subscription for ${id}`)
+              logger.debug('Cleaned up auth status subscription', { id })
             })
-            
+
             return { id, type: 'started' }
           } else if (procedureName === 'onDeviceCode') {
             // This subscription is for the device code flow
             const subChannelName = `${TRPC_CHANNEL}:${id}`
-            
+
             // Track this client's ID
             ctx.senderIds.add(event.sender.id)
-            
+
             // Subscribe to auth events for device code
             const subscription = ctx.mainEventBus.events$
               .pipe(
-                filter((e) => 
-                  e.category === EventCategory.SERVICE && 
-                  (e.type === 'device_code_received' || e.type === 'authentication_failed')
+                filter(
+                  (e) =>
+                    e.category === EventCategory.SERVICE &&
+                    (e.type === 'device_code_received' || e.type === 'authentication_failed')
                 )
               )
               .subscribe({
@@ -422,14 +430,16 @@ export function setupTRPCServer(
                     id,
                     result: {
                       type: authEvent.type,
-                      ...authEvent.payload
+                      ...(typeof authEvent.payload === 'object' && authEvent.payload !== null
+                        ? authEvent.payload
+                        : {})
                     },
                     type: 'data'
                   })
                 },
                 error: (err) => {
                   // Send error to client
-                  console.error('Error in device code subscription:', err)
+                  logger.error('Error in device code subscription', { error: err })
                   event.sender.send(subChannelName, {
                     id,
                     error: toSerializableError(err),
@@ -437,14 +447,61 @@ export function setupTRPCServer(
                   })
                 }
               })
-            
+
             // Set up cleanup
             ipcMain.once(`${TRPC_CHANNEL}:${id}:stop`, () => {
               subscription.unsubscribe()
-              console.log(`Cleaned up device code subscription for ${id}`)
+              logger.debug('Cleaned up device code subscription', { id })
             })
-            
+
             return { id, type: 'started' }
+          }
+        }
+      } else if (moduleName === 'logs') {
+        const logViewerService = getLogViewerService()
+        const logger = getLoggingService()
+
+        if (type === 'query') {
+          if (procedureName === 'getLogFiles') {
+            return { result: logViewerService.getLogFiles() }
+          } else if (procedureName === 'readLogFile') {
+            const { fileName, maxLines } = input as { fileName: string; maxLines?: number }
+            return { result: logViewerService.readLogFile(fileName, maxLines) }
+          } else if (procedureName === 'getLogDirectory') {
+            return { result: logViewerService.getLogDirectory() }
+          }
+        } else if (type === 'mutation') {
+          if (procedureName === 'clearOldLogs') {
+            return { result: logViewerService.clearOldLogs() }
+          } else if (procedureName === 'addLogEntry') {
+            const { level, message, meta } = input as {
+              level: string
+              message: string
+              meta?: Record<string, any>
+            }
+            const componentLogger = logger.createLogger('Client')
+
+            switch (level) {
+              case 'error':
+                componentLogger.error(message, meta)
+                break
+              case 'warn':
+                componentLogger.warn(message, meta)
+                break
+              case 'info':
+                componentLogger.info(message, meta)
+                break
+              case 'debug':
+                componentLogger.debug(message, meta)
+                break
+              case 'trace':
+                componentLogger.trace(message, meta)
+                break
+              default:
+                componentLogger.info(message, meta)
+            }
+
+            return { result: true }
           }
         }
       }
@@ -452,7 +509,10 @@ export function setupTRPCServer(
       throw new Error(`Unhandled request: ${type} ${path}`)
     } catch (error) {
       // Handle errors using our standardized error format
-      console.error(`Error handling tRPC request: ${type} ${path}`, error)
+      logger.error(`Error handling tRPC request: ${type} ${path}`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      })
       return {
         id,
         error: toSerializableError(error),

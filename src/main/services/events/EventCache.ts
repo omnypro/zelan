@@ -2,10 +2,8 @@ import { BehaviorSubject, Observable } from 'rxjs'
 import { map } from 'rxjs/operators'
 import { BaseEvent } from '@s/types/events'
 import { ConfigStore } from '@s/core/config/ConfigStore'
-import { 
-  EventFilterCriteria, 
-  filterEvents 
-} from '@s/utils/filters/event-filter'
+import { EventFilterCriteria, filterEvents } from '@s/utils/filters/event-filter'
+import { getLoggingService, ComponentLogger } from '@m/services/logging'
 
 /**
  * Options for getting events from cache, including filter criteria
@@ -21,11 +19,14 @@ export class EventCache {
   private events: BaseEvent[] = []
   private eventsSubject = new BehaviorSubject<BaseEvent[]>([])
   private cacheSize: number
+  private logger: ComponentLogger
 
   /**
    * Create a new event cache
    */
   constructor(configStore: ConfigStore) {
+    // Initialize logger
+    this.logger = getLoggingService().createLogger('EventCache')
     // Set a default cache size
     this.cacheSize = 100
 
@@ -36,7 +37,9 @@ export class EventCache {
         this.cacheSize = settings.eventCacheSize
       }
     } catch (error) {
-      console.warn('Could not get event cache size from settings, using default:', this.cacheSize)
+      this.logger.warn('Could not get event cache size from settings, using default', {
+        defaultSize: this.cacheSize
+      })
     }
 
     // Listen for settings changes
@@ -51,7 +54,9 @@ export class EventCache {
         }
       })
     } catch (error) {
-      console.warn('Could not subscribe to settings changes:', error)
+      this.logger.warn('Could not subscribe to settings changes', {
+        error: error instanceof Error ? error.message : String(error)
+      })
     }
   }
 
@@ -83,10 +88,10 @@ export class EventCache {
    */
   getEvents(options: EventCacheOptions = {}): BaseEvent[] {
     const { limit = 20, ...filterCriteria } = options
-    
+
     // Apply filters using the filterEvents utility
     const filtered = filterEvents(this.events, filterCriteria)
-    
+
     // Apply limit
     return filtered.slice(0, limit)
   }
@@ -102,9 +107,7 @@ export class EventCache {
    * Get filtered events as an observable
    */
   filteredEvents$(filterCriteria: EventFilterCriteria = {}): Observable<BaseEvent[]> {
-    return this.eventsSubject.pipe(
-      map((events) => filterEvents(events, filterCriteria))
-    )
+    return this.eventsSubject.pipe(map((events) => filterEvents(events, filterCriteria)))
   }
 
   /**

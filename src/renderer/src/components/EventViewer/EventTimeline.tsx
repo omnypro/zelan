@@ -34,47 +34,47 @@ export function EventTimeline({
     if (!events.length) {
       return { timeSegments: [], maxCount: 0, startTime: Date.now(), endTime: Date.now() }
     }
-    
+
     const now = Date.now()
-    const startTimeMs = now - (timeRange * 60 * 1000)
+    const startTimeMs = now - timeRange * 60 * 1000
     const segmentCount = Math.min(50, timeRange) // Max 50 segments
     const segmentSize = (timeRange * 60 * 1000) / segmentCount
-    
+
     // Initialize segments
     const segments: TimeSegment[] = []
     for (let i = 0; i < segmentCount; i++) {
       segments.push({
-        timestamp: startTimeMs + (i * segmentSize),
+        timestamp: startTimeMs + i * segmentSize,
         count: 0,
         categories: {}
       })
     }
-    
+
     // Count events in each segment
-    events.forEach(event => {
+    events.forEach((event) => {
       if (event.timestamp < startTimeMs) return
-      
+
       const segmentIndex = Math.floor((event.timestamp - startTimeMs) / segmentSize)
       if (segmentIndex >= 0 && segmentIndex < segmentCount) {
         const segment = segments[segmentIndex]
         segment.count++
-        
+
         const category = event.category || 'unknown'
         segment.categories[category] = (segment.categories[category] || 0) + 1
       }
     })
-    
+
     // Find max count for scaling
-    const maxSegmentCount = Math.max(1, ...segments.map(s => s.count))
-    
-    return { 
+    const maxSegmentCount = Math.max(1, ...segments.map((s) => s.count))
+
+    return {
       timeSegments: segments,
       maxCount: maxSegmentCount,
       startTime: startTimeMs,
       endTime: now
     }
   }, [events, timeRange])
-  
+
   // Category colors for the timeline
   const categoryColors: Record<string, string> = {
     [EventCategory.SYSTEM]: 'bg-blue-400',
@@ -84,19 +84,19 @@ export function EventTimeline({
     [EventCategory.TEST]: 'bg-green-400',
     unknown: 'bg-gray-400'
   }
-  
+
   // Format timestamp for display
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
-  
+
   // Handle clicking on a time segment
   const handleSegmentClick = (timestamp: number) => {
     if (onTimeClick) {
       onTimeClick(timestamp)
     }
   }
-  
+
   return (
     <div className="bg-white rounded-md shadow-sm border p-3 mb-4">
       <div className="flex justify-between items-center mb-2">
@@ -105,12 +105,9 @@ export function EventTimeline({
           {formatTime(startTime)} - {formatTime(endTime)}
         </div>
       </div>
-      
+
       {/* Timeline Visualization */}
-      <div 
-        className="relative w-full bg-gray-50 border rounded" 
-        style={{ height: `${height}px` }}
-      >
+      <div className="relative w-full bg-gray-50 border rounded" style={{ height: `${height}px` }}>
         {timeSegments.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
             No events in selected time range
@@ -120,7 +117,7 @@ export function EventTimeline({
             {/* Time segments */}
             <div className="flex h-full w-full">
               {timeSegments.map((segment, index) => (
-                <div 
+                <div
                   key={index}
                   className="flex-1 h-full relative hover:bg-gray-100 cursor-pointer group"
                   onClick={() => handleSegmentClick(segment.timestamp)}
@@ -139,7 +136,7 @@ export function EventTimeline({
                       )
                     })}
                   </div>
-                  
+
                   {/* Hover tooltip */}
                   <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 hidden group-hover:block z-10">
                     <div className="bg-gray-800 text-white text-xs rounded py-1 px-2 whitespace-nowrap">
@@ -150,7 +147,7 @@ export function EventTimeline({
                 </div>
               ))}
             </div>
-            
+
             {/* Time labels */}
             <div className="absolute bottom-0 left-0 right-0 flex justify-between text-xs text-gray-500 pb-1 px-2">
               <span>{formatTime(startTime)}</span>
@@ -160,17 +157,18 @@ export function EventTimeline({
           </>
         )}
       </div>
-      
+
       {/* Legend */}
       <div className="flex flex-wrap gap-3 mt-2">
-        {Object.entries(categoryColors).map(([category, color]) => (
-          category !== 'unknown' && (
-            <div key={category} className="flex items-center gap-1">
-              <div className={`w-3 h-3 ${color} rounded-sm`} />
-              <span className="text-xs">{category}</span>
-            </div>
-          )
-        ))}
+        {Object.entries(categoryColors).map(
+          ([category, color]) =>
+            category !== 'unknown' && (
+              <div key={category} className="flex items-center gap-1">
+                <div className={`w-3 h-3 ${color} rounded-sm`} />
+                <span className="text-xs">{category}</span>
+              </div>
+            )
+        )}
       </div>
     </div>
   )

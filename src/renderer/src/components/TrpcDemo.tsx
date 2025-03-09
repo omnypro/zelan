@@ -45,31 +45,31 @@ export function TrpcDemo() {
 
   // Log debugging info about trpc object
   useEffect(() => {
-    console.log('TrpcDemo component rendered, inspecting trpc object:')
+    console.info('TrpcDemo component rendered, inspecting trpc object:')
     if (window.trpc) {
-      console.log('window.trpc exists:', typeof window.trpc)
+      console.info('window.trpc exists:', typeof window.trpc)
 
       // Log top-level keys
       const keys = Object.keys(window.trpc || {})
-      console.log('window.trpc keys:', keys)
+      console.info('window.trpc keys:', keys)
 
       // Check config module
       if (window.trpc.config) {
-        console.log('window.trpc.config exists:', typeof window.trpc.config)
-        console.log('window.trpc.config keys:', Object.keys(window.trpc.config || {}))
+        console.info('window.trpc.config exists:', typeof window.trpc.config)
+        console.info('window.trpc.config keys:', Object.keys(window.trpc.config || {}))
 
         // Check config.get
         if (window.trpc.config.get) {
-          console.log('window.trpc.config.get exists:', typeof window.trpc.config.get)
-          console.log('window.trpc.config.get keys:', Object.keys(window.trpc.config.get || {}))
+          console.info('window.trpc.config.get exists:', typeof window.trpc.config.get)
+          console.info('window.trpc.config.get keys:', Object.keys(window.trpc.config.get || {}))
         } else {
-          console.log('window.trpc.config.get is missing')
+          console.info('window.trpc.config.get is missing')
         }
       } else {
-        console.log('window.trpc.config is missing')
+        console.info('window.trpc.config is missing')
       }
     } else {
-      console.log('window.trpc is missing entirely')
+      console.info('window.trpc is missing entirely')
     }
   }, [])
 

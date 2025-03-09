@@ -19,7 +19,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
   // Test adapter options
   const [eventInterval, setEventInterval] = useState<number>(3000)
   const [simulateErrors, setSimulateErrors] = useState<boolean>(false)
-  
+
   // Twitch adapter options
   const [twitchPollInterval, setTwitchPollInterval] = useState<number>(60000)
   const [twitchIncludeSubscriptions, setTwitchIncludeSubscriptions] = useState<boolean>(false)
@@ -59,11 +59,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
           channelName: '', // Will use authenticated user's channel by default
           pollInterval: twitchPollInterval,
           includeSubscriptions: twitchIncludeSubscriptions,
-          eventsToTrack: [
-            'channel.update', 
-            'stream.online', 
-            'stream.offline'
-          ]
+          eventsToTrack: ['channel.update', 'stream.online', 'stream.offline']
         }
       }
 
@@ -231,12 +227,12 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
             </div>
           </div>
         )}
-        
+
         {/* Twitch adapter options */}
         {adapterType === 'twitch' && (
           <div className="bg-gray-50 p-4 rounded-md mb-4">
             <h4 className="font-medium mb-3">Twitch Adapter Settings</h4>
-            
+
             <div className="mb-3">
               <label className="block text-sm font-medium mb-1">Poll Interval (ms)</label>
               <input
@@ -253,7 +249,7 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 How often to poll for channel information (in milliseconds)
               </p>
             </div>
-            
+
             <div className="flex items-center">
               <input
                 type="checkbox"
@@ -263,14 +259,20 @@ const AdapterCreationForm: React.FC<AdapterCreationFormProps> = ({ onCreateAdapt
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                 disabled={isLoading}
               />
-              <label htmlFor="twitchIncludeSubscriptions" className="ml-2 block text-sm text-gray-900">
+              <label
+                htmlFor="twitchIncludeSubscriptions"
+                className="ml-2 block text-sm text-gray-900"
+              >
                 Include subscription data in polls (requires additional scopes)
               </label>
             </div>
-            
+
             <div className="mt-4 p-3 bg-blue-50 rounded text-sm text-blue-800 border border-blue-200">
               <p className="font-medium">Note:</p>
-              <p>You must authenticate with Twitch before creating this adapter. The adapter will use the authenticated user's channel.</p>
+              <p>
+                You must authenticate with Twitch before creating this adapter. The adapter will use
+                the authenticated user's channel.
+              </p>
             </div>
           </div>
         )}

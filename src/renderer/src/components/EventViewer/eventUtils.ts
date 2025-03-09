@@ -60,7 +60,7 @@ export function groupEvents(
 export function extractSources(events: BaseEvent[]): Array<{ id: string; type: string }> {
   const sourceMap = new Map<string, { id: string; type: string }>()
 
-  events.forEach(event => {
+  events.forEach((event) => {
     if (event.source && event.source.id && event.source.type) {
       const key = `${event.source.id}|${event.source.type}`
       sourceMap.set(key, event.source)
@@ -76,7 +76,7 @@ export function extractSources(events: BaseEvent[]): Array<{ id: string; type: s
 export function extractEventTypes(events: BaseEvent[]): string[] {
   const types = new Set<string>()
 
-  events.forEach(event => {
+  events.forEach((event) => {
     if (event.type) {
       types.add(event.type)
     }
@@ -99,7 +99,7 @@ export function orderGroups(groups: GroupedEvents, groupBy: GroupBy): [string, B
       [EventCategory.ADAPTER]: 3,
       [EventCategory.AUTH]: 4,
       [EventCategory.TEST]: 5,
-      'Other': 99
+      Other: 99
     }
 
     return entries.sort((a, b) => {

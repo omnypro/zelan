@@ -214,15 +214,15 @@ export abstract class BaseAdapter implements ServiceAdapter {
   protected validateConfigUpdate(config: Partial<AdapterConfig>): void {
     // Basic validation for common properties
     if (config.name !== undefined && !isString(config.name)) {
-      throw new Error(`Invalid adapter name: ${config.name}, expected string`);
+      throw new Error(`Invalid adapter name: ${config.name}, expected string`)
     }
 
     if (config.enabled !== undefined && !isBoolean(config.enabled)) {
-      throw new Error(`Invalid adapter enabled value: ${config.enabled}, expected boolean`);
+      throw new Error(`Invalid adapter enabled value: ${config.enabled}, expected boolean`)
     }
 
     if (config.options !== undefined && !isObject(config.options)) {
-      throw new Error(`Invalid adapter options: ${config.options}, expected object`);
+      throw new Error(`Invalid adapter options: ${config.options}, expected object`)
     }
 
     // Derived classes can override to add more specific validation

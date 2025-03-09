@@ -1,9 +1,6 @@
 import { Observable, Subject } from 'rxjs'
 import { BaseEvent, EventCategory } from '@s/types/events'
-import { 
-  EventFilterCriteria, 
-  filterEventStream
-} from '@s/utils/filters/event-filter'
+import { EventFilterCriteria, filterEventStream } from '@s/utils/filters/event-filter'
 
 /**
  * Interface for the event bus that handles event pub/sub

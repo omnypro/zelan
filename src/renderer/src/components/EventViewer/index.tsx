@@ -33,52 +33,52 @@ export function EventViewer({
   const [filterCriteria, setFilterCriteria] = useState<EventFilterCriteria>({})
   const [timeRangeMinutes, setTimeRangeMinutes] = useState(60)
   const [groupBy, setGroupBy] = useState<GroupBy>(initialGroupBy)
-  
+
   // Initialize filter criteria if initial values provided
   useEffect(() => {
     const criteria: EventFilterCriteria = {}
-    
+
     if (initialCategory) {
       criteria.category = initialCategory
     }
-    
+
     if (initialType) {
       criteria.type = initialType
     }
-    
+
     setFilterCriteria(criteria)
   }, [initialCategory, initialType])
-  
+
   // Apply time range filter
   useEffect(() => {
     if (timeRangeMinutes > 0) {
-      const since = Date.now() - (timeRangeMinutes * 60 * 1000)
-      setFilterCriteria(prev => ({
+      const since = Date.now() - timeRangeMinutes * 60 * 1000
+      setFilterCriteria((prev) => ({
         ...prev,
         since
       }))
     }
   }, [timeRangeMinutes])
-  
+
   // Get filtered events
   const filteredEvents = useFilteredEvents(filterCriteria)
-  
+
   // Extract unique sources and types for filter options
   const sources = useMemo(() => extractSources(filteredEvents), [filteredEvents])
   const eventTypes = useMemo(() => extractEventTypes(filteredEvents), [filteredEvents])
-  
+
   // Group events
   const groupedEvents = useMemo(() => {
     return orderGroups(groupEvents(filteredEvents, groupBy), groupBy)
   }, [filteredEvents, groupBy])
-  
+
   // Test event publisher
   const publishTestEvent = useEventPublisher(
     EventCategory.TEST,
     'event-viewer-test',
     'event-viewer'
   )
-  
+
   // Generate test event
   const handleGenerateTestEvent = () => {
     publishTestEvent({
@@ -87,17 +87,17 @@ export function EventViewer({
       value: Math.random()
     })
   }
-  
+
   // Handle grouping change
   const handleGroupingChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setGroupBy(e.target.value as GroupBy)
   }
-  
+
   // Handle filter changes
   const handleFilterChange = (criteria: EventFilterCriteria) => {
     // Preserve time range filter
     if (timeRangeMinutes > 0) {
-      const since = Date.now() - (timeRangeMinutes * 60 * 1000)
+      const since = Date.now() - timeRangeMinutes * 60 * 1000
       setFilterCriteria({
         ...criteria,
         since
@@ -106,12 +106,12 @@ export function EventViewer({
       setFilterCriteria(criteria)
     }
   }
-  
+
   return (
     <div className="p-4 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">{title}</h2>
-        
+
         <div className="flex items-center gap-3">
           <div>
             <label className="text-sm mr-2">Group by:</label>
@@ -126,7 +126,7 @@ export function EventViewer({
               <option value={GroupBy.NONE}>No Grouping</option>
             </select>
           </div>
-          
+
           {showTestControls && (
             <button
               onClick={handleGenerateTestEvent}
@@ -137,7 +137,7 @@ export function EventViewer({
           )}
         </div>
       </div>
-      
+
       {/* Filter bar */}
       <EventFilterBar
         onFilterChange={handleFilterChange}
@@ -146,15 +146,10 @@ export function EventViewer({
         sources={sources}
         types={eventTypes}
       />
-      
+
       {/* Timeline visualization */}
-      {showTimeline && (
-        <EventTimeline
-          events={filteredEvents}
-          timeRange={timeRangeMinutes}
-        />
-      )}
-      
+      {showTimeline && <EventTimeline events={filteredEvents} timeRange={timeRangeMinutes} />}
+
       {/* Event groups */}
       <div className="space-y-4">
         {groupedEvents.map(([groupName, events]) => (
@@ -165,7 +160,7 @@ export function EventViewer({
             emptyMessage={`No ${groupName.toLowerCase()} events in the selected time range`}
           />
         ))}
-        
+
         {groupedEvents.length === 0 && (
           <div className="bg-white p-8 text-center text-gray-500 rounded-md shadow-sm border">
             No events match the current filters

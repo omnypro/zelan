@@ -4,6 +4,7 @@ import { createSystemEvent } from '@s/core/events'
 import { EventBus } from '@s/core/bus'
 import { ConfigStore } from '@s/core/config/ConfigStore'
 import { SubscriptionManager } from '@s/utils/subscription-manager'
+import { getLoggingService, ComponentLogger } from '@m/services/logging'
 
 interface WebSocketClient extends WebSocket {
   isAlive: boolean
@@ -36,6 +37,7 @@ export class WebSocketService {
   private port: number
   private startTime: number = 0
   private subscriptionManager = new SubscriptionManager()
+  private logger: ComponentLogger
 
   private static instance: WebSocketService
 
@@ -56,6 +58,7 @@ export class WebSocketService {
     private eventBus: EventBus,
     configStore: ConfigStore
   ) {
+    this.logger = getLoggingService().createLogger('WebSocketService')
     this.port = configStore.getSettings().webSocketPort
 
     // Listen for settings changes
@@ -97,7 +100,9 @@ export class WebSocketService {
       })
 
       this.server.on('error', (error) => {
-        console.error('WebSocket server error:', error)
+        this.logger.error('WebSocket server error', {
+          error: error instanceof Error ? error.message : String(error)
+        })
         this.eventBus.publish(
           createSystemEvent(SystemEventType.ERROR, 'WebSocket server error', 'error', {
             error: error.message
@@ -131,7 +136,9 @@ export class WebSocketService {
 
       return true
     } catch (error) {
-      console.error('Failed to start WebSocket server:', error)
+      this.logger.error('Failed to start WebSocket server', {
+        error: error instanceof Error ? error.message : String(error)
+      })
       this.eventBus.publish(
         createSystemEvent(SystemEventType.ERROR, 'Failed to start WebSocket server', 'error', {
           error: error instanceof Error ? error.message : String(error)
@@ -222,7 +229,9 @@ export class WebSocketService {
     })
 
     socket.on('error', (error) => {
-      console.error('WebSocket client error:', error)
+      this.logger.error('WebSocket client error', {
+        error: error instanceof Error ? error.message : String(error)
+      })
     })
 
     socket.on('pong', () => {
@@ -235,7 +244,7 @@ export class WebSocketService {
     })
 
     // Log the connection
-    console.log(`WebSocket client connected: ${socket.id}`)
+    this.logger.info(`WebSocket client connected: ${socket.id}`)
 
     // Publish event about new connection
     this.eventBus.publish(
@@ -253,7 +262,7 @@ export class WebSocketService {
     this.clients = this.clients.filter((client) => client !== socket)
 
     // Log the disconnection
-    console.log(`WebSocket client disconnected: ${socket.id}`)
+    this.logger.info(`WebSocket client disconnected: ${socket.id}`)
 
     // Publish event about disconnection
     this.eventBus.publish(
@@ -286,10 +295,16 @@ export class WebSocketService {
           break
 
         default:
-          console.warn(`Unknown message type: ${message.type}`)
+          this.logger.warn(`Unknown message type from client`, {
+            type: message.type,
+            clientId: socket.id
+          })
       }
     } catch (error) {
-      console.error('Error handling client message:', error)
+      this.logger.error('Error handling client message', {
+        error: error instanceof Error ? error.message : String(error),
+        clientId: socket.id
+      })
     }
   }
 

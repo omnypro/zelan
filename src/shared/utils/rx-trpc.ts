@@ -92,7 +92,7 @@ export function createSerializableAdapter(adapter: ServiceAdapter): Serializable
   const currentStatus = adapter.status || {
     status: 'unknown',
     timestamp: Date.now()
-  };
+  }
 
   // First convert to unknown to avoid direct conversion errors
   const serialized = toSerializable({

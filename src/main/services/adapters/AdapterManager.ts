@@ -5,6 +5,7 @@ import { EventBus } from '@s/core/bus'
 import { ConfigStore, AdapterConfig } from '@s/core/config'
 import { SystemEventType } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
+import { getLoggingService, ComponentLogger } from '@m/services/logging'
 
 /**
  * Manages adapter lifecycle and configuration
@@ -12,6 +13,7 @@ import { createSystemEvent } from '@s/core/events'
 export class AdapterManager {
   private adapters = new Map<string, ServiceAdapter>()
   private adaptersSubject = new BehaviorSubject<ServiceAdapter[]>([])
+  private logger: ComponentLogger
 
   /**
    * Create a new adapter manager
@@ -20,7 +22,9 @@ export class AdapterManager {
     private registry: AdapterRegistry,
     private eventBus: EventBus,
     private configStore: ConfigStore
-  ) {}
+  ) {
+    this.logger = getLoggingService().createLogger('AdapterManager')
+  }
 
   /**
    * Initialize adapters from saved configurations
@@ -34,7 +38,9 @@ export class AdapterManager {
       try {
         await this.createAdapter(config)
       } catch (error) {
-        console.error(`Failed to initialize adapter ${config.id}:`, error)
+        this.logger.error(`Failed to initialize adapter ${config.id}`, {
+          error: error instanceof Error ? error.message : String(error)
+        })
         this.eventBus.publish(
           createSystemEvent(
             SystemEventType.ERROR,
@@ -97,7 +103,9 @@ export class AdapterManager {
 
       return adapter
     } catch (error) {
-      console.error(`Failed to create adapter ${id}:`, error)
+      this.logger.error(`Failed to create adapter ${id}`, {
+        error: error instanceof Error ? error.message : String(error)
+      })
       this.eventBus.publish(
         createSystemEvent(
           SystemEventType.ERROR,
@@ -147,7 +155,9 @@ export class AdapterManager {
 
       return adapter
     } catch (error) {
-      console.error(`Failed to update adapter ${id}:`, error)
+      this.logger.error(`Failed to update adapter ${id}`, {
+        error: error instanceof Error ? error.message : String(error)
+      })
       this.eventBus.publish(
         createSystemEvent(
           SystemEventType.ERROR,
@@ -180,7 +190,9 @@ export class AdapterManager {
         })
       )
     } catch (error) {
-      console.error(`Failed to start adapter ${id}:`, error)
+      this.logger.error(`Failed to start adapter ${id}`, {
+        error: error instanceof Error ? error.message : String(error)
+      })
       this.eventBus.publish(
         createSystemEvent(
           SystemEventType.ERROR,
@@ -213,7 +225,9 @@ export class AdapterManager {
         })
       )
     } catch (error) {
-      console.error(`Failed to stop adapter ${id}:`, error)
+      this.logger.error(`Failed to stop adapter ${id}`, {
+        error: error instanceof Error ? error.message : String(error)
+      })
       this.eventBus.publish(
         createSystemEvent(
           SystemEventType.ERROR,
@@ -254,7 +268,9 @@ export class AdapterManager {
         })
       )
     } catch (error) {
-      console.error(`Failed to delete adapter ${id}:`, error)
+      this.logger.error(`Failed to delete adapter ${id}`, {
+        error: error instanceof Error ? error.message : String(error)
+      })
       this.eventBus.publish(
         createSystemEvent(
           SystemEventType.ERROR,
@@ -321,7 +337,9 @@ export class AdapterManager {
       if (adapter.enabled) {
         promises.push(
           adapter.reconnect().catch((error) => {
-            console.error(`Failed to reconnect adapter ${adapter.id}:`, error)
+            this.logger.error(`Failed to reconnect adapter ${adapter.id}`, {
+              error: error instanceof Error ? error.message : String(error)
+            })
           })
         )
       }
@@ -338,7 +356,9 @@ export class AdapterManager {
       try {
         await adapter.dispose()
       } catch (error) {
-        console.error(`Failed to dispose adapter ${adapter.id}:`, error)
+        this.logger.error(`Failed to dispose adapter ${adapter.id}`, {
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
     })
 

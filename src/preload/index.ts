@@ -5,6 +5,13 @@ import { map, filter, share } from 'rxjs/operators'
 import { ConfigChangeEvent, AppConfig } from '@s/core/config'
 import { trpcClient } from './trpc'
 
+// Simple logger for preload process
+const logger = {
+  info: (...args: any[]) => console.log('[Preload]', ...args),
+  error: (...args: any[]) => console.error('[Preload]', ...args),
+  warn: (...args: any[]) => console.warn('[Preload]', ...args)
+}
+
 // IPC channels
 const EVENT_CHANNEL = 'zelan:event'
 const EVENT_SYNC_CHANNEL = 'zelan:event-sync'
@@ -117,7 +124,7 @@ const configAPI = {
         callback(config as AppConfig)
       })
       .catch((err) => {
-        console.error('Error getting initial config:', err)
+        logger.error('Error getting initial config:', err)
       })
 
     // Set up subscription to config changes
@@ -128,7 +135,7 @@ const configAPI = {
           callback(updatedConfig as AppConfig)
         })
         .catch((err) => {
-          console.error('Error getting updated config:', err)
+          logger.error('Error getting updated config:', err)
         })
     }
 
@@ -153,7 +160,7 @@ const configAPI = {
         callback(value as T)
       })
       .catch((err) => {
-        console.error(`Error getting initial value for ${path}:`, err)
+        logger.error(`Error getting initial value for ${path}:`, err)
       })
 
     // Set up subscription to matching config changes
@@ -169,7 +176,7 @@ const configAPI = {
             callback(updatedValue as T)
           })
           .catch((err) => {
-            console.error(`Error getting updated value for ${path}:`, err)
+            logger.error(`Error getting updated value for ${path}:`, err)
           })
       }
     }
@@ -217,10 +224,10 @@ if (process.contextIsolated) {
       events: eventAPI,
       config: configAPI
     })
-    console.log('Exposing tRPC client to main world:', !!trpcClient)
+    logger.info('Exposing tRPC client to main world:', !!trpcClient)
     contextBridge.exposeInMainWorld('trpc', trpcClient)
   } catch (error) {
-    console.error(error)
+    logger.error('Error exposing tRPC client:', error)
   }
 } else {
   // @ts-ignore (define in dts)

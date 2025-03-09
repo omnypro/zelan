@@ -4,31 +4,50 @@ import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
+// Initialize logging service first thing so we can use it to log startup
+const logger = getLoggingService().createLogger('Main')
+logger.info('Zelan application starting up')
+
 // Load environment variables from .env file manually
 try {
   // __dirname may be relative in dev mode, so use app.getAppPath()
   const appRoot = app.getAppPath()
   const envPath = join(appRoot, '.env')
-  console.log('Looking for .env at path:', envPath)
+  logger.debug('Looking for .env file', { path: envPath })
   const envContent = readFileSync(envPath, 'utf8')
-  
-  envContent.split('\n').forEach(line => {
+
+  const loadedVars: Record<string, string> = {}
+
+  envContent.split('\n').forEach((line) => {
     // Skip empty lines and comments
     if (!line || line.startsWith('#')) return
-    
+
     // Parse KEY=VALUE format
     const [key, ...valueParts] = line.split('=')
     const value = valueParts.join('=').trim()
-    
+
     if (key && value) {
-      process.env[key.trim()] = value
-      console.log(`Loaded env var: ${key.trim()}=${value}`)
+      const trimmedKey = key.trim()
+      process.env[trimmedKey] = value
+
+      // Don't log sensitive values
+      if (
+        trimmedKey.includes('SECRET') ||
+        trimmedKey.includes('KEY') ||
+        trimmedKey.includes('TOKEN')
+      ) {
+        loadedVars[trimmedKey] = '******'
+      } else {
+        loadedVars[trimmedKey] = value
+      }
     }
   })
-  
-  console.log('Environment variables loaded from .env file')
+
+  logger.info('Environment variables loaded from .env file', { vars: loadedVars })
 } catch (error) {
-  console.error('Failed to load .env file:', error)
+  logger.error('Failed to load .env file', {
+    error: error instanceof Error ? error.message : String(error)
+  })
 }
 
 // Import our services
@@ -47,6 +66,7 @@ import { TwitchAdapterFactory } from '@m/adapters/twitch'
 import { setupTRPCServer } from '@m/trpc'
 import { SystemEventType, EventCategory } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
+import { getLoggingService } from '@m/services/logging'
 // We use these types in our error handling
 import type { ErrorService } from '@m/services/errors'
 
@@ -174,7 +194,7 @@ async function initializeServices(): Promise<void> {
 
     // Initialize error service
     errorService = getErrorService(mainEventBus)
-    
+
     // Add console error handler for development
     if (is.dev) {
       errorService.addHandler({
@@ -182,7 +202,7 @@ async function initializeServices(): Promise<void> {
           // Additional development-mode error handling could go here
           // (already logged to console by the error service)
         }
-      });
+      })
     }
 
     // Publish startup event
@@ -196,8 +216,8 @@ async function initializeServices(): Promise<void> {
     adapterRegistry = new AdapterRegistry()
 
     // Register adapter factories
-    adapterRegistry.register(new TestAdapterFactory(mainEventBus))
-    adapterRegistry.register(new ObsAdapterFactory(mainEventBus))
+    adapterRegistry.register(new TestAdapterFactory())
+    adapterRegistry.register(new ObsAdapterFactory())
     adapterRegistry.register(new TwitchAdapterFactory(mainEventBus))
 
     // Initialize adapter manager
@@ -218,18 +238,18 @@ async function initializeServices(): Promise<void> {
           eventTypes: ['message', 'follow', 'subscription']
         }
       })
-      
+
       // Check for existing adapters
-      const existingAdapters = adapterManager.getAllAdapters();
-      const hasTwitchAdapter = existingAdapters.some(adapter => adapter.type === 'twitch');
-      
+      const existingAdapters = adapterManager.getAllAdapters()
+      const hasTwitchAdapter = existingAdapters.some((adapter) => adapter.type === 'twitch')
+
       // Create Twitch adapter if authenticated and one doesn't already exist
       try {
-        const authService = getAuthService(mainEventBus);
-        const twitchAuthStatus = authService.getStatus(AuthProvider.TWITCH);
-        
+        const authService = getAuthService(mainEventBus)
+        const twitchAuthStatus = authService.getStatus(AuthProvider.TWITCH)
+
         if (twitchAuthStatus.state === 'authenticated' && !hasTwitchAdapter) {
-          console.log('Twitch authenticated at startup, creating Twitch adapter');
+          logger.info('Twitch authenticated at startup, creating Twitch adapter')
           await adapterManager.createAdapter({
             id: 'twitch-adapter',
             type: 'twitch',
@@ -237,22 +257,27 @@ async function initializeServices(): Promise<void> {
             enabled: true,
             options: {
               channelName: '', // Will use authenticated user's channel by default
-              pollInterval: 60000, // Poll channel info every minute
               includeSubscriptions: false,
               eventsToTrack: [
-                'channel.update', 
-                'stream.online', 
-                'stream.offline'
+                'channel.update',
+                'stream.online',
+                'stream.offline',
+                'chat.message',
+                'chat.cheer',
+                'chat.subscription',
+                'chat.raid'
               ]
             }
-          });
+          })
         } else if (twitchAuthStatus.state === 'authenticated') {
-          console.log('Twitch adapter already exists');
+          logger.info('Twitch adapter already exists')
         } else {
-          console.log('Twitch not authenticated, skipping Twitch adapter creation');
+          logger.info('Twitch not authenticated, skipping Twitch adapter creation')
         }
       } catch (error) {
-        console.error('Error creating Twitch adapter:', error);
+        logger.error('Error creating Twitch adapter', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
     }
 
@@ -276,71 +301,85 @@ async function initializeServices(): Promise<void> {
     const authEventSubscription = mainEventBus.events$.subscribe(async (event) => {
       try {
         // Check for auth events from the TwitchAuthService
-        if (event.category === EventCategory.SERVICE && 
-            event.type === 'authenticated' && 
-            event.payload?.provider === AuthProvider.TWITCH) {
-          console.log('Twitch authentication successful, creating Twitch adapter');
-          
+        if (
+          event.category === EventCategory.SERVICE &&
+          event.type === 'authenticated' &&
+          event.payload &&
+          typeof event.payload === 'object' &&
+          'provider' in event.payload &&
+          event.payload.provider === AuthProvider.TWITCH
+        ) {
+          logger.info('Twitch authentication successful, creating Twitch adapter')
+
           // Check if a Twitch adapter already exists
-          const existingAdapter = adapterManager.getAdaptersByType('twitch');
-          if (existingAdapter.length === 0) {
-            try {
-              await adapterManager.createAdapter({
-                id: 'twitch-adapter',
-                type: 'twitch',
-                name: 'Twitch Adapter',
-                enabled: true,
-                options: {
-                  channelName: '',
-                  pollInterval: 60000,
-                  includeSubscriptions: false,
-                  eventsToTrack: [
-                    'channel.update', 
-                    'stream.online', 
-                    'stream.offline'
-                  ]
-                }
-              });
-              
-              console.log('Twitch adapter created successfully');
-            } catch (error) {
-              console.error('Failed to create Twitch adapter:', error);
+          if (adapterManager) {
+            const existingAdapter = adapterManager.getAdaptersByType('twitch')
+            if (existingAdapter.length === 0) {
+              try {
+                await adapterManager.createAdapter({
+                  id: 'twitch-adapter',
+                  type: 'twitch',
+                  name: 'Twitch Adapter',
+                  enabled: true,
+                  options: {
+                    channelName: '',
+                    includeSubscriptions: false,
+                    eventsToTrack: [
+                      'channel.update',
+                      'stream.online',
+                      'stream.offline',
+                      'chat.message',
+                      'chat.cheer',
+                      'chat.subscription',
+                      'chat.raid'
+                    ]
+                  }
+                })
+
+                logger.info('Twitch adapter created successfully')
+              } catch (error) {
+                logger.error('Failed to create Twitch adapter', {
+                  error: error instanceof Error ? error.message : String(error)
+                })
+              }
+            } else {
+              logger.info('Twitch adapter already exists')
             }
-          } else {
-            console.log('Twitch adapter already exists');
           }
         }
       } catch (error) {
-        console.error('Error handling auth event:', error);
+        logger.error('Error handling auth event', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       }
-    });
-    
+    })
+
     // Store the subscription for cleanup
-    subscriptionManager.add(authEventSubscription);
+    subscriptionManager.add(authEventSubscription)
 
     // Set up tRPC server
     setupTRPCServer(mainEventBus, adapterManager, configStore, authService)
 
-    console.log('Services initialized successfully')
+    logger.info('Services initialized successfully')
   } catch (error) {
     // Report error through error service if available
     if (errorService) {
-      errorService.reportError(
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: 'ApplicationCore',
-          operation: 'initializeServices',
-          recoverable: false
-        }
-      );
+      errorService.reportError(error instanceof Error ? error : new Error(String(error)), {
+        component: 'ApplicationCore',
+        operation: 'initializeServices',
+        recoverable: false
+      })
     } else {
       // Fallback if error service isn't initialized yet
-      console.error('Failed to initialize services:', error);
+      logger.error('Failed to initialize services', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      })
       mainEventBus?.publish(
         createSystemEvent(SystemEventType.ERROR, 'Failed to initialize services', 'error', {
           error: error instanceof Error ? error.message : String(error)
         })
-      );
+      )
     }
   }
 }
@@ -406,13 +445,13 @@ app.on('before-quit', async (event) => {
     if (webSocketService) {
       webSocketService.stop()
     }
-    
+
     if (authService) {
       authService.dispose()
     }
-    
+
     // Clean up subscriptions
-    subscriptionManager.unsubscribeAll();
+    subscriptionManager.unsubscribeAll()
 
     // Wait a moment for cleanup to complete and events to be processed
     setTimeout(() => {
@@ -421,24 +460,23 @@ app.on('before-quit', async (event) => {
   } catch (error) {
     // Report error through error service if available
     if (errorService) {
-      errorService.reportError(
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: 'ApplicationCore',
-          operation: 'appCleanup',
-          recoverable: false
-        }
-      );
+      errorService.reportError(error instanceof Error ? error : new Error(String(error)), {
+        component: 'ApplicationCore',
+        operation: 'appCleanup',
+        recoverable: false
+      })
     } else {
-      console.error('Error during cleanup:', error);
+      logger.error('Error during cleanup', {
+        error: error instanceof Error ? error.message : String(error)
+      })
     }
-    
+
     // Force quit if cleanup fails
-    app.quit();
+    app.quit()
   } finally {
     // Clean up error service as the last step
     if (errorService) {
-      errorService.dispose();
+      errorService.dispose()
     }
   }
 })

@@ -22,7 +22,7 @@ import EventViewer, { GroupBy } from './components/EventViewer'
 
 function MyComponent() {
   return (
-    <EventViewer 
+    <EventViewer
       title="System Events"
       initialCategory={EventCategory.SYSTEM}
       initialGroupBy={GroupBy.TYPE}
@@ -55,11 +55,11 @@ function MyComponent() {
   const handleFilterChange = (criteria) => {
     // Apply filters
   }
-  
+
   return (
     <EventFilterBar
       onFilterChange={handleFilterChange}
-      onTimeRangeChange={(minutes) => console.log(`Time range: ${minutes} minutes`)}
+      onTimeRangeChange={(minutes) => console.info(`Time range: ${minutes} minutes`)}
       categories={Object.values(EventCategory)}
       sources={mySources}
       types={myEventTypes}
@@ -101,8 +101,8 @@ function MyComponent() {
     <EventTimeline
       events={myEvents}
       timeRange={60} // minutes
-      height={100} 
-      onTimeClick={(timestamp) => console.log(`Clicked on ${new Date(timestamp)}`)}
+      height={100}
+      onTimeClick={(timestamp) => console.info(`Clicked on ${new Date(timestamp)}`)}
     />
   )
 }
@@ -122,10 +122,10 @@ function MyComponent() {
       timestamp={Date.now()}
       category={EventCategory.SYSTEM}
       type="info"
-      source={{ id: "system", type: "core" }}
-      payload={{ message: "System started" }}
+      source={{ id: 'system', type: 'core' }}
+      payload={{ message: 'System started' }}
       expanded={false}
-      onClick={() => console.log("Event clicked")}
+      onClick={() => console.info('Event clicked')}
     />
   )
 }
@@ -167,7 +167,7 @@ function ErrorsPage() {
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Error Log</h1>
-      <EventViewer 
+      <EventViewer
         title="Application Errors"
         initialCategory={EventCategory.ERROR}
         showTestControls={false}
@@ -187,21 +187,17 @@ import { useFilteredEvents } from '@r/hooks/useEventStream'
 function CustomEventsView() {
   const [criteria, setCriteria] = useState({ since: Date.now() - 3600000 }) // Last hour
   const events = useFilteredEvents(criteria)
-  
+
   const groupedEvents = useMemo(() => {
     return groupEvents(events, GroupBy.TYPE)
   }, [events])
-  
+
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Recent Events by Type</h1>
-      
+
       {Object.entries(groupedEvents).map(([type, events]) => (
-        <EventGroup
-          key={type}
-          title={type}
-          events={events}
-        />
+        <EventGroup key={type} title={type} events={events} />
       ))}
     </div>
   )

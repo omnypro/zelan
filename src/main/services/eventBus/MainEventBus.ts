@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { BaseEventBus } from '@s/core/bus'
 import { BaseEvent } from '@s/types/events'
+import { getLoggingService, ComponentLogger } from '@m/services/logging'
 
 // IPC channels
 const EVENT_CHANNEL = 'zelan:event'
@@ -12,9 +13,13 @@ const EVENT_SYNC_CHANNEL = 'zelan:event-sync'
 export class MainEventBus extends BaseEventBus {
   private webContents: Electron.WebContents[] = []
   private isForwarding = false
+  private logger: ComponentLogger
 
   constructor() {
     super()
+
+    // Initialize logger
+    this.logger = getLoggingService().createLogger('MainEventBus')
 
     // Set up IPC listeners
     this.setupIpcListeners()
@@ -75,7 +80,9 @@ export class MainEventBus extends BaseEventBus {
 
         this.isForwarding = false
       } catch (error) {
-        console.error('Error handling event from renderer:', error)
+        this.logger.error('Error handling event from renderer', {
+          error: error instanceof Error ? error.message : String(error)
+        })
         this.isForwarding = false
       }
     })
@@ -97,7 +104,9 @@ export class MainEventBus extends BaseEventBus {
         // Acknowledge receipt
         event.returnValue = { success: true }
       } catch (error) {
-        console.error('Error handling sync event from renderer:', error)
+        this.logger.error('Error handling sync event from renderer', {
+          error: error instanceof Error ? error.message : String(error)
+        })
         this.isForwarding = false
         event.returnValue = { success: false, error: String(error) }
       }

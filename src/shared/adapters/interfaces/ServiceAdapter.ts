@@ -51,7 +51,7 @@ export interface ServiceAdapter {
    * Observable of adapter status changes
    */
   readonly status$: Observable<AdapterStatusInfo>
-  
+
   /**
    * Current adapter status
    */
