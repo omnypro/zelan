@@ -1,6 +1,5 @@
 import { EventCategory, SystemEventType, SystemInfoPayload, BaseEvent } from '@s/types/events'
-import { createSystemEvent, createObsEvent, createEvent } from './createEvents'
-import { ObsEventType } from '@s/types/events/ObsEvents'
+import { createSystemEvent, createObsEvent, createEvent, ObsEventType } from './createEvent'
 
 /**
  * Base class for all event types

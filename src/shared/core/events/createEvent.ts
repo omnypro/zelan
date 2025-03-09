@@ -1,33 +1,73 @@
-import { BaseEvent as IBaseEvent, EventCategory, EventSource } from '@s/types/events'
+import { 
+  BaseEvent, 
+  EventCategory, 
+  SystemEventType, 
+  SystemInfoPayload,
+  ObsEventType
+} from '@s/types/events'
 
 /**
- * Create a new event with the given parameters
- * @param category Event category
- * @param type Event type
- * @param payload Event payload
- * @param source Event source
- * @returns A new event object
+ * Create a properly formatted event with consistent metadata
  */
 export function createEvent<T>(
   category: EventCategory,
   type: string,
-  payload: T,
-  source: EventSource | string = 'system'
-): IBaseEvent<T> {
-  // Create standardized source object
-  const eventSource: EventSource =
-    typeof source === 'string' ? { id: 'system', name: 'System', type: 'system' } : source
-
+  data: T,
+  sourceId: string,
+  sourceName: string = sourceId,
+  sourceType: string = category
+): BaseEvent<T> {
   return {
     id: crypto.randomUUID(),
     timestamp: Date.now(),
-    source: eventSource,
     category,
     type,
-    payload,
-    data: payload, // For compatibility with API spec
+    source: {
+      id: sourceId,
+      name: sourceName,
+      type: sourceType
+    },
+    data,
     metadata: {
       version: '1.0'
     }
   }
 }
+
+/**
+ * Create an OBS event with specific metadata
+ */
+export function createObsEvent<T>(
+  type: ObsEventType, 
+  data: T, 
+  adapterId: string, 
+  adapterName: string
+): BaseEvent<T> {
+  return createEvent(EventCategory.OBS, type, data, adapterId, adapterName, 'obs')
+}
+
+/**
+ * Create a system event with specific metadata
+ */
+export function createSystemEvent(
+  type: SystemEventType,
+  message: string,
+  level: 'info' | 'warning' | 'error' = 'info',
+  details?: Record<string, unknown>
+): BaseEvent<SystemInfoPayload> {
+  return createEvent(
+    EventCategory.SYSTEM,
+    type,
+    {
+      message,
+      level,
+      details
+    },
+    'system',
+    'System',
+    'system'
+  )
+}
+
+// Re-export for convenience
+export { ObsEventType }

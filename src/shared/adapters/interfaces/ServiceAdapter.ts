@@ -40,7 +40,7 @@ export interface ServiceAdapter {
   /**
    * Adapter-specific configuration options
    */
-  readonly options: Record<string, any>
+  readonly options: Record<string, unknown>
 
   /**
    * Event bus instance used by this adapter

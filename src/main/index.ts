@@ -327,10 +327,10 @@ async function initializeServices(): Promise<void> {
         if (
           event.category === EventCategory.SERVICE &&
           event.type === 'authenticated' &&
-          event.payload &&
-          typeof event.payload === 'object' &&
-          'provider' in event.payload &&
-          event.payload.provider === AuthProvider.TWITCH
+          event.data &&
+          typeof event.data === 'object' &&
+          'provider' in event.data &&
+          event.data.provider === AuthProvider.TWITCH
         ) {
           logger.info('Twitch authentication successful, creating Twitch adapter')
 
