@@ -1,6 +1,8 @@
-import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import { resolve } from 'path'
 import react from '@vitejs/plugin-react'
+
+// @ts-ignore - Can't switch to "bundler" or "node16"
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 
 export default defineConfig({
