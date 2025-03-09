@@ -34,7 +34,6 @@ export class TwitchAuthService extends BaseAuthService {
     'channel:read:subscriptions',
     'channel:read:vips',
     'chat:read',
-    'eventsub:version1', // Required for EventSub WebSocket
     'moderation:read',
     'moderator:read:automod_settings',
     'moderator:read:blocked_terms',
