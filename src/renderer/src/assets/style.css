@@ -1,0 +1,40 @@
+@import 'tailwindcss';
+
+.appbar {
+  -webkit-app-region: drag;
+}
+
+html {
+  @apply antialiased;
+}
+
+html body #root {
+  height: 100%;
+  width: 100%;
+  overflow: auto;
+}
+
+p {
+  user-select: text
+}
+
+*:focus-visible {
+  outline: none !important;
+  box-shadow: unset !important;
+}
+
+code {
+  font-weight: 600;
+  padding: 3px 5px;
+  border-radius: 2px;
+  background-color: var(--color-background-mute);
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    Liberation Mono,
+    monospace;
+  font-size: 85%;
+}

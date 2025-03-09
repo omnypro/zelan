@@ -1,5 +1,5 @@
+import AppBar from '@r/components/app-bar'
 import { Link, Outlet, createRootRoute, useMatchRoute } from '@tanstack/react-router'
-import electronLogo from '../assets/electron.svg'
 
 // Navigation link component with active state
 function NavLink({ to, label }: { to: string; label: string }) {
@@ -28,13 +28,9 @@ export const Route = createRootRoute({
 
 function Layout() {
   return (
-    <div className="min-h-screen bg-gray-100 text-black flex flex-col">
+    <div className="min-h-screen min-w-screen flex flex-col">
       {/* Header is shared across all routes */}
-      <header className="bg-gray-800 text-white p-4 flex items-center shadow-md">
-        <img alt="logo" className="h-8 w-8 mr-3" src={electronLogo} />
-        <h1 className="text-xl font-semibold">Zelan</h1>
-        <p className="ml-4 text-gray-400 text-sm">Stream Data Aggregation Service</p>
-      </header>
+      <AppBar />
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar Navigation */}

@@ -7,21 +7,21 @@ import icon from '../../resources/icon.png?asset'
 // Create a simple console logger for startup
 // We'll use the full logging service after it's properly imported
 const consoleLogger = {
-  info: (message: string, meta?: Record<string, any>) => {
+  info: (message: string, meta?: Record<string, unknown>): void => {
     console.info(`[Main] ${message}`, meta || '')
   },
-  error: (message: string, meta?: Record<string, any>) => {
+  error: (message: string, meta?: Record<string, unknown>): void => {
     console.error(`[Main] ${message}`, meta || '')
   },
-  warn: (message: string, meta?: Record<string, any>) => {
+  warn: (message: string, meta?: Record<string, unknown>): void => {
     console.warn(`[Main] ${message}`, meta || '')
   },
-  debug: (message: string, meta?: Record<string, any>) => {
+  debug: (message: string, meta?: Record<string, unknown>): void => {
     console.debug(`[Main] ${message}`, meta || '')
   }
 }
 
-consoleLogger.info('Zelan application starting up')
+consoleLogger.info('Zelan application starting up...')
 
 // Load environment variables from .env file manually
 try {
@@ -62,27 +62,24 @@ try {
 }
 
 // Import our services
-import { MainEventBus } from '@m/services/eventBus'
 import { AdapterManager, ReconnectionManager } from '@m/services/adapters'
-import { WebSocketService } from '@m/services/websocket'
-import { getErrorService } from '@m/services/errors'
-import { getAuthService } from '@m/services/auth'
-import { AuthProvider } from '@s/auth/interfaces'
 import { AdapterRegistry } from '@s/adapters'
-import { EventCache } from '@m/services/events/EventCache'
+import { AuthProvider } from '@s/auth/interfaces'
 import { ConfigStore, getConfigStore } from '@s/core/config'
-import { TestAdapterFactory } from '@m/adapters/test'
-import { ObsAdapterFactory } from '@m/adapters/obs'
-import { TwitchAdapterFactory } from '@m/adapters/twitch'
-import { setupTRPCServer } from '@m/trpc'
-import { SystemEventType, EventCategory } from '@s/types/events'
 import { createSystemEvent } from '@s/core/events'
-// We use these types in our error handling
-import type { ErrorService } from '@m/services/errors'
-
-// Import for subscription management
-import { SubscriptionManager } from '@s/utils/subscription-manager'
+import { EventCache } from '@m/services/events/EventCache'
+import { getAuthService, type AuthService } from '@m/services/auth'
+import { getErrorService } from '@m/services/errors'
 import { getLoggingService } from '@m/services/logging'
+import { MainEventBus } from '@m/services/eventBus'
+import { ObsAdapterFactory } from '@m/adapters/obs'
+import { setupTRPCServer } from '@m/trpc'
+import { SubscriptionManager } from '@s/utils/subscription-manager'
+import { SystemEventType, EventCategory } from '@s/types/events'
+import { TestAdapterFactory } from '@m/adapters/test'
+import { TwitchAdapterFactory } from '@m/adapters/twitch'
+import { WebSocketService } from '@m/services/websocket'
+import type { ErrorService } from '@m/services/errors'
 
 // Initialize the full logging service now that it's imported
 const logger = getLoggingService().createLogger('Main')
@@ -98,20 +95,22 @@ let adapterRegistry: AdapterRegistry | null = null
 let adapterManager: AdapterManager | null = null
 let reconnectionManager: ReconnectionManager | null = null
 let webSocketService: WebSocketService | null = null
-let authService: any = null // Using 'any' temporarily
-let subscriptionManager: SubscriptionManager = new SubscriptionManager()
+let authService: AuthService | null = null
+
+const subscriptionManager: SubscriptionManager = new SubscriptionManager()
 
 function createWindow(): void {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
-    show: false,
-    autoHideMenuBar: true,
+    minWidth: 854,
+    height: 480,
+    titleBarStyle: 'hiddenInset',
+    frame: false,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
-      sandbox: false
+      sandbox: false,
+      webviewTag: true
     }
   })
 
