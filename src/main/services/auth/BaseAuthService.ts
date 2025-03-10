@@ -1,4 +1,4 @@
-import { BehaviorSubject, Observable } from 'rxjs'
+import { BehaviorSubject, Observable, of } from 'rxjs'
 import { EventBus } from '@s/core/bus'
 import { EventCategory } from '@s/types/events'
 import { createEvent } from '@s/core/events'
@@ -13,7 +13,8 @@ import {
   AuthResult,
   AuthStatus,
   AuthState,
-  AuthToken
+  AuthToken,
+  DeviceCodeResponse
 } from '@s/auth/interfaces'
 import { AuthError, AuthErrorCode, TokenExpiredError, RefreshFailedError } from '@s/auth/errors'
 import { SubscriptionManager } from '@s/utils/subscription-manager'
@@ -36,6 +37,40 @@ export abstract class BaseAuthService implements AuthService {
     this.eventBus = eventBus
     this.tokenManager = getTokenManager()
     this.logger = getLoggingService().createLogger('BaseAuthService')
+  }
+  
+  /**
+   * Observable of authentication status changes for a provider (tRPC compatibility)
+   * This method is used by the tRPC routers which use string literals
+   */
+  onStatusChange(providerStr: string): Observable<AuthStatus> {
+    try {
+      // Convert string to enum
+      const provider = providerStr as AuthProvider
+      return this.status$(provider)
+    } catch (error) {
+      // Return empty observable for invalid providers
+      return of({
+        state: AuthState.UNAUTHENTICATED,
+        provider: providerStr as any,
+        lastUpdated: Date.now()
+      } as AuthStatus)
+    }
+  }
+  
+  /**
+   * Observable of device code events
+   * Default implementation returns empty observable
+   * Child classes should override this as needed
+   */
+  onDeviceCode(): Observable<DeviceCodeResponse> {
+    return of({ 
+      device_code: '',
+      user_code: '',
+      verification_uri: '',
+      expires_in: 0,
+      interval: 0
+    })
   }
 
   /**

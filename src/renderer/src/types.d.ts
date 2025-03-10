@@ -81,6 +81,57 @@ interface Window {
         mutate: () => Promise<boolean>
       }
     }
+    
+    reconnection: {
+      getStatus: {
+        query: (adapterId: string) => Promise<{
+          enabled: boolean
+          interval: number
+          maxAttempts: number
+          attempts: number
+          isRetrying: boolean
+        }>
+      }
+      enable: {
+        mutate: (adapterId: string) => Promise<boolean>
+      }
+      disable: {
+        mutate: (adapterId: string) => Promise<boolean>
+      }
+      setInterval: {
+        mutate: (params: { id: string; interval: number }) => Promise<boolean>
+      }
+      setMaxAttempts: {
+        mutate: (params: { id: string; maxAttempts: number }) => Promise<boolean>
+      }
+      resetAttempts: {
+        mutate: (adapterId: string) => Promise<boolean>
+      }
+    }
+    
+    auth: {
+      getStatus: {
+        query: (provider: string) => Promise<any>
+      }
+      isAuthenticated: {
+        query: (provider: string) => Promise<boolean>
+      }
+      authenticate: {
+        mutate: (params: { provider: string; options: any }) => Promise<any>
+      }
+      refreshToken: {
+        mutate: (provider: string) => Promise<any>
+      }
+      revokeToken: {
+        mutate: (provider: string) => Promise<boolean>
+      }
+      onStatusChange: {
+        subscribe: (provider: string) => { subscribe: Function }
+      }
+      onDeviceCode: {
+        subscribe: () => { subscribe: Function }
+      }
+    }
   }
 
   electron: {

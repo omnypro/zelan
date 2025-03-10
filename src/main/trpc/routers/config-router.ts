@@ -1,6 +1,5 @@
 import { router, procedure, configPathSchema, configValueSchema, configUpdatesSchema } from '@s/trpc'
 import { observable } from '@trpc/server/observable'
-import type { TRPCContext } from '../context'
 import { z } from 'zod'
 
 export const configRouter = router({
@@ -10,7 +9,7 @@ export const configRouter = router({
       key: configPathSchema,
       defaultValue: configValueSchema.optional()
     }))
-    .query(({ ctx, input }: { ctx: TRPCContext, input: { key: string, defaultValue?: any } }) => {
+    .query(({ ctx, input }) => {
       return ctx.configStore.get(input.key, input.defaultValue)
     }),
 
@@ -20,7 +19,7 @@ export const configRouter = router({
       key: configPathSchema,
       value: configValueSchema
     }))
-    .mutation(({ ctx, input }: { ctx: TRPCContext, input: { key: string, value: any } }) => {
+    .mutation(({ ctx, input }) => {
       ctx.configStore.set(input.key, input.value)
       return true
     }),
@@ -28,7 +27,7 @@ export const configRouter = router({
   // Update multiple configuration values
   update: procedure
     .input(configUpdatesSchema)
-    .mutation(({ ctx, input }: { ctx: TRPCContext, input: Record<string, any> }) => {
+    .mutation(({ ctx, input }) => {
       ctx.configStore.update(input)
       return true
     }),
@@ -36,7 +35,7 @@ export const configRouter = router({
   // Delete configuration key
   delete: procedure
     .input(configPathSchema)
-    .mutation(({ ctx, input }: { ctx: TRPCContext, input: string }) => {
+    .mutation(({ ctx, input }) => {
       ctx.configStore.delete(input)
       return true
     }),
@@ -44,22 +43,22 @@ export const configRouter = router({
   // Check if configuration key exists
   has: procedure
     .input(configPathSchema)
-    .query(({ ctx, input }: { ctx: TRPCContext, input: string }) => {
+    .query(({ ctx, input }) => {
       return ctx.configStore.has(input)
     }),
 
   // Get all configuration
-  getAll: procedure.query(({ ctx }: { ctx: TRPCContext }) => {
+  getAll: procedure.query(({ ctx }) => {
     return ctx.configStore.getAll()
   }),
 
   // Get configuration path
-  getPath: procedure.query(({ ctx }: { ctx: TRPCContext }) => {
+  getPath: procedure.query(({ ctx }) => {
     return ctx.configStore.fileName
   }),
 
   // Subscribe to configuration changes
-  onConfigChange: procedure.subscription(({ ctx }: { ctx: TRPCContext }) => {
+  onConfigChange: procedure.subscription(({ ctx }) => {
     return observable<any>((emit) => {
       const logger = ctx.logger('tRPC.config')
       logger.info('Client subscribed to config changes')
@@ -88,15 +87,18 @@ export const configRouter = router({
   // Subscribe to specific path changes
   onPathChange: procedure
     .input(configPathSchema)
-    .subscription(({ ctx, input }: { ctx: TRPCContext, input: string }) => {
+    .subscription(({ ctx, input }) => {
       return observable<any>((emit) => {
         const logger = ctx.logger('tRPC.config')
         logger.info('Client subscribed to config path change', { path: input })
         
-        // Subscribe to specific path changes
-        const subscription = ctx.configStore.pathChanges$(input).subscribe({
+        // Subscribe to all changes and filter for our path
+        const subscription = ctx.configStore.changes$().subscribe({
           next: (change) => {
-            emit.next(change)
+            // Only emit changes for the specific path
+            if (change.key === input || change.key.startsWith(`${input}.`)) {
+              emit.next(change)
+            }
           },
           error: (err) => {
             logger.error('Error in config path stream', {

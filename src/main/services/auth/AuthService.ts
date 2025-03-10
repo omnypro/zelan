@@ -6,11 +6,12 @@ import {
   AuthOptions,
   AuthResult,
   AuthStatus,
-  AuthToken
+  AuthToken,
+  DeviceCodeResponse
 } from '@s/auth/interfaces'
 import { AuthError, AuthErrorCode } from '@s/auth/errors'
 import { getTwitchAuthService } from './TwitchAuthService'
-import { Observable } from 'rxjs'
+import { Observable, of } from 'rxjs'
 
 /**
  * Main authentication service that manages multiple auth providers
@@ -143,6 +144,60 @@ export class AuthService implements IAuthService {
   status$(provider: AuthProvider): Observable<AuthStatus> {
     const authService = this.getProviderService(provider)
     return authService.status$(provider)
+  }
+  
+  /**
+   * Observable of authentication status changes for a provider (tRPC compatibility)
+   * This method is used by the tRPC routers which use string literals
+   */
+  onStatusChange(providerStr: string): Observable<AuthStatus> {
+    try {
+      // Convert string to enum
+      const provider = providerStr as AuthProvider
+      const authService = this.getProviderService(provider)
+      return authService.status$(provider)
+    } catch (error) {
+      // Return empty observable for invalid providers
+      return of({
+        state: 'unauthenticated',
+        provider: providerStr as any,
+        lastUpdated: Date.now()
+      } as AuthStatus)
+    }
+  }
+  
+  /**
+   * Observable of device code events
+   * This delegates to the Twitch auth service which handles device code flow
+   */
+  onDeviceCode(): Observable<DeviceCodeResponse> {
+    try {
+      // Currently only Twitch supports device code flow
+      const authService = this.getProviderService(AuthProvider.TWITCH) as any
+      
+      // Check if the service has the method
+      if (authService && typeof authService.onDeviceCode === 'function') {
+        return authService.onDeviceCode()
+      }
+      
+      // Otherwise return empty observable
+      return of({ 
+        device_code: '',
+        user_code: '',
+        verification_uri: '',
+        expires_in: 0,
+        interval: 0
+      })
+    } catch (error) {
+      // Return empty observable on error
+      return of({ 
+        device_code: '',
+        user_code: '',
+        verification_uri: '',
+        expires_in: 0,
+        interval: 0
+      })
+    }
   }
 
   /**

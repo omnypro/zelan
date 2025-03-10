@@ -1,7 +1,6 @@
 import { router, procedure } from '@s/trpc'
 import { observable } from '@trpc/server/observable'
 import type { TRPCContext } from '../context'
-import { toSerializableError } from '@s/utils/rx-trpc'
 import { BaseEvent } from '@s/types/events'
 
 export const eventsRouter = router({

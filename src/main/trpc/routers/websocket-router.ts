@@ -1,5 +1,4 @@
 import { router, procedure } from '@s/trpc'
-import { observable } from '@trpc/server/observable'
 import type { TRPCContext } from '../context'
 
 export const websocketRouter = router({

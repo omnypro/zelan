@@ -1,8 +1,6 @@
 import { ipcMain } from 'electron'
-import { createContext } from './context'
+import { createContext, TRPCContext } from './context'
 import { appRouter } from './routers'
-import { TRPCError } from '@trpc/server'
-import { observable } from '@trpc/server/observable'
 import { MainEventBus } from '@m/services/eventBus'
 import { AdapterManager, ReconnectionManager } from '@m/services/adapters'
 import { ConfigStore } from '@s/core/config'
@@ -10,12 +8,12 @@ import { AuthService } from '@m/services/auth'
 import { getLoggingService } from '@m/services/logging'
 
 // Create a simple adapter for electron IPC
-const createElectronAdapter = (appRouter: typeof appRouter) => {
-  // Get the tRPC caller for the router
-  const trpc = appRouter.createCaller({} as any)
+const createElectronAdapter = (router: typeof appRouter, ctx: TRPCContext) => {
+  // Get the tRPC caller for the router with proper context
+  const trpc = router.createCaller(ctx)
 
-  // Create a logger for tRPC
-  const logger = getLoggingService().createLogger('tRPC')
+  // Get logger from context
+  const logger = ctx.logger('tRPC')
 
   // Channel for tRPC requests
   const TRPC_CHANNEL = 'zelan:trpc'
@@ -129,9 +127,6 @@ export function setupTRPCServer(
 
   logger.info('Setting up tRPC server', { channel: TRPC_CHANNEL })
 
-  // Create the router with context
-  const router = appRouter.createCaller(ctx)
-
-  // Register the IPC handler
-  ipcMain.handle(TRPC_CHANNEL, createElectronAdapter(appRouter))
+  // Register the IPC handler with proper context
+  ipcMain.handle(TRPC_CHANNEL, createElectronAdapter(appRouter, ctx))
 }

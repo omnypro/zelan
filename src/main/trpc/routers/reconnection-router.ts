@@ -12,14 +12,16 @@ const reconnectionOptionsSchema = z.object({
 })
 
 export const reconnectionRouter = router({
-  // Get current reconnection state
-  getState: procedure.query(({ ctx }: { ctx: TRPCContext }) => {
-    return ctx.reconnectionManager.getState()
+  // Get current reconnection state for an adapter
+  getReconnectionState: procedure
+    .input(z.string())
+    .query(({ ctx, input }: { ctx: TRPCContext, input: string }) => {
+      return ctx.reconnectionManager.getReconnectionState(input)
   }),
   
   // Get reconnection options
   getOptions: procedure.query(({ ctx }: { ctx: TRPCContext }) => {
-    return ctx.reconnectionManager.getOptions()
+    return ctx.reconnectionManager.options
   }),
   
   // Update reconnection options

@@ -1,5 +1,5 @@
 import { Observable } from 'rxjs'
-import { AuthProvider, AuthOptions, AuthResult, AuthStatus, AuthToken } from './AuthTypes'
+import { AuthProvider, AuthOptions, AuthResult, AuthStatus, AuthToken, DeviceCodeResponse } from './AuthTypes'
 
 /**
  * Interface for the authentication service
@@ -66,4 +66,24 @@ export interface AuthService {
    * @returns An observable of authentication status
    */
   status$(provider: AuthProvider): Observable<AuthStatus>
+  
+  /**
+   * Observable of authentication status changes for a provider (tRPC compatibility)
+   *
+   * @param provider The authentication provider string
+   * @returns An observable of authentication status
+   */
+  onStatusChange(provider: string): Observable<AuthStatus>
+  
+  /**
+   * Observable of device code events
+   * 
+   * @returns An observable of device code responses
+   */
+  onDeviceCode(): Observable<DeviceCodeResponse>
+  
+  /**
+   * Clean up resources
+   */
+  dispose(): void
 }

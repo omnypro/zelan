@@ -10,7 +10,7 @@ import {
   DeviceCodeTimeoutError,
   RefreshFailedError
 } from '@s/auth/errors'
-
+import { Observable } from 'rxjs'
 import { AccessToken, revokeToken } from '@twurple/auth'
 
 /**
@@ -170,6 +170,17 @@ export class TwitchAuthService extends BaseAuthService {
         error: error instanceof Error ? error : new Error(String(error))
       }
     }
+  }
+
+  /**
+   * Observable of device code events
+   * This implementation returns device code information when a Twitch authentication flow is initiated
+   * Override from BaseAuthService
+   */
+  onDeviceCode(): Observable<DeviceCodeResponse> {
+    // The implementation in BaseAuthService already provides a default empty response
+    // We'll just use it since the actual device codes are emitted through auth events
+    return super.onDeviceCode();
   }
 
   /**

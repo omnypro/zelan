@@ -1,14 +1,17 @@
 import { router, procedure, authProviderSchema, authenticateSchema } from '@s/trpc'
 import { observable } from '@trpc/server/observable'
 import type { TRPCContext } from '../context'
+// Import the actual enum for use in type assertions
 import { AuthProvider } from '@s/auth/interfaces'
 
 export const authRouter = router({
   // Get auth status
   getStatus: procedure
     .input(authProviderSchema)
-    .query(({ ctx, input }: { ctx: TRPCContext, input: AuthProvider }) => {
-      const status = ctx.authService.getStatus(input)
+    .query(({ ctx, input }) => {
+      // Convert string to AuthProvider enum 
+      const provider = input as AuthProvider
+      const status = ctx.authService.getStatus(provider)
       return {
         state: status.state,
         provider: status.provider,
@@ -19,8 +22,10 @@ export const authRouter = router({
   // Check if authenticated
   isAuthenticated: procedure
     .input(authProviderSchema)
-    .query(({ ctx, input }: { ctx: TRPCContext, input: AuthProvider }) => {
-      return ctx.authService.isAuthenticated(input)
+    .query(({ ctx, input }) => {
+      // Convert string to AuthProvider enum
+      const provider = input as AuthProvider
+      return ctx.authService.isAuthenticated(provider)
     }),
 
   // Start authentication
@@ -28,7 +33,9 @@ export const authRouter = router({
     .input(authenticateSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        await ctx.authService.authenticate(input.provider, input.options)
+        // Convert string to AuthProvider enum
+        const provider = input.provider as AuthProvider
+        await ctx.authService.authenticate(provider, input.options)
         return { success: true }
       } catch (error) {
         ctx.logger('tRPC.auth').error('Authentication error', {
@@ -42,9 +49,11 @@ export const authRouter = router({
   // Refresh token
   refreshToken: procedure
     .input(authProviderSchema)
-    .mutation(async ({ ctx, input }: { ctx: TRPCContext, input: AuthProvider }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
-        await ctx.authService.refreshToken(input)
+        // Convert string to AuthProvider enum
+        const provider = input as AuthProvider
+        await ctx.authService.refreshToken(provider)
         return { success: true }
       } catch (error) {
         ctx.logger('tRPC.auth').error('Token refresh error', {
@@ -58,9 +67,11 @@ export const authRouter = router({
   // Revoke token
   revokeToken: procedure
     .input(authProviderSchema)
-    .mutation(async ({ ctx, input }: { ctx: TRPCContext, input: AuthProvider }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
-        await ctx.authService.revokeToken(input)
+        // Convert string to AuthProvider enum
+        const provider = input as AuthProvider
+        await ctx.authService.revokeToken(provider)
         return true
       } catch (error) {
         ctx.logger('tRPC.auth').error('Token revocation error', {
@@ -74,12 +85,13 @@ export const authRouter = router({
   // Subscribe to auth status changes
   onStatusChange: procedure
     .input(authProviderSchema)
-    .subscription(({ ctx, input }: { ctx: TRPCContext, input: AuthProvider }) => {
+    .subscription(({ ctx, input }) => {
       return observable<any>((emit) => {
         const logger = ctx.logger('tRPC.auth')
         logger.info('Client subscribed to auth status changes', { provider: input })
         
-        // Subscribe to auth status changes
+        // Subscribe to auth status changes using string directly
+        // AuthService.onStatusChange handles string conversion internally
         const subscription = ctx.authService.onStatusChange(input).subscribe({
           next: (status) => {
             emit.next({

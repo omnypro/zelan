@@ -2,9 +2,11 @@ import { initTRPC } from '@trpc/server'
 import { z } from 'zod'
 
 /**
- * tRPC initialization point
+ * tRPC initialization point with context type
+ * 
+ * The context will be properly typed in the main process implementation
  */
-export const t = initTRPC.create()
+export const t = initTRPC.context<any>().create()
 
 /**
  * Base procedure builders
