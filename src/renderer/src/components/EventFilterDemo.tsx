@@ -16,7 +16,7 @@ export default function EventFilterDemo() {
   const [filterCriteria, setFilterCriteria] = useState<EventFilterCriteria>({})
 
   // Event publisher for testing
-  const publishTestEvent = useEventPublisher(EventCategory.TEST, 'filter-demo', 'filter-demo')
+  const publishTestEvent = useEventPublisher(EventCategory.USER, 'filter-demo', 'filter-demo')
 
   // Update filter criteria when any filter option changes
   useEffect(() => {
@@ -156,7 +156,7 @@ export default function EventFilterDemo() {
               filteredEvents.map((event) => (
                 <div key={event.id} className="p-2 mb-2 border-b">
                   <div className="text-sm font-medium">{new Date(event.timestamp).toLocaleTimeString()}</div>
-                  <pre className="text-xs mt-1 overflow-auto max-h-32">{JSON.stringify(event.payload, null, 2)}</pre>
+                  <pre className="text-xs mt-1 overflow-auto max-h-32">{JSON.stringify(event.data, null, 2)}</pre>
                 </div>
               ))
             )}

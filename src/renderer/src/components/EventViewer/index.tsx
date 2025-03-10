@@ -73,7 +73,7 @@ export function EventViewer({
   }, [filteredEvents, groupBy])
 
   // Test event publisher
-  const publishTestEvent = useEventPublisher(EventCategory.TEST, 'event-viewer-test', 'event-viewer')
+  const publishTestEvent = useEventPublisher(EventCategory.USER, 'event-viewer-test', 'event-viewer')
 
   // Generate test event
   const handleGenerateTestEvent = () => {

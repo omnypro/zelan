@@ -11,50 +11,50 @@ interface EventCardProps {
     id: string
     type: string
   }
-  payload: any
+  data: any
   expanded?: boolean
   onClick?: () => void
 }
 
 /**
- * Formats the payload for display based on its content and type
+ * Formats the event data for display based on its content and type
  */
-function formatPayload(payload: any, type?: string): React.ReactNode {
-  if (!payload) return <span className="text-gray-400 italic">No payload</span>
+function formatPayload(data: any, type?: string): React.ReactNode {
+  if (!data) return <span className="text-gray-400 italic">No data</span>
 
-  // Handle string payloads
-  if (typeof payload === 'string') {
-    return <span>{payload}</span>
+  // Handle string data
+  if (typeof data === 'string') {
+    return <span>{data}</span>
   }
 
   // Handle adapter status events specially
-  if (type === 'status' && payload.status) {
+  if (type === 'status' && data.status) {
     return (
       <div>
         <div className="flex gap-1 items-center">
-          <StatusIndicator status={payload.status} />
-          <span className="font-medium">{payload.status}</span>
+          <StatusIndicator status={data.status} />
+          <span className="font-medium">{data.status}</span>
         </div>
-        {payload.message && <div className="text-gray-600">{payload.message}</div>}
+        {data.message && <div className="text-gray-600">{data.message}</div>}
       </div>
     )
   }
 
   // Handle message property if it exists
-  if (payload.message) {
-    return <span>{payload.message}</span>
+  if (data.message) {
+    return <span>{data.message}</span>
   }
 
   // Try to find a good summary property
   const summaryProps = ['name', 'title', 'summary', 'description']
   for (const prop of summaryProps) {
-    if (payload[prop] && typeof payload[prop] === 'string') {
-      return <span>{payload[prop]}</span>
+    if (data[prop] && typeof data[prop] === 'string') {
+      return <span>{data[prop]}</span>
     }
   }
 
   // When all else fails, return the stringified object
-  return <span className="font-mono text-xs whitespace-pre-wrap">{JSON.stringify(payload, null, 2)}</span>
+  return <span className="font-mono text-xs whitespace-pre-wrap">{JSON.stringify(data, null, 2)}</span>
 }
 
 /**
@@ -108,14 +108,17 @@ function TypeBadge({ type, category }: { type?: string; category?: EventCategory
       case EventCategory.ADAPTER:
         bgColor = 'bg-purple-100'
         break
-      case EventCategory.AUTH:
+      case EventCategory.SERVICE: // Changed from AUTH to SERVICE
         bgColor = 'bg-yellow-100'
         break
-      case EventCategory.ERROR:
-        bgColor = 'bg-red-100'
-        break
-      case EventCategory.TEST:
+      case EventCategory.USER: // Changed from TEST to USER
         bgColor = 'bg-green-100'
+        break
+      case EventCategory.TWITCH:
+        bgColor = 'bg-violet-100'
+        break
+      case EventCategory.OBS:
+        bgColor = 'bg-pink-100'
         break
     }
   }
@@ -132,7 +135,7 @@ export function EventCard({
   category,
   type,
   source,
-  payload,
+  data,
   expanded: initialExpanded = false,
   onClick
 }: EventCardProps) {
@@ -163,13 +166,13 @@ export function EventCard({
         {source && <SourceBadge source={source} />}
       </div>
 
-      <div className="text-sm py-1">{formatPayload(payload, type)}</div>
+      <div className="text-sm py-1">{formatPayload(data, type)}</div>
 
       {expanded && (
         <div className="mt-2 pt-2 border-t border-gray-100">
           <div className="text-xs text-gray-500 mb-1">Event ID: {id}</div>
           <pre className="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-48">
-            {JSON.stringify(payload, null, 2)}
+            {JSON.stringify(data, null, 2)}
           </pre>
         </div>
       )}

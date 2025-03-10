@@ -14,9 +14,9 @@ export function EnhancedEventsDemo() {
 
   const publishAdapterEvent = useEventPublisher(EventCategory.ADAPTER, 'status', 'test-adapter')
 
-  const publishErrorEvent = useEventPublisher(EventCategory.ERROR, 'fatal', 'events-demo')
+  const publishErrorEvent = useEventPublisher(EventCategory.SYSTEM, 'error', 'events-demo')
 
-  const publishAuthEvent = useEventPublisher(EventCategory.AUTH, 'token', 'auth-service')
+  const publishAuthEvent = useEventPublisher(EventCategory.SERVICE, 'authenticated', 'auth-service')
 
   // Generate various test events
   const generateEvents = () => {

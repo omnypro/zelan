@@ -74,9 +74,10 @@ export function EventTimeline({ events, timeRange, height = 100, onTimeClick }: 
   const categoryColors: Record<string, string> = {
     [EventCategory.SYSTEM]: 'bg-blue-400',
     [EventCategory.ADAPTER]: 'bg-purple-400',
-    [EventCategory.AUTH]: 'bg-yellow-400',
-    [EventCategory.ERROR]: 'bg-red-400',
-    [EventCategory.TEST]: 'bg-green-400',
+    [EventCategory.SERVICE]: 'bg-yellow-400',
+    [EventCategory.TWITCH]: 'bg-violet-400',
+    [EventCategory.OBS]: 'bg-pink-400',
+    [EventCategory.USER]: 'bg-green-400',
     unknown: 'bg-gray-400'
   }
 

@@ -13,26 +13,26 @@ export const AdapterStatus: React.FC = () => {
   // Group by adapter id
   const adapterStatuses = adapterStatusEvents.reduce(
     (acc, event) => {
-      // Make sure payload is properly formatted before accessing properties
-      const payload = event.payload || {}
+      // Make sure data is properly formatted before accessing properties
+      const data = event.data || {}
 
       // Extract properties safely
-      const id = typeof payload.id === 'string' ? payload.id : 'unknown'
-      const name = typeof payload.name === 'string' ? payload.name : 'Unknown Adapter'
-      const type = typeof payload.type === 'string' ? payload.type : 'unknown'
+      const id = typeof data.id === 'string' ? data.id : 'unknown'
+      const name = typeof data.name === 'string' ? data.name : 'Unknown Adapter'
+      const type = typeof data.type === 'string' ? data.type : 'unknown'
 
       // Handle status which might be either an object with status property or a direct status value
       let statusValue
       let statusMessage
 
-      if (payload.status && typeof payload.status === 'object') {
+      if (data.status && typeof data.status === 'object') {
         // Handle case where status is an object with status and message properties
-        statusValue = payload.status.status
-        statusMessage = payload.status.message
-      } else if (typeof payload.status === 'string') {
+        statusValue = data.status.status
+        statusMessage = data.status.message
+      } else if (typeof data.status === 'string') {
         // Handle case where status is just a string
-        statusValue = payload.status
-        statusMessage = payload.message
+        statusValue = data.status
+        statusMessage = data.message
       } else {
         // Default status
         statusValue = AdapterStatusEnum.DISCONNECTED

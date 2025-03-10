@@ -11,7 +11,7 @@ interface BaseEvent<T = unknown> {
     id: string
     type: string
   }
-  payload: T
+  data: T
 }
 
 interface EventGroupProps {
@@ -91,7 +91,7 @@ export function EventGroup({
                 category={event.category}
                 type={event.type}
                 source={event.source}
-                payload={event.payload}
+                data={event.data}
               />
             ))
           )}

@@ -9,7 +9,7 @@ interface BaseEvent<T = unknown> {
     id: string
     type: string
   }
-  payload: T
+  data: T
 }
 
 export enum GroupBy {
@@ -91,11 +91,12 @@ export function orderGroups(groups: GroupedEvents, groupBy: GroupBy): [string, B
   if (groupBy === GroupBy.CATEGORY) {
     // Define preferred order for categories
     const categoryOrder: { [key: string]: number } = {
-      [EventCategory.ERROR]: 1,
-      [EventCategory.SYSTEM]: 2,
-      [EventCategory.ADAPTER]: 3,
-      [EventCategory.AUTH]: 4,
-      [EventCategory.TEST]: 5,
+      [EventCategory.SYSTEM]: 1,
+      [EventCategory.ADAPTER]: 2,
+      [EventCategory.SERVICE]: 3,
+      [EventCategory.TWITCH]: 4,
+      [EventCategory.OBS]: 5,
+      [EventCategory.USER]: 6,
       Other: 99
     }
 

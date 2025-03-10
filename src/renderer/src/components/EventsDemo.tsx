@@ -70,16 +70,16 @@ export const EventsDemo: React.FC = () => {
                 <li key={event.id} className="p-3 hover:bg-gray-50">
                   <div className="text-xs text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</div>
                   <div className="text-sm">
-                    {event.payload && typeof event.payload === 'object' ? (
-                      event.payload.message ? (
-                        <span>{event.payload.message}</span>
-                      ) : event.payload.appVersion ? (
-                        <span>System started (v{event.payload.appVersion})</span>
+                    {event.data && typeof event.data === 'object' ? (
+                      event.data.message ? (
+                        <span>{event.data.message}</span>
+                      ) : event.data.appVersion ? (
+                        <span>System started (v{event.data.appVersion})</span>
                       ) : (
-                        <span>{JSON.stringify(event.payload)}</span>
+                        <span>{JSON.stringify(event.data)}</span>
                       )
                     ) : (
-                      <span>{String(event.payload)}</span>
+                      <span>{String(event.data)}</span>
                     )}
                   </div>
                 </li>
@@ -97,18 +97,18 @@ export const EventsDemo: React.FC = () => {
                 <li key={event.id} className="p-3 hover:bg-gray-50">
                   <div className="text-xs text-gray-500 flex justify-between">
                     <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
-                    <span className="font-medium">{event.source}</span>
+                    <span className="font-medium">{event.source?.name || 'Unknown'}</span>
                   </div>
                   <div className="text-sm">
                     <span className="inline-block px-2 py-1 mr-2 bg-gray-100 text-xs rounded">
                       {event.type || 'unknown'}
                     </span>
                     <span>
-                      {event.payload
-                        ? typeof event.payload === 'object'
-                          ? JSON.stringify(event.payload)
-                          : String(event.payload)
-                        : 'No payload'}
+                      {event.data
+                        ? typeof event.data === 'object'
+                          ? JSON.stringify(event.data)
+                          : String(event.data)
+                        : 'No data'}
                     </span>
                   </div>
                 </li>
