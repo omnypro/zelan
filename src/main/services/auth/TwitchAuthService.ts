@@ -180,7 +180,7 @@ export class TwitchAuthService extends BaseAuthService {
   onDeviceCode(): Observable<DeviceCodeResponse> {
     // The implementation in BaseAuthService already provides a default empty response
     // We'll just use it since the actual device codes are emitted through auth events
-    return super.onDeviceCode();
+    return super.onDeviceCode()
   }
 
   /**

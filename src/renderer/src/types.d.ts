@@ -81,7 +81,7 @@ interface Window {
         mutate: () => Promise<boolean>
       }
     }
-    
+
     reconnection: {
       getStatus: {
         query: (adapterId: string) => Promise<{
@@ -107,8 +107,26 @@ interface Window {
       resetAttempts: {
         mutate: (adapterId: string) => Promise<boolean>
       }
+      getReconnectionState: {
+        query: (adapterId: string) => Promise<any>
+      }
+      getOptions: {
+        query: () => Promise<any>
+      }
+      updateOptions: {
+        mutate: (options: any) => Promise<boolean>
+      }
+      reconnectNow: {
+        mutate: (adapterId: string) => Promise<boolean>
+      }
+      reconnectAllNow: {
+        mutate: () => Promise<boolean>
+      }
+      cancelReconnection: {
+        mutate: (adapterId: string) => Promise<boolean>
+      }
     }
-    
+
     auth: {
       getStatus: {
         query: (provider: string) => Promise<any>

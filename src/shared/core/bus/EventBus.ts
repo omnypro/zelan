@@ -17,7 +17,7 @@ export interface EventFilterCriteria<T = unknown> {
 export function filterEvents<T = unknown>(events: BaseEvent<T>[], criteria: EventFilterCriteria<T>): BaseEvent<T>[] {
   if (!criteria || Object.keys(criteria).length === 0) return events
 
-  return events.filter(event => {
+  return events.filter((event) => {
     // Check category
     if (criteria.category !== undefined && event.category !== criteria.category) {
       return false
@@ -68,9 +68,9 @@ export class BaseEventBus implements EventBus {
   getFilteredEvents$<T = unknown>(criteria: EventFilterCriteria<T>): Observable<BaseEvent<T>> {
     // Simple cast - we're assuming T matches the event data type
     const stream$ = this.events$ as Observable<BaseEvent<T>>
-    
+
     return stream$.pipe(
-      filter(event => {
+      filter((event) => {
         // Skip filtering if no criteria provided
         if (!criteria || Object.keys(criteria).length === 0) return true
 

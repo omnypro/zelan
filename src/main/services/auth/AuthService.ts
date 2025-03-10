@@ -145,7 +145,7 @@ export class AuthService implements IAuthService {
     const authService = this.getProviderService(provider)
     return authService.status$(provider)
   }
-  
+
   /**
    * Observable of authentication status changes for a provider (tRPC compatibility)
    * This method is used by the tRPC routers which use string literals
@@ -165,7 +165,7 @@ export class AuthService implements IAuthService {
       } as AuthStatus)
     }
   }
-  
+
   /**
    * Observable of device code events
    * This delegates to the Twitch auth service which handles device code flow
@@ -174,14 +174,14 @@ export class AuthService implements IAuthService {
     try {
       // Currently only Twitch supports device code flow
       const authService = this.getProviderService(AuthProvider.TWITCH) as any
-      
+
       // Check if the service has the method
       if (authService && typeof authService.onDeviceCode === 'function') {
         return authService.onDeviceCode()
       }
-      
+
       // Otherwise return empty observable
-      return of({ 
+      return of({
         device_code: '',
         user_code: '',
         verification_uri: '',
@@ -190,7 +190,7 @@ export class AuthService implements IAuthService {
       })
     } catch (error) {
       // Return empty observable on error
-      return of({ 
+      return of({
         device_code: '',
         user_code: '',
         verification_uri: '',

@@ -102,48 +102,52 @@ export class ReconnectionManager {
    */
   private setupEventListeners(): void {
     // Listen for adapter error events
-    this.eventBus.events$.pipe(
-      takeUntil(this.destroy$),
-      filter(event => event.category === EventCategory.ADAPTER),
-      filter(event => event.type === AdapterEventType.ERROR)
-    ).subscribe(event => {
-      const adapterId = event.source.id
+    this.eventBus.events$
+      .pipe(
+        takeUntil(this.destroy$),
+        filter((event) => event.category === EventCategory.ADAPTER),
+        filter((event) => event.type === AdapterEventType.ERROR)
+      )
+      .subscribe((event) => {
+        const adapterId = event.source.id
 
-      // Check if the adapter exists and is enabled
-      const adapter = this.adapterManager.getAdapter(adapterId)
-      if (!adapter || !adapter.enabled) return
+        // Check if the adapter exists and is enabled
+        const adapter = this.adapterManager.getAdapter(adapterId)
+        if (!adapter || !adapter.enabled) return
 
-      this.logger.info(`Detected error in adapter ${adapterId}, scheduling reconnection`, {
-        adapterId,
-        adapterType: adapter.type,
-        adapterName: adapter.name
+        this.logger.info(`Detected error in adapter ${adapterId}, scheduling reconnection`, {
+          adapterId,
+          adapterType: adapter.type,
+          adapterName: adapter.name
+        })
+
+        // Schedule reconnection
+        this.scheduleReconnect(adapterId, adapter.name, adapter.type)
       })
 
-      // Schedule reconnection
-      this.scheduleReconnect(adapterId, adapter.name, adapter.type)
-    });
-
     // Listen for successful connections to reset attempt counters
-    this.eventBus.events$.pipe(
-      takeUntil(this.destroy$),
-      filter(event => event.category === EventCategory.ADAPTER),
-      filter(event => event.type === AdapterEventType.CONNECTED),
-      map(event => event.source.id)
-    ).subscribe(adapterId => {
-      // Reset reconnection attempts on successful connection if enabled
-      if (this._options.resetCountOnSuccess) {
-        const state = this.states.get(adapterId)
-        if (state) {
-          this.logger.debug(`Resetting reconnection attempts for ${adapterId}`, {
-            adapterId,
-            previousAttempts: state.attempts
-          })
+    this.eventBus.events$
+      .pipe(
+        takeUntil(this.destroy$),
+        filter((event) => event.category === EventCategory.ADAPTER),
+        filter((event) => event.type === AdapterEventType.CONNECTED),
+        map((event) => event.source.id)
+      )
+      .subscribe((adapterId) => {
+        // Reset reconnection attempts on successful connection if enabled
+        if (this._options.resetCountOnSuccess) {
+          const state = this.states.get(adapterId)
+          if (state) {
+            this.logger.debug(`Resetting reconnection attempts for ${adapterId}`, {
+              adapterId,
+              previousAttempts: state.attempts
+            })
 
-          state.attempts = 0
-          state.lastAttempt = Date.now()
+            state.attempts = 0
+            state.lastAttempt = Date.now()
+          }
         }
-      }
-    });
+      })
   }
 
   /**

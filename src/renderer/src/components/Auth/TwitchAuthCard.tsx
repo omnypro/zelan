@@ -1,5 +1,4 @@
-import { useEffect } from 'react'
-import { AuthProvider, AuthState } from '@s/auth/interfaces'
+import { AuthProvider } from '@s/auth/interfaces'
 import { useAuth } from '@r/hooks/useAuth'
 
 /**
@@ -62,7 +61,7 @@ export default function TwitchAuthCard() {
             <button
               onClick={handleLogout}
               disabled={isLoading}
-              className="w-full py-2 px-4 bg-red-500 text-white rounded-md hover:bg-red-600 
+              className="w-full py-2 px-4 bg-red-500 text-white rounded-md hover:bg-red-600
                 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50
                 disabled:opacity-50 disabled:cursor-not-allowed"
             >

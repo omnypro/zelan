@@ -5,9 +5,9 @@ import { ServiceAdapter } from '../interfaces/ServiceAdapter'
  * Type for adapter creation functions
  */
 export type AdapterCreator = (
-  id: string, 
-  name: string, 
-  options: Record<string, unknown>, 
+  id: string,
+  name: string,
+  options: Record<string, unknown>,
   eventBus: EventBus
 ) => ServiceAdapter
 
@@ -35,17 +35,17 @@ export class AdapterRegistry {
    * @param eventBus Event bus instance
    */
   createAdapter(
-    type: string, 
-    id: string, 
-    name: string, 
-    options: Record<string, unknown>, 
+    type: string,
+    id: string,
+    name: string,
+    options: Record<string, unknown>,
     eventBus: EventBus
   ): ServiceAdapter {
     const creator = this.creators.get(type)
     if (!creator) {
       throw new Error(`No creator registered for adapter type ${type}`)
     }
-    
+
     return creator(id, name, options, eventBus)
   }
 

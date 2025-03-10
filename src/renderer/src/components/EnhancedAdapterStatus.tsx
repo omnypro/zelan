@@ -34,7 +34,7 @@ interface AdapterStatusCardProps {
 
 const AdapterStatusCard: React.FC<AdapterStatusCardProps> = ({ adapterId }) => {
   const adapters = useTrpcAdapters()
-  const { startAdapter, stopAdapter, isLoading } = useAdapterControl(adapterId)
+  const { startAdapter } = useAdapterControl(adapterId)
 
   // Find the adapter in the list
   const adapter = adapters.find((a) => a.id === adapterId)

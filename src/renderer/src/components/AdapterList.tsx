@@ -66,7 +66,7 @@ const AdapterList: React.FC<AdapterListProps> = ({
 
   const getStatusClass = (status?: AdapterStatus) => {
     // Extract the status value from either string or object
-    const statusValue = typeof status === 'object' && status !== null ? status.toString() : status
+    const statusValue = typeof status === 'object' && status !== null ? JSON.stringify(status) : status
 
     // More specific string based matching
     if (statusValue === AdapterStatus.CONNECTED || statusValue === 'connected') {

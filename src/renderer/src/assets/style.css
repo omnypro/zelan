@@ -15,7 +15,7 @@ html body #root {
 }
 
 p {
-  user-select: text
+  user-select: text;
 }
 
 *:focus-visible {

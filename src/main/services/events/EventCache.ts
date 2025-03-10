@@ -26,7 +26,7 @@ export class EventCache {
   constructor(configStore: ConfigStore) {
     // Initialize logger
     this.logger = getLoggingService().createLogger('EventCache')
-    
+
     // Set a default cache size
     this.cacheSize = 100
 
@@ -47,17 +47,18 @@ export class EventCache {
 
     // Listen for settings changes
     try {
-      configStore.settings$()
+      configStore
+        .settings$()
         .pipe(
           takeUntil(this.destroy$),
-          map(settings => settings?.eventCacheSize),
+          map((settings) => settings?.eventCacheSize),
           distinctUntilChanged()
         )
-        .subscribe(newCacheSize => {
+        .subscribe((newCacheSize) => {
           if (typeof newCacheSize === 'number' && this.cacheSize !== newCacheSize) {
-            this.logger.debug('Updating event cache size', { 
-              oldSize: this.cacheSize, 
-              newSize: newCacheSize 
+            this.logger.debug('Updating event cache size', {
+              oldSize: this.cacheSize,
+              newSize: newCacheSize
             })
             this.cacheSize = newCacheSize
             this.pruneCache()
@@ -75,13 +76,15 @@ export class EventCache {
    */
   private setupBatchProcessing(): void {
     // Process events in batches with a small delay to reduce updates
-    this.batchUpdates.pipe(
-      takeUntil(this.destroy$),
-      debounceTime(50)  // Process updates in 50ms batches
-    ).subscribe(() => {
-      // Notify subscribers with a fresh copy to maintain immutability
-      this.eventsSubject.next([...this.events])
-    })
+    this.batchUpdates
+      .pipe(
+        takeUntil(this.destroy$),
+        debounceTime(50) // Process updates in 50ms batches
+      )
+      .subscribe(() => {
+        // Notify subscribers with a fresh copy to maintain immutability
+        this.eventsSubject.next([...this.events])
+      })
   }
 
   /**
@@ -136,7 +139,7 @@ export class EventCache {
    */
   filteredEvents$(filterCriteria: EventFilterCriteria = {}, limit?: number): Observable<BaseEvent[]> {
     return this.eventsSubject.pipe(
-      map(events => {
+      map((events) => {
         // Apply filter
         const filtered = filterEvents(events, filterCriteria)
         // Apply limit if provided

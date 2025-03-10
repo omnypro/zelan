@@ -236,8 +236,9 @@ async function initializeServices(): Promise<void> {
     // Register adapter creator functions
     adapterRegistry.register('test', createTestAdapter)
     adapterRegistry.register('obs', createObsAdapter)
-    adapterRegistry.register('twitch', (id, name, options, eventBus) => 
-      createTwitchAdapter(id, name, options, eventBus))
+    adapterRegistry.register('twitch', (id, name, options, eventBus) =>
+      createTwitchAdapter(id, name, options, eventBus)
+    )
 
     // Initialize adapter manager
     adapterManager = new AdapterManager(adapterRegistry, mainEventBus, configStore)

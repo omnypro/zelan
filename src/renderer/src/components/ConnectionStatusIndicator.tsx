@@ -104,7 +104,7 @@ export const ConnectionStatusIndicator: React.FC<ConnectionStatusIndicatorProps>
             </div>
           )}
 
-          {reconnectionState.lastAttempt > 0 && (
+          {reconnectionState.lastAttempt && reconnectionState.lastAttempt > 0 && (
             <div className="flex justify-between">
               <span className="text-gray-600">Last attempt:</span>
               <span className="font-medium">{formatTime(reconnectionState.lastAttempt)}</span>

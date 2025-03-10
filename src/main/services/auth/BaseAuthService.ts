@@ -38,7 +38,7 @@ export abstract class BaseAuthService implements AuthService {
     this.tokenManager = getTokenManager()
     this.logger = getLoggingService().createLogger('BaseAuthService')
   }
-  
+
   /**
    * Observable of authentication status changes for a provider (tRPC compatibility)
    * This method is used by the tRPC routers which use string literals
@@ -57,14 +57,14 @@ export abstract class BaseAuthService implements AuthService {
       } as AuthStatus)
     }
   }
-  
+
   /**
    * Observable of device code events
    * Default implementation returns empty observable
    * Child classes should override this as needed
    */
   onDeviceCode(): Observable<DeviceCodeResponse> {
-    return of({ 
+    return of({
       device_code: '',
       user_code: '',
       verification_uri: '',

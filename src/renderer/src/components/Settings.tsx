@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { useSettings, useConfig, useTheme, useConfigChanges } from '@r/hooks/useConfig'
-import { ConfigChangeEvent } from '@s/core/config'
 import ConfigDebugger from './ConfigDebugger'
 import AdapterCreationForm from './AdapterCreationForm'
 import AdapterList, { Adapter } from './AdapterList'
 import { useTrpcAdapters, useCreateAdapter } from '@r/hooks/useTrpc'
-import { AdapterStatus } from '@s/adapters/interfaces/AdapterStatus'
 
 /**
  * Component to display and manage application settings
@@ -15,7 +13,6 @@ const Settings: React.FC = () => {
   const [settings, updateSettings] = useSettings()
 
   // Individual reactive settings
-  const [startOnBoot] = useConfig<boolean>('settings.startOnBoot', false)
   const [minimizeToTray] = useConfig<boolean>('settings.minimizeToTray', true)
   const theme = useTheme()
 
@@ -27,7 +24,7 @@ const Settings: React.FC = () => {
 
   // Adapter hooks
   const adapters = useTrpcAdapters()
-  const { createAdapter, isCreating, error: createError } = useCreateAdapter()
+  const { createAdapter } = useCreateAdapter()
 
   // Track loading state for adapter actions
   const [adapterActionLoading, setAdapterActionLoading] = useState<string | null>(null)
@@ -63,12 +60,13 @@ const Settings: React.FC = () => {
     getConfigPath()
   }, [])
 
-  const handleToggleStartOnBoot = () => {
-    updateSettings({
-      ...settings,
-      startOnBoot: !settings.startOnBoot
-    })
-  }
+  // Start on boot is not currently supported
+  // const handleToggleStartOnBoot = () => {
+  //   updateSettings({
+  //     ...settings,
+  //     startOnBoot: !settings.startOnBoot
+  //   })
+  // }
 
   const handleToggleMinimizeToTray = () => {
     updateSettings({
@@ -92,7 +90,8 @@ const Settings: React.FC = () => {
         <h3 className="text-lg font-semibold mb-4">Application Settings</h3>
 
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          {/* Start on boot is not currently supported */}
+          {/* <div className="flex items-center justify-between">
             <div>
               <label className="font-medium">Start on Boot</label>
               <p className="text-sm text-gray-500">Launch Zelan when your computer starts</p>
@@ -100,13 +99,13 @@ const Settings: React.FC = () => {
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
-                checked={settings.startOnBoot}
-                onChange={handleToggleStartOnBoot}
+                checked={false}
+                onChange={() => {}}
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
-          </div>
+          </div> */}
 
           <div className="flex items-center justify-between">
             <div>
@@ -148,10 +147,10 @@ const Settings: React.FC = () => {
         <p className="text-sm mb-4">These values update automatically when settings change:</p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white p-3 rounded-lg shadow-sm">
+          {/* <div className="bg-white p-3 rounded-lg shadow-sm">
             <div className="text-sm font-medium">Start on Boot</div>
-            <div className="mt-1 text-lg">{startOnBoot ? 'Enabled' : 'Disabled'}</div>
-          </div>
+            <div className="mt-1 text-lg">Disabled</div>
+          </div> */}
 
           <div className="bg-white p-3 rounded-lg shadow-sm">
             <div className="text-sm font-medium">Minimize to Tray</div>

@@ -70,7 +70,7 @@ export class MainEventBus implements EventBus {
     const stream$ = this.events$ as Observable<BaseEvent<T>>
 
     return stream$.pipe(
-      filter(event => {
+      filter((event) => {
         // Skip filtering if no criteria provided
         if (!criteria || Object.keys(criteria).length === 0) return true
 

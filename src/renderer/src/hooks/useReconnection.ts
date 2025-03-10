@@ -5,9 +5,13 @@ import type { ReconnectionOptions } from '@s/types/reconnection'
  * Result type for the reconnection state
  */
 export interface ReconnectionState {
-  pending: boolean
+  enabled: boolean
+  interval: number
+  maxAttempts: number
   attempts: number
-  lastAttempt: number
+  isRetrying: boolean
+  pending?: boolean
+  lastAttempt?: number
 }
 
 /**
@@ -21,14 +25,14 @@ export function useReconnection(adapterId: string) {
 
   // Get the reconnection state for this adapter
   useEffect(() => {
-    if (!window.trpc?.reconnection?.getState) {
-      console.error('tRPC client or reconnection.getState not available')
+    if (!window.trpc?.reconnection?.getStatus) {
+      console.error('tRPC client or reconnection.getStatus not available')
       return
     }
 
     const fetchReconnectionState = async () => {
       try {
-        const state = await window.trpc.reconnection.getState.query(adapterId)
+        const state = await window.trpc.reconnection.getStatus.query(adapterId)
         setReconnectionState(state)
       } catch (err) {
         console.error('Error fetching reconnection state:', err)
@@ -80,7 +84,7 @@ export function useReconnection(adapterId: string) {
     try {
       await window.trpc.reconnection.reconnectNow.mutate(adapterId)
       // After reconnection, refetch the state
-      const state = await window.trpc.reconnection.getState.query(adapterId)
+      const state = await window.trpc.reconnection.getStatus.query(adapterId)
       setReconnectionState(state)
     } catch (err) {
       console.error('Error reconnecting adapter:', err)
@@ -105,7 +109,7 @@ export function useReconnection(adapterId: string) {
     try {
       await window.trpc.reconnection.cancelReconnection.mutate(adapterId)
       // After cancellation, refetch the state
-      const state = await window.trpc.reconnection.getState.query(adapterId)
+      const state = await window.trpc.reconnection.getStatus.query(adapterId)
       setReconnectionState(state)
     } catch (err) {
       console.error('Error cancelling reconnection:', err)

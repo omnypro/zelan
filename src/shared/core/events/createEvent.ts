@@ -1,10 +1,4 @@
-import { 
-  BaseEvent, 
-  EventCategory, 
-  SystemEventType, 
-  SystemInfoPayload,
-  ObsEventType
-} from '@s/types/events'
+import { BaseEvent, EventCategory, SystemEventType, SystemInfoPayload, ObsEventType } from '@s/types/events'
 
 /**
  * Create a properly formatted event with consistent metadata
@@ -37,12 +31,7 @@ export function createEvent<T>(
 /**
  * Create an OBS event with specific metadata
  */
-export function createObsEvent<T>(
-  type: ObsEventType, 
-  data: T, 
-  adapterId: string, 
-  adapterName: string
-): BaseEvent<T> {
+export function createObsEvent<T>(type: ObsEventType, data: T, adapterId: string, adapterName: string): BaseEvent<T> {
   return createEvent(EventCategory.OBS, type, data, adapterId, adapterName, 'obs')
 }
 

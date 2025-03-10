@@ -5,47 +5,45 @@ import { z } from 'zod'
 export const configRouter = router({
   // Get configuration value
   get: procedure
-    .input(z.object({
-      key: configPathSchema,
-      defaultValue: configValueSchema.optional()
-    }))
+    .input(
+      z.object({
+        key: configPathSchema,
+        defaultValue: configValueSchema.optional()
+      })
+    )
     .query(({ ctx, input }) => {
       return ctx.configStore.get(input.key, input.defaultValue)
     }),
 
   // Set configuration value
   set: procedure
-    .input(z.object({
-      key: configPathSchema,
-      value: configValueSchema
-    }))
+    .input(
+      z.object({
+        key: configPathSchema,
+        value: configValueSchema
+      })
+    )
     .mutation(({ ctx, input }) => {
       ctx.configStore.set(input.key, input.value)
       return true
     }),
 
   // Update multiple configuration values
-  update: procedure
-    .input(configUpdatesSchema)
-    .mutation(({ ctx, input }) => {
-      ctx.configStore.update(input)
-      return true
-    }),
+  update: procedure.input(configUpdatesSchema).mutation(({ ctx, input }) => {
+    ctx.configStore.update(input)
+    return true
+  }),
 
   // Delete configuration key
-  delete: procedure
-    .input(configPathSchema)
-    .mutation(({ ctx, input }) => {
-      ctx.configStore.delete(input)
-      return true
-    }),
+  delete: procedure.input(configPathSchema).mutation(({ ctx, input }) => {
+    ctx.configStore.delete(input)
+    return true
+  }),
 
   // Check if configuration key exists
-  has: procedure
-    .input(configPathSchema)
-    .query(({ ctx, input }) => {
-      return ctx.configStore.has(input)
-    }),
+  has: procedure.input(configPathSchema).query(({ ctx, input }) => {
+    return ctx.configStore.has(input)
+  }),
 
   // Get all configuration
   getAll: procedure.query(({ ctx }) => {
@@ -62,7 +60,7 @@ export const configRouter = router({
     return observable<any>((emit) => {
       const logger = ctx.logger('tRPC.config')
       logger.info('Client subscribed to config changes')
-      
+
       // Subscribe to all config changes
       const subscription = ctx.configStore.changes$().subscribe({
         next: (change) => {
@@ -75,7 +73,7 @@ export const configRouter = router({
           emit.error(err)
         }
       })
-      
+
       // Return unsubscribe function
       return () => {
         subscription.unsubscribe()
@@ -85,37 +83,35 @@ export const configRouter = router({
   }),
 
   // Subscribe to specific path changes
-  onPathChange: procedure
-    .input(configPathSchema)
-    .subscription(({ ctx, input }) => {
-      return observable<any>((emit) => {
-        const logger = ctx.logger('tRPC.config')
-        logger.info('Client subscribed to config path change', { path: input })
-        
-        // Subscribe to all changes and filter for our path
-        const subscription = ctx.configStore.changes$().subscribe({
-          next: (change) => {
-            // Only emit changes for the specific path
-            if (change.key === input || change.key.startsWith(`${input}.`)) {
-              emit.next(change)
-            }
-          },
-          error: (err) => {
-            logger.error('Error in config path stream', {
-              error: err instanceof Error ? err.message : String(err),
-              path: input
-            })
-            emit.error(err)
+  onPathChange: procedure.input(configPathSchema).subscription(({ ctx, input }) => {
+    return observable<any>((emit) => {
+      const logger = ctx.logger('tRPC.config')
+      logger.info('Client subscribed to config path change', { path: input })
+
+      // Subscribe to all changes and filter for our path
+      const subscription = ctx.configStore.changes$().subscribe({
+        next: (change) => {
+          // Only emit changes for the specific path
+          if (change.key === input || change.key.startsWith(`${input}.`)) {
+            emit.next(change)
           }
-        })
-        
-        // Return unsubscribe function
-        return () => {
-          subscription.unsubscribe()
-          logger.info('Client unsubscribed from config path change', { path: input })
+        },
+        error: (err) => {
+          logger.error('Error in config path stream', {
+            error: err instanceof Error ? err.message : String(err),
+            path: input
+          })
+          emit.error(err)
         }
       })
+
+      // Return unsubscribe function
+      return () => {
+        subscription.unsubscribe()
+        logger.info('Client unsubscribed from config path change', { path: input })
+      }
     })
+  })
 })
 
 // Export type

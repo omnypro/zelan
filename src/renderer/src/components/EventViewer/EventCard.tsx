@@ -171,9 +171,7 @@ export function EventCard({
       {expanded && (
         <div className="mt-2 pt-2 border-t border-gray-100">
           <div className="text-xs text-gray-500 mb-1">Event ID: {id}</div>
-          <pre className="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-48">
-            {JSON.stringify(data, null, 2)}
-          </pre>
+          <pre className="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-48">{JSON.stringify(data, null, 2)}</pre>
         </div>
       )}
     </div>

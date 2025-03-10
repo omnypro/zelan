@@ -181,18 +181,8 @@ export abstract class BaseAdapter implements ServiceAdapter {
   /**
    * Helper method to create an adapter event
    */
-  protected createAdapterEvent(
-    eventType: string, 
-    data: unknown
-  ) {
-    return createEvent(
-      EventCategory.ADAPTER,
-      eventType,
-      data,
-      this.id,
-      this.name,
-      this.type
-    )
+  protected createAdapterEvent(eventType: string, data: unknown) {
+    return createEvent(EventCategory.ADAPTER, eventType, data, this.id, this.name, this.type)
   }
 
   /**
@@ -234,16 +224,16 @@ export abstract class BaseAdapter implements ServiceAdapter {
       status: statusInfo.status,
       message: statusInfo.message,
       timestamp: statusInfo.timestamp,
-      error: error ? {
-        message: error.message,
-        stack: error.stack
-      } : undefined
+      error: error
+        ? {
+            message: error.message,
+            stack: error.stack
+          }
+        : undefined
     }
 
     // Publish a single status event with all information
-    this.eventBus.publish(
-      this.createAdapterEvent(AdapterEventType.STATUS, eventData)
-    )
+    this.eventBus.publish(this.createAdapterEvent(AdapterEventType.STATUS, eventData))
   }
 
   /**

@@ -54,9 +54,12 @@ export function useAdapterConfigs() {
  */
 export function useSettings() {
   const defaultSettings: AppConfig['settings'] = {
-    startOnBoot: false,
     minimizeToTray: true,
-    theme: 'system'
+    theme: 'system',
+    webSocketPort: 8081,
+    eventCacheSize: 100,
+    developerMode: false,
+    logLevel: 'info'
   }
 
   return useConfig<AppConfig['settings']>('settings', defaultSettings)
@@ -70,7 +73,7 @@ export function useTheme() {
 
   useEffect(() => {
     const unsubscribe = window.api.config.select$('settings.theme', 'system', (newTheme) => {
-      setTheme(newTheme)
+      setTheme(newTheme as 'light' | 'dark' | 'system')
     })
 
     return () => {

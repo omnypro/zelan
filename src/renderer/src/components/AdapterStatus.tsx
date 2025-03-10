@@ -14,27 +14,44 @@ export const AdapterStatus: React.FC = () => {
   const adapterStatuses = adapterStatusEvents.reduce(
     (acc, event) => {
       // Make sure data is properly formatted before accessing properties
-      const data = event.data || {}
+      const eventData = event.data || {}
 
-      // Extract properties safely
-      const id = typeof data.id === 'string' ? data.id : 'unknown'
-      const name = typeof data.name === 'string' ? data.name : 'Unknown Adapter'
-      const type = typeof data.type === 'string' ? data.type : 'unknown'
+      // Extract properties safely, assuming the adapter status data structure
+      const id =
+        typeof eventData === 'object' && eventData !== null && 'id' in eventData && typeof eventData.id === 'string'
+          ? eventData.id
+          : 'unknown'
+      const name =
+        typeof eventData === 'object' && eventData !== null && 'name' in eventData && typeof eventData.name === 'string'
+          ? eventData.name
+          : 'Unknown Adapter'
+      const type =
+        typeof eventData === 'object' && eventData !== null && 'type' in eventData && typeof eventData.type === 'string'
+          ? eventData.type
+          : 'unknown'
 
       // Handle status which might be either an object with status property or a direct status value
       let statusValue
       let statusMessage
 
-      if (data.status && typeof data.status === 'object') {
-        // Handle case where status is an object with status and message properties
-        statusValue = data.status.status
-        statusMessage = data.status.message
-      } else if (typeof data.status === 'string') {
-        // Handle case where status is just a string
-        statusValue = data.status
-        statusMessage = data.message
+      if (eventData && typeof eventData === 'object' && 'status' in eventData) {
+        if (typeof eventData.status === 'object' && eventData.status !== null) {
+          // Handle case where status is an object with status and message properties
+          const statusObj = eventData.status as Record<string, any>
+          statusValue = 'status' in statusObj ? statusObj.status : AdapterStatusEnum.DISCONNECTED
+          statusMessage = 'message' in statusObj ? (statusObj.message as string) : 'Unknown status'
+        } else if (typeof eventData.status === 'string') {
+          // Handle case where status is just a string
+          statusValue = eventData.status as string
+          statusMessage =
+            typeof eventData === 'object' && 'message' in eventData ? (eventData.message as string) : 'Unknown status'
+        } else {
+          // Default status
+          statusValue = AdapterStatusEnum.DISCONNECTED
+          statusMessage = 'Unknown status'
+        }
       } else {
-        // Default status
+        // Default status if no status property exists
         statusValue = AdapterStatusEnum.DISCONNECTED
         statusMessage = 'Unknown status'
       }

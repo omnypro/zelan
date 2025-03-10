@@ -69,14 +69,14 @@ export function TrpcDemo() {
 
   // Display a message if tRPC is not available
   if (!isTrpcAvailable) {
-    const missingParts = []
-    if (!window.trpc) missingParts.push('tRPC client')
+    const missingParts: string[] = []
+    if (!window.trpc) missingParts.push('tRPC client missing')
     else {
-      if (!window.trpc.config) missingParts.push('config module')
-      else if (!window.trpc.config.get) missingParts.push('config.get')
+      if (!window.trpc.config) missingParts.push('config module missing')
+      else if (!window.trpc.config.get) missingParts.push('config.get missing')
 
-      if (!window.trpc.events) missingParts.push('events module')
-      if (!window.trpc.adapters) missingParts.push('adapters module')
+      if (!window.trpc.events) missingParts.push('events module missing')
+      if (!window.trpc.adapters) missingParts.push('adapters module missing')
     }
 
     return (

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react'
 import { useConfig, useFullConfig, useConfigChanges } from '@r/hooks/useConfig'
-import { ConfigChangeEvent } from '@s/core/config'
 
 /**
  * A component to debug and test reactive configuration

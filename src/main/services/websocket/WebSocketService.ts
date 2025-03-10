@@ -32,10 +32,10 @@ export class WebSocketService {
   private config: WebSocketServiceConfig
   private isRunning = false
   private logger: ComponentLogger
-  
+
   // Singleton instance
   private static instance: WebSocketService | null = null
-  
+
   /**
    * Get the WebSocketService singleton instance
    */
@@ -43,20 +43,20 @@ export class WebSocketService {
     if (!WebSocketService.instance) {
       // Get config from store if available
       let config: Partial<WebSocketServiceConfig> = {}
-      
+
       if (configStore) {
         const storedPort = configStore.get('websocket.port', DEFAULT_CONFIG.port) as number
         const storedPingInterval = configStore.get('websocket.pingInterval', DEFAULT_CONFIG.pingInterval) as number
-        
+
         config = {
           port: storedPort,
           pingInterval: storedPingInterval
         }
       }
-      
+
       WebSocketService.instance = new WebSocketService(eventBus, config)
     }
-    
+
     return WebSocketService.instance
   }
 
@@ -94,7 +94,7 @@ export class WebSocketService {
 
       this.isRunning = true
       this.logger.info(`WebSocket server started on port ${this.config.port}`)
-      
+
       // Publish event about server starting
       this.eventBus.publish({
         id: `websocket-start-${Date.now()}`,
@@ -113,7 +113,7 @@ export class WebSocketService {
           version: '1.0'
         }
       })
-      
+
       return true
     } catch (error) {
       this.logger.error('Failed to start WebSocket server', {
@@ -130,7 +130,7 @@ export class WebSocketService {
    */
   stop(): void {
     this.cleanup()
-    
+
     // Publish event about server stopping
     this.eventBus.publish({
       id: `websocket-stop-${Date.now()}`,
@@ -150,7 +150,7 @@ export class WebSocketService {
       }
     })
   }
-  
+
   /**
    * Clean up resources
    */
@@ -214,7 +214,7 @@ export class WebSocketService {
   private checkConnections(): void {
     const now = Date.now()
     const staleTimeout = this.config.pingInterval * 2.5 // If no activity in 2.5x ping interval, consider stale
-    
+
     for (const [client, data] of this.clients.entries()) {
       if (now - data.lastActivity > staleTimeout) {
         // Client hasn't responded in too long
@@ -250,7 +250,7 @@ export class WebSocketService {
         clientData.lastActivity = Date.now()
       }
     })
-    
+
     // Also update activity on message
     client.on('message', () => {
       const clientData = this.clients.get(client)
@@ -283,7 +283,7 @@ export class WebSocketService {
   }
 
   /**
-   * Remove a client 
+   * Remove a client
    */
   private removeClient(client: WebSocket): void {
     if (this.clients.has(client)) {
@@ -340,9 +340,9 @@ export class WebSocketService {
         }
         return value
       })
-      
+
       client.send(message)
-      
+
       // Update last activity time
       const clientData = this.clients.get(client)
       if (clientData) {
