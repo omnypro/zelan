@@ -586,7 +586,7 @@ impl TwitchAdapter {
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })
                         }
-                        AuthEvent::TokenRefreshDetails { expires_in, payload } => {
+                        AuthEvent::TokenRefreshDetails { expires_in: _, payload } => {
                             // Forward the payload from the auth manager
                             payload.clone()
                         }
