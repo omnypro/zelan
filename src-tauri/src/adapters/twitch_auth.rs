@@ -68,44 +68,6 @@ fn get_scopes() -> Vec<Scope> {
     ]
 }
 
-/// Parse a scope string to a Scope enum
-fn parse_scope(scope_str: &str) -> Option<Scope> {
-    match scope_str {
-        "analytics:read:extensions" => Some(Scope::AnalyticsReadExtensions),
-        "analytics:read:games" => Some(Scope::AnalyticsReadGames),
-        "bits:read" => Some(Scope::BitsRead),
-        "channel:bot" => Some(Scope::ChannelBot),
-        "channel:moderate" => Some(Scope::ChannelModerate),
-        "channel:read:goals" => Some(Scope::ChannelReadGoals),
-        "channel:read:hype_train" => Some(Scope::ChannelReadHypeTrain),
-        "channel:read:polls" => Some(Scope::ChannelReadPolls),
-        "channel:read:predictions" => Some(Scope::ChannelReadPredictions),
-        "channel:read:redemptions" => Some(Scope::ChannelReadRedemptions),
-        "channel:read:subscriptions" => Some(Scope::ChannelReadSubscriptions),
-        "channel:read:vips" => Some(Scope::ChannelReadVips),
-        "chat:read" => Some(Scope::ChatRead),
-        "moderation:read" => Some(Scope::ModerationRead),
-        "moderator:read:automod_settings" => Some(Scope::ModeratorReadAutomodSettings),
-        "moderator:read:blocked_terms" => Some(Scope::ModeratorReadBlockedTerms),
-        "moderator:read:chat_settings" => Some(Scope::ModeratorReadChatSettings),
-        "moderator:read:chatters" => Some(Scope::ModeratorReadChatters),
-        "moderator:read:followers" => Some(Scope::ModeratorReadFollowers),
-        "moderator:read:guest_star" => Some(Scope::ModeratorReadGuestStar),
-        "moderator:read:shield_mode" => Some(Scope::ModeratorReadShieldMode),
-        "user:read:blocked_users" => Some(Scope::UserReadBlockedUsers),
-        "user:read:broadcast" => Some(Scope::UserReadBroadcast),
-        "user:read:chat" => Some(Scope::UserReadChat),
-        "user:read:email" => Some(Scope::UserReadEmail),
-        "user:read:follows" => Some(Scope::UserReadFollows),
-        "user:read:subscriptions" => Some(Scope::UserReadSubscriptions),
-        _ => {
-            // Log unknown scope for debugging
-            info!("Unknown scope: {}", scope_str);
-            None
-        }
-    }
-}
-
 /// Authentication event for callbacks
 #[derive(Clone, Debug)]
 pub enum AuthEvent {
@@ -353,57 +315,6 @@ impl TwitchAuthManager {
         }
     }
 
-    /// Validate a token to get user data
-    async fn validate_token(&self, token: twitch_oauth2::AccessToken) -> Result<ValidatedToken> {
-        // Use reqwest directly for validation with detailed response handling
-        let http_client = reqwest::Client::new();
-
-        info!("Validating token with Twitch API");
-
-        let response = http_client
-            .get("https://id.twitch.tv/oauth2/validate")
-            .header("Authorization", format!("OAuth {}", token.secret()))
-            .send()
-            .await?;
-
-        // Log response status
-        info!("Token validation response status: {}", response.status());
-
-        // Check if request succeeded
-        let status = response.status();
-        if !status.is_success() {
-            // Clone the response for error text
-            let error_text = response.text().await?;
-            error!(
-                "Token validation failed with status {}: {}",
-                status, error_text
-            );
-            return Err(anyhow!(
-                "Failed to validate token: HTTP {} - {}",
-                status,
-                error_text
-            ));
-        }
-
-        // Parse the response
-        let response_text = response.text().await?;
-        info!("Received valid token response, trying to parse");
-
-        match serde_json::from_str::<ValidatedToken>(&response_text) {
-            Ok(validated) => {
-                info!(
-                    "Token validated successfully for user {} ({}), expires in {}s",
-                    validated.login, validated.user_id, validated.expires_in
-                );
-                Ok(validated)
-            }
-            Err(e) => {
-                error!("Failed to parse validation response: {}", e);
-                error!("Raw response: {}", response_text);
-                Err(anyhow!("Failed to parse validation response: {}", e))
-            }
-        }
-    }
 
     /// Get the current token if authenticated
     pub async fn get_token(&self) -> Option<UserToken> {
@@ -624,7 +535,7 @@ impl TwitchAuthManager {
             info!("No refresh token available, validating access token directly");
             
             match access_token_obj.validate_token(&http_client).await {
-                Ok(validated) => {
+                Ok(_) => {
                     info!("Successfully validated access token");
                     
                     // Log that we have validated the token
