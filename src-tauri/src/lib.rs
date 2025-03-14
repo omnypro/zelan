@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 // use std::time::Duration;
 
@@ -52,6 +52,30 @@ pub struct Config {
 pub struct WebSocketConfig {
     /// Port to bind the WebSocket server to
     pub port: u16,
+    /// Maximum number of simultaneous connections (default: 100)
+    #[serde(default = "default_max_connections")]
+    pub max_connections: usize,
+    /// Inactivity timeout in seconds (default: 300 - 5 minutes)
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: u64,
+    /// Ping interval in seconds (default: 60)
+    #[serde(default = "default_ping_interval")]
+    pub ping_interval: u64,
+}
+
+/// Default max connections
+pub fn default_max_connections() -> usize {
+    100
+}
+
+/// Default timeout in seconds
+pub fn default_timeout() -> u64 {
+    300
+}
+
+/// Default ping interval in seconds
+pub fn default_ping_interval() -> u64 {
+    60
 }
 
 /// Standardized event structure for all events flowing through the system
@@ -65,6 +89,23 @@ pub struct StreamEvent {
     payload: serde_json::Value,
     /// Timestamp when the event was created
     timestamp: chrono::DateTime<chrono::Utc>,
+    /// Message format version for backward compatibility
+    #[serde(default = "default_version")]
+    version: u8,
+    /// Unique event ID
+    #[serde(default = "generate_uuid")]
+    id: String,
+}
+
+/// Default version for events
+fn default_version() -> u8 {
+    1
+}
+
+/// Generate a UUID for events
+fn generate_uuid() -> String {
+    use uuid::Uuid;
+    Uuid::new_v4().to_string()
 }
 
 impl StreamEvent {
@@ -74,6 +115,8 @@ impl StreamEvent {
             event_type: event_type.to_string(),
             payload,
             timestamp: chrono::Utc::now(),
+            version: default_version(),
+            id: generate_uuid(),
         }
     }
 
@@ -326,6 +369,9 @@ impl StreamService {
             shutdown_sender: None,
             ws_config: WebSocketConfig {
                 port: DEFAULT_WS_PORT,
+                max_connections: default_max_connections(),
+                timeout_seconds: default_timeout(),
+                ping_interval: default_ping_interval(),
             },
             token_manager,
             recovery_manager,
@@ -767,12 +813,14 @@ impl StreamService {
         self.shutdown_sender = Some(shutdown_sender);
 
         // Pass the WebSocket config
-        let ws_port = self.ws_config.port;
+        let ws_config = self.ws_config.clone();
+        // Get the port for the span
+        let ws_port = ws_config.port;
 
         // Start WebSocket server in a separate task
         let handle = tauri::async_runtime::spawn(
             async move {
-                let socket_addr = format!("127.0.0.1:{}", ws_port)
+                let socket_addr = format!("127.0.0.1:{}", ws_config.port)
                     .parse::<std::net::SocketAddr>()
                     .unwrap();
                 let listener = match TcpListener::bind(socket_addr).await {
@@ -786,11 +834,14 @@ impl StreamService {
                 // Print a helpful message for connecting to the WebSocket server
                 info!(address = %socket_addr, "WebSocket server listening");
                 info!(
-                    uri = format!("ws://127.0.0.1:{}", ws_port),
+                    uri = format!("ws://127.0.0.1:{}", ws_config.port),
                     "WebSocket server available at"
                 );
-                debug!("Connect with: wscat -c ws://127.0.0.1:{}", ws_port);
-                debug!("Connect with: websocat ws://127.0.0.1:{}", ws_port);
+                debug!("Connect with: wscat -c ws://127.0.0.1:{}", ws_config.port);
+                debug!("Connect with: websocat ws://127.0.0.1:{}", ws_config.port);
+
+                // Connection counter using Atomic for thread safety
+                let connection_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
                 // Handle incoming connections
                 loop {
@@ -805,15 +856,46 @@ impl StreamService {
                         accept_result = listener.accept() => {
                             match accept_result {
                                 Ok((stream, addr)) => {
-                                    info!(client = %addr, "New WebSocket connection");
+                                    let current_count = connection_count.load(std::sync::atomic::Ordering::SeqCst);
+                                    
+                                    // Check if we've reached the maximum connections
+                                    if current_count >= ws_config.max_connections {
+                                        warn!(
+                                            client = %addr,
+                                            max_connections = ws_config.max_connections,
+                                            current_connections = current_count,
+                                            "Maximum WebSocket connections reached, rejecting new connection"
+                                        );
+                                        // Just drop the connection - it will be closed automatically
+                                        continue;
+                                    }
+
+                                    // Increment connection counter
+                                    connection_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                    let new_count = connection_count.load(std::sync::atomic::Ordering::SeqCst);
+                                    
+                                    info!(
+                                        client = %addr,
+                                        connections = new_count,
+                                        max_connections = ws_config.max_connections,
+                                        "New WebSocket connection"
+                                    );
 
                                     // Handle each connection in a separate task
                                     let event_bus_clone = event_bus.clone();
+                                    let ws_config_clone = ws_config.clone();
+                                    let counter_clone = Arc::clone(&connection_count);
+                                    
                                     tauri::async_runtime::spawn(
                                         async move {
-                                            if let Err(e) = handle_websocket_client(stream, event_bus_clone).await {
+                                            if let Err(e) = handle_websocket_client(stream, event_bus_clone, ws_config_clone).await {
                                                 error!(error = %e, client = %addr, "Error in WebSocket connection");
                                             }
+                                            
+                                            // Decrement connection counter when client disconnects
+                                            counter_clone.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                                            let remaining = counter_clone.load(std::sync::atomic::Ordering::SeqCst);
+                                            debug!(client = %addr, remaining_connections = remaining, "Client disconnected");
                                         }
                                         .in_current_span()
                                     );
@@ -978,9 +1060,83 @@ async fn disconnect_adapter_handler(
     }
 }
 
+/// WebSocket client subscription preferences
+#[derive(Debug, Clone, Default)]
+struct WebSocketClientPreferences {
+    /// Event sources to include (empty means all)
+    source_filters: HashSet<String>,
+    /// Event types to include (empty means all)
+    type_filters: HashSet<String>,
+    /// Whether filtering is active
+    filtering_active: bool,
+}
+
+impl WebSocketClientPreferences {
+    /// Check if an event should be forwarded to this client
+    fn should_receive_event(&self, event: &StreamEvent) -> bool {
+        // If filtering is not active, forward all events
+        if !self.filtering_active {
+            return true;
+        }
+
+        // Check source filter
+        if !self.source_filters.is_empty() && !self.source_filters.contains(&event.source) {
+            return false;
+        }
+
+        // Check type filter
+        if !self.type_filters.is_empty() && !self.type_filters.contains(&event.event_type) {
+            return false;
+        }
+
+        true
+    }
+
+    /// Process a client subscription command
+    fn process_subscription_command(&mut self, command: &str, value: &serde_json::Value) -> Result<String, String> {
+        match command {
+            "subscribe.sources" => {
+                if let Some(sources) = value.as_array() {
+                    self.source_filters.clear();
+                    for source in sources {
+                        if let Some(source_str) = source.as_str() {
+                            self.source_filters.insert(source_str.to_string());
+                        }
+                    }
+                    self.filtering_active = true;
+                    Ok(format!("Subscribed to {} sources", self.source_filters.len()))
+                } else {
+                    Err("Invalid sources format, expected array".to_string())
+                }
+            },
+            "subscribe.types" => {
+                if let Some(types) = value.as_array() {
+                    self.type_filters.clear();
+                    for event_type in types {
+                        if let Some(type_str) = event_type.as_str() {
+                            self.type_filters.insert(type_str.to_string());
+                        }
+                    }
+                    self.filtering_active = true;
+                    Ok(format!("Subscribed to {} event types", self.type_filters.len()))
+                } else {
+                    Err("Invalid types format, expected array".to_string())
+                }
+            },
+            "unsubscribe.all" => {
+                self.source_filters.clear();
+                self.type_filters.clear();
+                self.filtering_active = false;
+                Ok("Unsubscribed from all filters".to_string())
+            },
+            _ => Err(format!("Unknown command: {}", command))
+        }
+    }
+}
+
 /// Handler for WebSocket client connections
-#[instrument(skip(stream, event_bus), fields(client = ?stream.peer_addr().map_or("unknown".to_string(), |addr| addr.to_string())))]
-async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) -> ZelanResult<()> {
+#[instrument(skip(stream, event_bus, config), fields(client = ?stream.peer_addr().map_or("unknown".to_string(), |addr| addr.to_string())))]
+async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, config: WebSocketConfig) -> ZelanResult<()> {
     // Get client IP for logging
     let peer_addr = stream
         .peer_addr()
@@ -1022,16 +1178,20 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
     let mut last_activity = std::time::Instant::now();
     let connection_start = std::time::Instant::now();
 
+    // Client subscription preferences
+    let mut preferences = WebSocketClientPreferences::default();
+
     // Keep a cached version of the last serialized events to avoid redundant serialization
     let mut event_cache: Option<(String, String)> = None;
 
     // Handle incoming WebSocket messages
     loop {
-        // Check for client inactivity timeout (5 minutes)
-        if last_activity.elapsed() > std::time::Duration::from_secs(300) {
+        // Check for client inactivity timeout
+        if last_activity.elapsed() > std::time::Duration::from_secs(config.timeout_seconds) {
             info!(
                 client = %peer_addr,
                 duration = ?last_activity.elapsed(),
+                timeout_seconds = config.timeout_seconds,
                 "WebSocket client timed out due to inactivity"
             );
             break;
@@ -1042,6 +1202,17 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
             result = receiver.recv() => {
                 match result {
                     Ok(event) => {
+                        // Check if this client should receive this event based on filters
+                        if !preferences.should_receive_event(&event) {
+                            debug!(
+                                client = %peer_addr,
+                                event_source = %event.source(),
+                                event_type = %event.event_type(),
+                                "Skipping event due to client filters"
+                            );
+                            continue;
+                        }
+
                         // Create a key for the event type+source
                         let event_key = format!("{}.{}", event.source(), event.event_type());
 
@@ -1140,11 +1311,90 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
                             Message::Text(text) => {
                                 debug!(client = %peer_addr, message = %text, "Received text message");
 
-                                // Process client commands - could implement filtering/subscriptions here
+                                // Process client commands
                                 if text == "ping" {
                                     if let Err(e) = ws_sender.send(Message::Text("pong".into())).await {
                                         error!(error = %e, client = %peer_addr, "Error sending pong");
                                         break;
+                                    }
+                                } else {
+                                    // Try to parse as JSON
+                                    match serde_json::from_str::<serde_json::Value>(&text) {
+                                        Ok(json) => {
+                                            // Check if it's a command
+                                            if let Some(command) = json.get("command").and_then(|c| c.as_str()) {
+                                                let data = json.get("data").unwrap_or(&serde_json::Value::Null);
+                                                
+                                                // Process subscription commands
+                                                if command.starts_with("subscribe.") || command.starts_with("unsubscribe.") {
+                                                    match preferences.process_subscription_command(command, data) {
+                                                        Ok(response) => {
+                                                            // Send success response
+                                                            let response_json = serde_json::json!({
+                                                                "success": true,
+                                                                "command": command,
+                                                                "message": response
+                                                            });
+                                                            if let Err(e) = ws_sender.send(Message::Text(response_json.to_string().into())).await {
+                                                                error!(error = %e, client = %peer_addr, "Error sending command response");
+                                                                break;
+                                                            }
+                                                        },
+                                                        Err(err) => {
+                                                            // Send error response
+                                                            let response_json = serde_json::json!({
+                                                                "success": false,
+                                                                "command": command,
+                                                                "error": err
+                                                            });
+                                                            if let Err(e) = ws_sender.send(Message::Text(response_json.to_string().into())).await {
+                                                                error!(error = %e, client = %peer_addr, "Error sending command error response");
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                } else if command == "info" {
+                                                    // Send info about available commands
+                                                    let info_json = serde_json::json!({
+                                                        "success": true,
+                                                        "command": "info",
+                                                        "data": {
+                                                            "commands": [
+                                                                "ping",
+                                                                "info",
+                                                                "subscribe.sources",
+                                                                "subscribe.types",
+                                                                "unsubscribe.all"
+                                                            ],
+                                                            "active_filters": {
+                                                                "filtering_active": preferences.filtering_active,
+                                                                "sources": preferences.source_filters,
+                                                                "types": preferences.type_filters
+                                                            }
+                                                        }
+                                                    });
+                                                    if let Err(e) = ws_sender.send(Message::Text(info_json.to_string().into())).await {
+                                                        error!(error = %e, client = %peer_addr, "Error sending info response");
+                                                        break;
+                                                    }
+                                                } else {
+                                                    // Unknown command
+                                                    let response_json = serde_json::json!({
+                                                        "success": false,
+                                                        "command": command,
+                                                        "error": format!("Unknown command: {}", command)
+                                                    });
+                                                    if let Err(e) = ws_sender.send(Message::Text(response_json.to_string().into())).await {
+                                                        error!(error = %e, client = %peer_addr, "Error sending error response");
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        Err(_) => {
+                                            // Not JSON, ignore non-standard messages
+                                            debug!(client = %peer_addr, "Ignoring non-JSON message");
+                                        }
                                     }
                                 }
                             },
@@ -1177,8 +1427,12 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>) ->
             }
 
             // Add a timeout to check client activity periodically
-            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {
-                debug!(client = %peer_addr, "Sending ping to check if client is alive");
+            _ = tokio::time::sleep(std::time::Duration::from_secs(config.ping_interval)) => {
+                debug!(
+                    client = %peer_addr, 
+                    ping_interval = config.ping_interval,
+                    "Sending ping to check if client is alive"
+                );
                 // Send ping to check if client is still alive
                 if let Err(e) = ws_sender.send(Message::Ping(vec![].into())).await {
                     error!(error = %e, client = %peer_addr, "Error sending ping");

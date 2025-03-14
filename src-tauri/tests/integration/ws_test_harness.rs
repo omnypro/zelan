@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 
 use zelan_lib::{Config, EventBus, StreamEvent, StreamService, WebSocketConfig};
 use zelan_lib::auth::TokenManager;
+use zelan_lib::{default_max_connections, default_timeout, default_ping_interval};
 
 use crate::ws_client::WebSocketTestClient;
 
@@ -44,6 +45,9 @@ impl WebSocketTestEnvironment {
         // Create WebSocket config
         let ws_config = WebSocketConfig {
             port: test_port,
+            max_connections: default_max_connections(),
+            timeout_seconds: default_timeout(),
+            ping_interval: default_ping_interval(),
         };
         
         // Create service config

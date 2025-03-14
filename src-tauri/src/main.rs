@@ -46,7 +46,12 @@ fn initialize_stores<R: Runtime>(app: &AppHandle<R>) -> Result<(Arc<Store<R>>, A
 
         // Create a default configuration
         let default_config = Config {
-            websocket: zelan_lib::WebSocketConfig { port: 9000 },
+            websocket: zelan_lib::WebSocketConfig { 
+                port: 9000,
+                max_connections: zelan_lib::default_max_connections(),
+                timeout_seconds: zelan_lib::default_timeout(),
+                ping_interval: zelan_lib::default_ping_interval(),
+            },
             adapters: std::collections::HashMap::new(),
         };
 
