@@ -15,7 +15,7 @@ use twitch_api::{
     eventsub::{event::websocket::EventsubWebsocketData, Event},
     types::UserId,
 };
-use twitch_oauth2::{ClientId, UserToken};
+use twitch_oauth2::{ClientId, UserToken, TwitchToken};
 
 use crate::EventBus;
 use crate::StreamEvent;
@@ -143,6 +143,9 @@ pub struct EventSubSubscriptionInfo {
     pub created_at: String,
 }
 
+/// Callback function type for token refresh
+pub type TokenRefresher = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<UserToken>> + Send>> + Send + Sync>;
+
 /// Twitch EventSub client
 pub struct EventSubClient {
     /// Event bus for publishing events
@@ -155,6 +158,12 @@ pub struct EventSubClient {
     shutdown_tx: Arc<RwLock<Option<mpsc::Sender<()>>>>,
     /// User ID (broadcaster ID)
     user_id: Arc<RwLock<Option<String>>>,
+    /// Current auth token
+    token: Arc<RwLock<Option<UserToken>>>,
+    /// Token refresher callback
+    token_refresher: Arc<RwLock<Option<TokenRefresher>>>,
+    /// Last token hash for detecting changes
+    token_hash: Arc<RwLock<Option<u64>>>,
 }
 
 // We're no longer parsing chat messages and just passing through the raw data
@@ -171,7 +180,116 @@ impl EventSubClient {
             connection: Arc::new(RwLock::new(None)),
             shutdown_tx: Arc::new(RwLock::new(None)),
             user_id: Arc::new(RwLock::new(None)),
+            token: Arc::new(RwLock::new(None)),
+            token_refresher: Arc::new(RwLock::new(None)),
+            token_hash: Arc::new(RwLock::new(None)),
         })
+    }
+    
+    /// Set the token refresher callback
+    pub fn set_token_refresher(&self, refresher: TokenRefresher) {
+        let token_refresher = self.token_refresher.clone();
+        tokio::spawn(async move {
+            *token_refresher.write().await = Some(refresher);
+        });
+    }
+    
+    /// Update the token stored in the client
+    pub async fn update_token(&self, token: UserToken) -> Result<()> {
+        // Calculate token hash for change detection
+        let token_hash = self.hash_token(&token);
+        
+        // Store token and its hash
+        *self.token.write().await = Some(token);
+        *self.token_hash.write().await = Some(token_hash);
+        
+        Ok(())
+    }
+    
+    /// Get a fresh token (refresh if needed)
+    pub async fn get_fresh_token(&self) -> Result<UserToken> {
+        // First check if we need to refresh
+        if let Err(e) = self.check_and_refresh_token_if_needed().await {
+            error!("Error refreshing token during get_fresh_token: {}", e);
+            // Continue anyway and try to use what we have
+        }
+        
+        // Get the current token
+        let token_guard = self.token.read().await;
+        match &*token_guard {
+            Some(token) => Ok(token.clone()),
+            None => Err(anyhow!("No token available")),
+        }
+    }
+    
+    /// Check if token needs refresh and refresh it if needed
+    pub async fn check_and_refresh_token_if_needed(&self) -> Result<()> {
+        // Get current token
+        let current_token = {
+            let token_guard = self.token.read().await;
+            match &*token_guard {
+                Some(token) => token.clone(),
+                None => return Err(anyhow!("No token available to refresh")),
+            }
+        };
+        
+        // Check if token is about to expire (within 10 minutes)
+        let expires_in = current_token.expires_in();
+        if expires_in.as_secs() < 600 {
+            info!("Token expires in {} seconds, refreshing", expires_in.as_secs());
+            
+            // Get the refresher function
+            let refresher = {
+                let refresher_guard = self.token_refresher.read().await;
+                match &*refresher_guard {
+                    Some(refresher) => refresher.clone(),
+                    None => return Err(anyhow!("No token refresher available")),
+                }
+            };
+            
+            // Call the refresher to get a new token
+            match refresher().await {
+                Ok(new_token) => {
+                    // Calculate token hash
+                    let token_hash = self.hash_token(&new_token);
+                    let current_hash = {
+                        let hash_guard = self.token_hash.read().await;
+                        hash_guard.clone()
+                    };
+                    
+                    // Update token if hash is different (token has changed)
+                    if current_hash.is_none() || current_hash.unwrap() != token_hash {
+                        info!("Token has changed, updating stored token");
+                        self.update_token(new_token).await?;
+                    } else {
+                        info!("Token is unchanged after refresh");
+                    }
+                    
+                    Ok(())
+                },
+                Err(e) => {
+                    error!("Failed to refresh token: {}", e);
+                    Err(anyhow!("Failed to refresh token: {}", e))
+                }
+            }
+        } else {
+            // Token is still valid
+            debug!("Token is still valid for {} seconds", expires_in.as_secs());
+            Ok(())
+        }
+    }
+    
+    /// Calculate a hash for the token to detect changes
+    fn hash_token(&self, token: &UserToken) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        token.access_token.secret().hash(&mut hasher);
+        if let Some(refresh_token) = &token.refresh_token {
+            refresh_token.secret().hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Start the EventSub client
@@ -182,6 +300,9 @@ impl EventSubClient {
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         *self.shutdown_tx.write().await = Some(shutdown_tx);
 
+        // Store the initial token
+        self.update_token(token.clone()).await?;
+
         // Get broadcaster ID from token user ID
         let user_id = Self::get_user_id_from_token(&self.client_id, token).await?;
         *self.user_id.write().await = Some(user_id.to_string());
@@ -189,15 +310,19 @@ impl EventSubClient {
         // Clone Arc references for the background task
         let event_bus = self.event_bus.clone();
         let connection = self.connection.clone();
-        // We now need client_id and token for creating subscriptions
         let client_id = self.client_id.clone();
-        let token = token.clone(); // Clone the UserToken for use in the async task
+        let token_storage = self.token.clone();
+        let token_refresher = self.token_refresher.clone();
         let user_id_clone = self.user_id.clone();
 
         // Spawn the WebSocket connection task
         tokio::spawn(async move {
             // Track reconnect attempts for exponential backoff
             let mut reconnect_attempts = 0;
+            // Create a periodic token check timer (every 5 minutes)
+            let mut token_check_interval = tokio::time::interval(Duration::from_secs(300));
+            // First tick completes immediately, subsequent ticks wait for the interval
+            token_check_interval.tick().await;
 
             // Connection loop
             loop {
@@ -205,6 +330,51 @@ impl EventSubClient {
                 if let Ok(Some(_)) = timeout(Duration::from_millis(10), shutdown_rx.recv()).await {
                     info!("Shutdown signal received, stopping EventSub client");
                     break;
+                }
+                
+                // Periodic token check (non-blocking)
+                if tokio::time::timeout(Duration::from_millis(1), token_check_interval.tick()).await.is_ok() {
+                    // Token check interval reached
+                    
+                    // Get the current token
+                    match token_storage.read().await.clone() {
+                        Some(current_token) => {
+                            // Check if token is expiring soon (within 10 minutes)
+                            let expires_in = current_token.expires_in();
+                            if expires_in.as_secs() < 600 {
+                                info!("Token expiring in {} seconds, attempting refresh", expires_in.as_secs());
+                                
+                                // Check if we have a refresher
+                                if let Some(refresher) = token_refresher.read().await.clone() {
+                                    // Try to refresh token
+                                    match refresher().await {
+                                        Ok(new_token) => {
+                                            info!("Token successfully refreshed, expires in {} seconds", 
+                                                  new_token.expires_in().as_secs());
+                                            // Update stored token
+                                            *token_storage.write().await = Some(new_token);
+                                            
+                                            // Force reconnection to use the new token
+                                            if connection.read().await.is_some() {
+                                                info!("Reconnecting to use the new token");
+                                                *connection.write().await = None;
+                                                // Reset reconnect attempts since this is intentional
+                                                reconnect_attempts = 0;
+                                                continue;
+                                            }
+                                        },
+                                        Err(e) => {
+                                            error!("Failed to refresh token: {}", e);
+                                            // Continue anyway, will reconnect on 401
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        None => {
+                            warn!("No token available for periodic check");
+                        }
+                    }
                 }
 
                 // Calculate reconnect delay with exponential backoff
@@ -246,10 +416,19 @@ impl EventSubClient {
                         
                         info!("Creating EventSub subscriptions for broadcaster ID: {}", broadcaster_id);
                         
+                        // Get the most up-to-date token for creating subscriptions
+                        let current_token = match token_storage.read().await.clone() {
+                            Some(token) => token,
+                            None => {
+                                error!("No token available for creating EventSub subscriptions");
+                                break;
+                            }
+                        };
+                        
                         // Create subscriptions for various event types
                         match Self::create_subscriptions(
                             &client_id,
-                            &token,
+                            &current_token, 
                             &broadcaster_id, 
                             &session_id
                         ).await {
@@ -258,12 +437,33 @@ impl EventSubClient {
                             }
                             Err(e) => {
                                 error!("Failed to create EventSub subscriptions: {}", e);
+                                
+                                // Check if the error is due to authentication (401)
+                                if e.to_string().contains("401") || e.to_string().contains("Authentication") {
+                                    info!("Authentication error during subscription creation, will attempt token refresh");
+                                    
+                                    // Try to refresh the token
+                                    if let Some(refresher) = token_refresher.read().await.clone() {
+                                        match refresher().await {
+                                            Ok(new_token) => {
+                                                info!("Token refreshed after 401 error");
+                                                *token_storage.write().await = Some(new_token);
+                                                // Force reconnection loop
+                                                break;
+                                            },
+                                            Err(refresh_err) => {
+                                                error!("Failed to refresh token after 401: {}", refresh_err);
+                                            }
+                                        }
+                                    }
+                                }
+                                
                                 // Continue anyway, we might handle some predefined subscriptions
                             }
                         }
 
                         // Process messages until disconnected
-                        Self::process_messages(&connection, &event_bus, &user_id_clone).await;
+                        Self::process_messages(&connection, &event_bus, &user_id_clone, &token_storage, &token_refresher).await;
                     }
                     Err(e) => {
                         // Connection failed
@@ -542,6 +742,8 @@ impl EventSubClient {
         connection: &Arc<RwLock<Option<EventSubConnection>>>,
         event_bus: &Arc<EventBus>,
         user_id: &Arc<RwLock<Option<String>>>,
+        token_storage: &Arc<RwLock<Option<UserToken>>>,
+        token_refresher: &Arc<RwLock<Option<TokenRefresher>>>,
     ) {
         info!("Started processing EventSub messages");
 
@@ -775,6 +977,26 @@ impl EventSubClient {
                 }
                 Ok(Some(Err(e))) => {
                     error!("WebSocket error: {}", e);
+                    
+                    // Check if the error is related to authentication
+                    let error_str = e.to_string();
+                    if error_str.contains("401") || error_str.contains("Authentication") {
+                        info!("Authentication error in WebSocket, attempting token refresh");
+                        
+                        // Try to refresh the token
+                        if let Some(refresher) = token_refresher.read().await.clone() {
+                            match refresher().await {
+                                Ok(new_token) => {
+                                    info!("Token refreshed after WebSocket error");
+                                    *token_storage.write().await = Some(new_token);
+                                },
+                                Err(refresh_err) => {
+                                    error!("Failed to refresh token after WebSocket error: {}", refresh_err);
+                                }
+                            }
+                        }
+                    }
+                    
                     break;
                 }
                 Ok(None) => {
@@ -795,4 +1017,38 @@ impl EventSubClient {
 
     // The process_event_notification function has been integrated directly into the process_messages method
     // using the twitch_api library's event types and parsing
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EventBus;
+    use std::sync::Arc;
+
+    // Set up environment for tests
+    fn mock_env_var() {
+        std::env::set_var(TWITCH_CLIENT_ID_ENV, "test_client_id");
+    }
+
+    fn unmock_env_var() {
+        std::env::remove_var(TWITCH_CLIENT_ID_ENV);
+    }
+
+    #[tokio::test]
+    async fn test_eventsub_client_creation() {
+        // Set up environment
+        mock_env_var();
+
+        // Create event bus with default capacity
+        let event_bus = Arc::new(EventBus::new(100));
+
+        // Create EventSub client
+        let client = EventSubClient::new(event_bus);
+        
+        // Verify client was created successfully
+        assert!(client.is_ok());
+        
+        // Clean up
+        unmock_env_var();
+    }
 }
