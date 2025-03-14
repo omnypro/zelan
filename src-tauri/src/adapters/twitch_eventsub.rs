@@ -152,8 +152,8 @@ pub struct EventSubClient {
     event_bus: Arc<EventBus>,
     /// Twitch Client ID
     client_id: ClientId,
-    /// Active WebSocket connection
-    connection: Arc<RwLock<Option<EventSubConnection>>>,
+    /// Active WebSocket connection - using Mutex for exclusive access
+    connection: Arc<tokio::sync::Mutex<Option<EventSubConnection>>>,
     /// Shutdown signal
     shutdown_tx: Arc<RwLock<Option<mpsc::Sender<()>>>>,
     /// User ID (broadcaster ID)
@@ -177,7 +177,7 @@ impl EventSubClient {
         Ok(Self {
             event_bus,
             client_id,
-            connection: Arc::new(RwLock::new(None)),
+            connection: Arc::new(tokio::sync::Mutex::new(None)),
             shutdown_tx: Arc::new(RwLock::new(None)),
             user_id: Arc::new(RwLock::new(None)),
             token: Arc::new(RwLock::new(None)),
@@ -294,7 +294,42 @@ impl EventSubClient {
 
     /// Start the EventSub client
     pub async fn start(&self, token: &UserToken) -> Result<()> {
-        info!("Starting Twitch EventSub client");
+        // Static lock to prevent multiple simultaneous starts
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static STARTING: AtomicBool = AtomicBool::new(false);
+        
+        // Check if already starting or if connection already exists
+        if STARTING.load(Ordering::SeqCst) || self.connection.try_lock().is_err() {
+            info!("EventSub client is already starting or running, skipping");
+            return Ok(());
+        }
+        
+        // Try to get the lock to check for an existing connection
+        if let Ok(guard) = self.connection.try_lock() {
+            if guard.is_some() {
+                info!("EventSub client already has a connection, skipping start");
+                return Ok(());
+            }
+            // Don't keep the lock - drop it immediately
+            drop(guard);
+        }
+
+        // Set the flag atomically, and only proceed if we got it
+        if STARTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            info!("Another task just started EventSub, not starting again");
+            return Ok(());
+        }
+        
+        info!("Starting Twitch EventSub client (with lock acquired)");
+        
+        // Make sure we set back to false when we exit this function
+        struct StartingGuard;
+        impl Drop for StartingGuard {
+            fn drop(&mut self) {
+                STARTING.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = StartingGuard;
 
         // Create shutdown channel
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -355,12 +390,17 @@ impl EventSubClient {
                                             *token_storage.write().await = Some(new_token);
                                             
                                             // Force reconnection to use the new token
-                                            if connection.read().await.is_some() {
-                                                info!("Reconnecting to use the new token");
-                                                *connection.write().await = None;
-                                                // Reset reconnect attempts since this is intentional
-                                                reconnect_attempts = 0;
-                                                continue;
+                                            // Try to get the connection lock to check if it exists
+                                            if let Ok(mut conn) = connection.try_lock() {
+                                                if conn.is_some() {
+                                                    info!("Reconnecting to use the new token");
+                                                    *conn = None;
+                                                    drop(conn);
+                                                    
+                                                    // Reset reconnect attempts since this is intentional
+                                                    reconnect_attempts = 0;
+                                                    continue;
+                                                }
                                             }
                                         },
                                         Err(e) => {
@@ -473,11 +513,15 @@ impl EventSubClient {
                 }
 
                 // Clear connection before reconnecting
-                *connection.write().await = None;
+                if let Ok(mut conn) = connection.try_lock() {
+                    *conn = None;
+                }
             }
 
             // Clear connection on shutdown
-            *connection.write().await = None;
+            if let Ok(mut conn) = connection.try_lock() {
+                *conn = None;
+            }
             info!("EventSub client stopped");
         });
 
@@ -493,16 +537,41 @@ impl EventSubClient {
             let _ = tx.send(()).await;
         }
 
-        // Clear connection
-        *self.connection.write().await = None;
+        // Clear connection - try to get the lock but don't wait too long
+        if let Ok(mut conn) = timeout(Duration::from_millis(500), self.connection.lock()).await {
+            *conn = None;
+            info!("Successfully cleared EventSub connection");
+        } else {
+            warn!("Could not get connection lock to clear it during stop");
+        }
 
         Ok(())
     }
 
     /// Connect to Twitch EventSub WebSocket
     async fn connect_to_eventsub(
-        connection: &Arc<RwLock<Option<EventSubConnection>>>,
+        connection: &Arc<tokio::sync::Mutex<Option<EventSubConnection>>>,
     ) -> Result<String> {
+        // Try to get the lock - will wait for up to 500ms
+        let mut conn_lock = match timeout(Duration::from_millis(500), connection.lock()).await {
+            Ok(guard) => guard, 
+            Err(_) => {
+                return Err(anyhow!("Couldn't get connection lock - another task is likely connecting"));
+            }
+        };
+        
+        // CHECK 1: Now that we have the lock, check if there's a valid connection
+        if let Some(existing_conn) = &*conn_lock {
+            if !existing_conn.session_id.is_empty() {
+                let session_id = existing_conn.session_id.clone();
+                info!("Reusing existing EventSub connection with session_id: {}", session_id);
+                drop(conn_lock); // Release the lock immediately
+                return Ok(session_id);
+            }
+        }
+        
+        // Proceed with creating the connection since we have the lock
+    
         info!("Connecting to Twitch EventSub WebSocket");
 
         // EventSub WebSocket URL
@@ -528,6 +597,8 @@ impl EventSubClient {
             session_id: String::new(),
             last_keepalive: std::time::Instant::now(),
         };
+        
+        // We'll keep the lock while we wait for the welcome message
 
         // Wait for welcome message to get session ID
         let welcome_timeout = Duration::from_secs(10);
@@ -547,9 +618,10 @@ impl EventSubClient {
                                 // Store session ID
                                 conn.session_id = session_id.clone();
 
-                                // Update connection
-                                *connection.write().await = Some(conn);
+                                // Store the connection
+                                *conn_lock = Some(conn);
 
+                                info!("Successfully stored new EventSub connection with session_id: {}", session_id);
                                 return Ok(session_id);
                             }
                             Ok(_) => {
@@ -820,14 +892,33 @@ impl EventSubClient {
             })),
         ];
         
-        // Create all subscriptions with delays between each
-        for (_, create_sub_fn) in subscriptions {
-            // Attempt to create the subscription
-            let _ = create_sub_fn().await;
+        // Create all subscriptions
+        info!("Creating all 15 EventSub subscriptions for broadcaster {}", broadcaster_id);
+        
+        let mut created = 0;
+        
+        for (name, create_sub_fn) in subscriptions {
+            // Try to create with error handling
+            match create_sub_fn().await {
+                Ok(_) => {
+                    created += 1;
+                    info!("Created subscription for {}", name);
+                },
+                Err(e) => {
+                    error!("Failed to create subscription for {}: {}", name, e);
+                    // Stop if we hit disconnection errors
+                    if e.to_string().contains("disconnected") {
+                        error!("WebSocket session disconnected - will retry later when connection is reestablished");
+                        break;
+                    }
+                }
+            }
             
-            // Add a small delay between subscriptions to prevent rate limiting
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // Reasonable delay between requests to prevent rate limits
+            tokio::time::sleep(Duration::from_millis(150)).await;
         }
+        
+        info!("Successfully created {} EventSub subscriptions", created);
         
         // Get the final subscription count
         let total_count = success_count.load(Ordering::SeqCst);
@@ -839,7 +930,7 @@ impl EventSubClient {
 
     /// Process EventSub WebSocket messages
     async fn process_messages(
-        connection: &Arc<RwLock<Option<EventSubConnection>>>,
+        connection: &Arc<tokio::sync::Mutex<Option<EventSubConnection>>>,
         event_bus: &Arc<EventBus>,
         user_id: &Arc<RwLock<Option<String>>>,
         token_storage: &Arc<RwLock<Option<UserToken>>>,
@@ -857,8 +948,17 @@ impl EventSubClient {
             loop {
                 ping_interval.tick().await;
 
+                // Try to get the connection lock
+                let mut conn_guard = match connection_ping.try_lock() {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        // Couldn't get the lock, try again next tick
+                        continue;
+                    }
+                };
+
                 // Send ping if connection exists
-                if let Some(conn) = &mut *connection_ping.write().await {
+                if let Some(conn) = &mut *conn_guard {
                     // Check if we've received a keepalive recently
                     let elapsed = conn.last_keepalive.elapsed();
                     debug!("Last keepalive: {:?} ago", elapsed);
@@ -872,6 +972,9 @@ impl EventSubClient {
                     // Connection closed
                     break;
                 }
+                
+                // Release the lock promptly
+                drop(conn_guard);
             }
 
             debug!("Ping task stopped");
@@ -879,8 +982,11 @@ impl EventSubClient {
 
         // Message processing loop
         loop {
-            // Get a reference to the connection
-            let mut conn_guard = connection.write().await;
+            // Try to get a lock on the connection
+            let mut conn_guard = match connection.lock().await {
+                guard => guard
+            };
+            
             let conn = match &mut *conn_guard {
                 Some(c) => c,
                 None => {

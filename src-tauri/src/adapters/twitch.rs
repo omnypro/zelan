@@ -416,37 +416,59 @@ impl TwitchAdapter {
     async fn start_eventsub(&self) -> Result<()> {
         info!("Starting EventSub client");
 
-        // Check config for token
+        // Check config for token and EventSub setting
         let config = self.config.read().await;
-        info!("Config has access token: {}", config.access_token.is_some());
-        drop(config);
+        info!("Config settings: has_access_token={}, use_eventsub={}", 
+              config.access_token.is_some(), config.use_eventsub);
+              
+        if !config.use_eventsub {
+            info!("EventSub is disabled in config, enabling it");
+            drop(config);
+            let mut config = self.config.write().await;
+            config.use_eventsub = true;
+            drop(config);
+        } else {
+            drop(config);
+        }
 
-        // Get access token
+        // Get access token with detailed logging
         let token = {
+            info!("Attempting to get token from auth manager");
             let auth_manager = self.auth_manager.read().await;
             match auth_manager.get_token().await {
                 Some(token) => {
-                    info!("Auth manager has valid token");
+                    info!("Auth manager has valid token: access_token_len={}, has_refresh_token={}, expires_in={}s", 
+                          token.access_token.secret().len(),
+                          token.refresh_token.is_some(),
+                          token.expires_in().as_secs());
                     drop(auth_manager);
                     token
                 }
                 None => {
-                    warn!("Auth manager has no token despite config having one");
+                    warn!("Auth manager has no token, attempting to restore from config");
                     // Try to restore from config
                     drop(auth_manager);
-                    if let Err(e) = self.restore_token_auth_state().await {
-                        warn!("Failed to restore auth state: {}", e);
+                    match self.restore_token_auth_state().await {
+                        Ok(_) => {
+                            info!("Successfully restored token from config");
+                        }
+                        Err(e) => {
+                            warn!("Failed to restore auth state from config: {}", e);
+                        }
                     }
 
                     // Try again
                     let auth_manager = self.auth_manager.read().await;
                     match auth_manager.get_token().await {
                         Some(token) => {
-                            info!("Successfully restored token from config");
+                            info!("Successfully retrieved token after restoration: access_token_len={}, has_refresh_token={}", 
+                                  token.access_token.secret().len(),
+                                  token.refresh_token.is_some());
                             drop(auth_manager);
                             token
                         }
                         None => {
+                            error!("No access token available after restoration attempt");
                             return Err(anyhow!(
                                 "No access token available after restoration attempt"
                             ));
@@ -456,13 +478,29 @@ impl TwitchAdapter {
             }
         };
 
+        // Check if the token has a user ID
+        let user_id = token.user_id.clone();
+        info!("Token has user ID: {}", user_id);
+
         // If no EventSub client exists, initialize it
         if self.eventsub_client.read().await.is_none() {
-            self.init_eventsub_client().await?;
+            info!("No EventSub client exists, initializing one");
+            match self.init_eventsub_client().await {
+                Ok(_) => info!("Successfully initialized EventSub client"),
+                Err(e) => {
+                    error!("Failed to initialize EventSub client: {}", e);
+                    return Err(anyhow!("Failed to initialize EventSub client: {}", e));
+                }
+            }
+        } else {
+            info!("EventSub client already exists");
         }
 
         // Start EventSub client
-        if let Some(client) = &*self.eventsub_client.read().await {
+        let eventsub_client = self.eventsub_client.read().await;
+        if let Some(client) = &*eventsub_client {
+            info!("Setting up token refresher callback for EventSub client");
+            
             // Set up token refresher callback before starting
             let auth_manager = Arc::clone(&self.auth_manager);
             let token_manager = self.token_manager.clone();
@@ -473,18 +511,28 @@ impl TwitchAdapter {
                 let token_manager_clone = token_manager.clone();
                 
                 Box::pin(async move {
-                    // First try to refresh using auth manager
-                    let refresh_result = auth_manager_clone.write().await.refresh_token_if_needed().await;
+                    info!("Token refresher called - checking if token needs refresh");
                     
-                    if let Err(e) = &refresh_result {
-                        warn!("Token refresh attempt failed: {}", e);
-                    }
+                    // First try to refresh using auth manager
+                    let refresh_successful = match auth_manager_clone.write().await.refresh_token_if_needed().await {
+                        Ok(_) => {
+                            info!("Token refresh check completed successfully");
+                            true
+                        },
+                        Err(e) => {
+                            warn!("Token refresh attempt failed: {}", e);
+                            false
+                        }
+                    };
                     
                     // Regardless of refresh result, get the current token
                     match auth_manager_clone.read().await.get_token().await {
                         Some(token) => {
+                            info!("Token refresher returning valid token: expires_in={}s", 
+                                  token.expires_in().as_secs());
+                            
                             // If refresh succeeded, update token in TokenManager
-                            if refresh_result.is_ok() && token_manager_clone.is_some() {
+                            if refresh_successful && token_manager_clone.is_some() {
                                 // Extract tokens
                                 let access_token = token.access_token.secret().to_string();
                                 let refresh_token = token.refresh_token.as_ref().map(|t| t.secret().to_string());
@@ -500,8 +548,23 @@ impl TwitchAdapter {
                                 
                                 // Store in token manager
                                 if let Some(tm) = &token_manager_clone {
-                                    if let Err(e) = tm.store_tokens("twitch", token_data).await {
-                                        warn!("Failed to update token data in TokenManager: {}", e);
+                                    match tm.store_tokens("twitch", token_data).await {
+                                        Ok(_) => {
+                                            info!("Successfully updated token data in TokenManager, ensuring persistence");
+                                            
+                                            // The most important part is ensuring the token is written to secure storage
+                                            // This happens automatically when store_tokens is called on TokenManager
+                                            
+                                            info!("Refreshed token has been persisted to secure storage");
+                                            
+                                            // Log that we're ensuring this token will survive restarts
+                                            info!("Token refresh complete - refreshed tokens will be used after restart");
+                                            
+                                            // Log expiration details for debugging
+                                            info!("Access token expires in: {}s, refresh token was present: {}", 
+                                                 token.expires_in().as_secs(), token.refresh_token.is_some());
+                                        },
+                                        Err(e) => warn!("Failed to update token data in TokenManager: {}", e),
                                     }
                                 }
                             }
@@ -509,6 +572,7 @@ impl TwitchAdapter {
                             Ok(token.clone())
                         },
                         None => {
+                            error!("No token available for refresh in token refresher");
                             Err(anyhow!("No token available for refresh"))
                         }
                     }
@@ -516,19 +580,26 @@ impl TwitchAdapter {
             });
             
             // Set the token refresher on the EventSub client
+            info!("Setting token refresher on EventSub client");
             client.set_token_refresher(refresher);
             
             // Now start the client with the token
-            if let Err(e) = client.start(&token).await {
-                error!("Failed to start EventSub client: {}", e);
-                // Fall back to polling
-                let mut config = self.config.write().await;
-                config.use_eventsub = false;
-                return Err(anyhow!("Failed to start EventSub client: {}", e));
+            info!("Attempting to start EventSub client with token");
+            match client.start(&token).await {
+                Ok(_) => {
+                    info!("EventSub client started successfully");
+                    Ok(())
+                }
+                Err(e) => {
+                    error!("Failed to start EventSub client: {}", e);
+                    // Fall back to polling
+                    let mut config = self.config.write().await;
+                    config.use_eventsub = false;
+                    Err(anyhow!("Failed to start EventSub client: {}", e))
+                }
             }
-            info!("EventSub client started successfully");
-            Ok(())
         } else {
+            error!("EventSub client not initialized despite initialization attempt");
             // Fall back to polling
             let mut config = self.config.write().await;
             config.use_eventsub = false;
@@ -692,6 +763,22 @@ impl TwitchAdapter {
                 match result {
                     Ok(_) => {
                         info!("Successfully restored and validated authentication tokens");
+                        
+                        // Enable EventSub in config
+                        {
+                            let mut config = adapter_clone.config.write().await;
+                            if !config.use_eventsub {
+                                info!("Enabling EventSub in config (was disabled)");
+                                config.use_eventsub = true;
+                            }
+                        }
+                        
+                        // Start EventSub directly - the client itself now handles synchronization
+                        info!("Starting EventSub after token restoration");
+                        match adapter_clone.start_eventsub().await {
+                            Ok(_) => info!("Successfully started EventSub after token restoration"),
+                            Err(e) => info!("Note: EventSub start after token restoration returned: {}", e)
+                        };
                     }
                     Err(e) => {
                         // Token validation failed, we need to notify the user
@@ -1146,37 +1233,21 @@ impl TwitchAdapter {
                             info!("Authentication state verified: is_authenticated=true");
                             drop(auth_manager);
                             
-                            // Start EventSub now that we have authentication
-                            // Clone for use in async block
-                            let self_clone_for_eventsub = self_clone.clone();
-                            
-                            // Start EventSub in a new task to not block auth flow
-                            tauri::async_runtime::spawn(async move {
-                                // Check if EventSub is enabled in config
-                                let use_eventsub = {
-                                    let config = self_clone_for_eventsub.config.read().await;
-                                    config.use_eventsub
-                                };
-                                
-                                if use_eventsub {
-                                    info!("Starting EventSub after successful authentication");
-                                    
-                                    match self_clone_for_eventsub.start_eventsub().await {
-                                        Ok(_) => {
-                                            info!("Successfully started EventSub after authentication");
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to start EventSub after authentication: {}", e);
-                                            // Fall back to polling
-                                            let mut config = self_clone_for_eventsub.config.write().await;
-                                            config.use_eventsub = false;
-                                            info!("Falling back to polling for updates");
-                                        }
-                                    }
-                                } else {
-                                    info!("EventSub is disabled in config, using polling");
+                            // Enable EventSub in config
+                            {
+                                let mut config = self_clone.config.write().await;
+                                if !config.use_eventsub {
+                                    info!("Enabling EventSub in config (was disabled)");
+                                    config.use_eventsub = true;
                                 }
-                            });
+                            }
+                            
+                            // Start EventSub directly - the client itself handles synchronization now
+                            info!("Starting EventSub after successful authentication");
+                            match self_clone.start_eventsub().await {
+                                Ok(_) => info!("Successfully started EventSub after authentication"),
+                                Err(e) => info!("Note: EventSub start after auth returned: {}", e)
+                            };
                         } else {
                             warn!("Authentication state inconsistency: is_authenticated=false despite successful token");
                         }
