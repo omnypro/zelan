@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zelan WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .panel {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+            flex: 1;
+            min-width: 300px;
+        }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        h2 {
+            margin: 0;
+            font-size: 18px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        input, button, select {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button.disconnect {
+            background-color: #f44336;
+        }
+        button.disconnect:hover {
+            background-color: #d32f2f;
+        }
+        button.clear {
+            background-color: #607d8b;
+        }
+        button.clear:hover {
+            background-color: #455a64;
+        }
+        button.send {
+            background-color: #2196F3;
+        }
+        button.send:hover {
+            background-color: #1976D2;
+        }
+        .events {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            background-color: #fafafa;
+        }
+        .event {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: white;
+            border-radius: 4px;
+            border-left: 4px solid #4CAF50;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .connected {
+            background-color: #c8e6c9;
+            color: #2e7d32;
+        }
+        .disconnected {
+            background-color: #ffcdd2;
+            color: #c62828;
+        }
+        .filter-container {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .filter-container select, .filter-container input {
+            flex: 1;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .hidden {
+            display: none;
+        }
+        #subscribeForm textarea {
+            width: 100%;
+            height: 100px;
+            font-family: monospace;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <h1>Zelan WebSocket Test Client</h1>
+    
+    <div class="container">
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Connection</h2>
+                <span id="status" class="status disconnected">Disconnected</span>
+            </div>
+            
+            <div class="controls">
+                <input type="text" id="wsUrl" value="ws://localhost:8080" placeholder="WebSocket URL">
+                <button id="connect">Connect</button>
+                <button id="disconnect" class="disconnect" disabled>Disconnect</button>
+            </div>
+            
+            <div class="panel-header">
+                <h2>Subscriptions</h2>
+            </div>
+            
+            <div class="controls">
+                <button id="showSubscribeForm">Subscribe to Events</button>
+                <button id="unsubscribeAll" disabled>Unsubscribe All</button>
+                <button id="getInfo" disabled>Get Info</button>
+            </div>
+            
+            <form id="subscribeForm" class="hidden">
+                <div class="form-group">
+                    <label for="subscriptionType">Subscription Type:</label>
+                    <select id="subscriptionType">
+                        <option value="subscribe.sources">Subscribe to Sources</option>
+                        <option value="subscribe.types">Subscribe to Event Types</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="subscriptionData">Values (JSON array):</label>
+                    <textarea id="subscriptionData" placeholder='["twitch", "obs"]'></textarea>
+                </div>
+                <div class="controls">
+                    <button type="submit" class="send">Subscribe</button>
+                    <button type="button" id="cancelSubscribe" class="clear">Cancel</button>
+                </div>
+            </form>
+        </div>
+        
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Send Command</h2>
+            </div>
+            
+            <div class="form-group">
+                <label for="command">JSON Command:</label>
+                <textarea id="command" style="width: 100%; height: 100px;" placeholder='{"command": "info"}'></textarea>
+            </div>
+            
+            <div class="controls">
+                <button id="sendCommand" class="send" disabled>Send</button>
+                <button id="clearCommand" class="clear">Clear</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="panel">
+        <div class="panel-header">
+            <h2>Events</h2>
+            <div class="controls">
+                <button id="clearEvents" class="clear">Clear</button>
+            </div>
+        </div>
+        
+        <div class="filter-container">
+            <label for="filterType">Filter:</label>
+            <select id="filterType">
+                <option value="all">All Events</option>
+                <option value="event_type">Event Type</option>
+                <option value="source">Source</option>
+            </select>
+            <input type="text" id="filterValue" placeholder="Filter value" disabled>
+        </div>
+        
+        <div id="events" class="events"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let events = [];
+        
+        // Elements
+        const connectBtn = document.getElementById('connect');
+        const disconnectBtn = document.getElementById('disconnect');
+        const statusEl = document.getElementById('status');
+        const wsUrlInput = document.getElementById('wsUrl');
+        const eventsContainer = document.getElementById('events');
+        const clearEventsBtn = document.getElementById('clearEvents');
+        const filterTypeSelect = document.getElementById('filterType');
+        const filterValueInput = document.getElementById('filterValue');
+        const sendCommandBtn = document.getElementById('sendCommand');
+        const commandTextarea = document.getElementById('command');
+        const clearCommandBtn = document.getElementById('clearCommand');
+        const showSubscribeFormBtn = document.getElementById('showSubscribeForm');
+        const subscribeForm = document.getElementById('subscribeForm');
+        const cancelSubscribeBtn = document.getElementById('cancelSubscribe');
+        const unsubscribeAllBtn = document.getElementById('unsubscribeAll');
+        const getInfoBtn = document.getElementById('getInfo');
+        
+        // Connect to WebSocket
+        connectBtn.addEventListener('click', () => {
+            if (ws) {
+                ws.close();
+            }
+            
+            try {
+                const url = wsUrlInput.value;
+                ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    statusEl.textContent = 'Connected';
+                    statusEl.className = 'status connected';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    sendCommandBtn.disabled = false;
+                    unsubscribeAllBtn.disabled = false;
+                    getInfoBtn.disabled = false;
+                    
+                    addEvent({
+                        type: 'system',
+                        message: `Connected to ${url}`
+                    });
+                };
+                
+                ws.onclose = () => {
+                    statusEl.textContent = 'Disconnected';
+                    statusEl.className = 'status disconnected';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    sendCommandBtn.disabled = true;
+                    unsubscribeAllBtn.disabled = true;
+                    getInfoBtn.disabled = true;
+                    
+                    ws = null;
+                    
+                    addEvent({
+                        type: 'system',
+                        message: 'Disconnected'
+                    });
+                };
+                
+                ws.onerror = (error) => {
+                    addEvent({
+                        type: 'error',
+                        message: `WebSocket Error: ${error.message || 'Unknown error'}`
+                    });
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        addEvent(data);
+                    } catch (e) {
+                        addEvent({
+                            type: 'message',
+                            message: event.data
+                        });
+                    }
+                };
+            } catch (error) {
+                addEvent({
+                    type: 'error',
+                    message: `Connection Error: ${error.message}`
+                });
+            }
+        });
+        
+        // Disconnect from WebSocket
+        disconnectBtn.addEventListener('click', () => {
+            if (ws) {
+                ws.close();
+            }
+        });
+        
+        // Clear events
+        clearEventsBtn.addEventListener('click', () => {
+            events = [];
+            renderEvents();
+        });
+        
+        // Filter type change
+        filterTypeSelect.addEventListener('change', () => {
+            if (filterTypeSelect.value === 'all') {
+                filterValueInput.disabled = true;
+                filterValueInput.value = '';
+            } else {
+                filterValueInput.disabled = false;
+            }
+            renderEvents();
+        });
+        
+        // Filter value change
+        filterValueInput.addEventListener('input', () => {
+            renderEvents();
+        });
+        
+        // Send command
+        sendCommandBtn.addEventListener('click', () => {
+            if (!ws) return;
+            
+            try {
+                const commandText = commandTextarea.value.trim();
+                if (!commandText) return;
+                
+                // Try to parse as JSON
+                const command = JSON.parse(commandText);
+                ws.send(JSON.stringify(command));
+                
+                addEvent({
+                    type: 'sent',
+                    message: `Sent: ${commandText}`
+                });
+            } catch (error) {
+                addEvent({
+                    type: 'error',
+                    message: `Command Error: ${error.message}`
+                });
+            }
+        });
+        
+        // Clear command
+        clearCommandBtn.addEventListener('click', () => {
+            commandTextarea.value = '';
+        });
+        
+        // Show subscribe form
+        showSubscribeFormBtn.addEventListener('click', () => {
+            subscribeForm.classList.remove('hidden');
+            showSubscribeFormBtn.classList.add('hidden');
+        });
+        
+        // Cancel subscribe
+        cancelSubscribeBtn.addEventListener('click', () => {
+            subscribeForm.classList.add('hidden');
+            showSubscribeFormBtn.classList.remove('hidden');
+        });
+        
+        // Submit subscribe form
+        subscribeForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (!ws) return;
+            
+            try {
+                const subscriptionType = document.getElementById('subscriptionType').value;
+                const subscriptionData = document.getElementById('subscriptionData').value.trim();
+                
+                // Parse data as JSON
+                const data = JSON.parse(subscriptionData);
+                
+                const command = {
+                    command: subscriptionType,
+                    data: data
+                };
+                
+                ws.send(JSON.stringify(command));
+                
+                addEvent({
+                    type: 'sent',
+                    message: `Sent subscription: ${JSON.stringify(command)}`
+                });
+                
+                // Hide form after sending
+                subscribeForm.classList.add('hidden');
+                showSubscribeFormBtn.classList.remove('hidden');
+            } catch (error) {
+                addEvent({
+                    type: 'error',
+                    message: `Subscription Error: ${error.message}`
+                });
+            }
+        });
+        
+        // Unsubscribe all
+        unsubscribeAllBtn.addEventListener('click', () => {
+            if (!ws) return;
+            
+            const command = {
+                command: 'unsubscribe.all'
+            };
+            
+            ws.send(JSON.stringify(command));
+            
+            addEvent({
+                type: 'sent',
+                message: `Sent: ${JSON.stringify(command)}`
+            });
+        });
+        
+        // Get info
+        getInfoBtn.addEventListener('click', () => {
+            if (!ws) return;
+            
+            const command = {
+                command: 'info'
+            };
+            
+            ws.send(JSON.stringify(command));
+            
+            addEvent({
+                type: 'sent',
+                message: `Sent: ${JSON.stringify(command)}`
+            });
+        });
+        
+        // Add event to the list
+        function addEvent(event) {
+            events.unshift(event); // Add to the beginning
+            
+            // Limit to 100 events
+            if (events.length > 100) {
+                events = events.slice(0, 100);
+            }
+            
+            renderEvents();
+        }
+        
+        // Render events with filter
+        function renderEvents() {
+            eventsContainer.innerHTML = '';
+            
+            const filterType = filterTypeSelect.value;
+            const filterValue = filterValueInput.value.toLowerCase();
+            
+            const filteredEvents = events.filter(event => {
+                if (filterType === 'all') return true;
+                
+                if (filterType === 'event_type' && event.event_type) {
+                    return event.event_type.toLowerCase().includes(filterValue);
+                }
+                
+                if (filterType === 'source' && event.source) {
+                    return event.source.toLowerCase().includes(filterValue);
+                }
+                
+                return true;
+            });
+            
+            filteredEvents.forEach(event => {
+                const eventEl = document.createElement('div');
+                eventEl.className = 'event';
+                
+                let content = '';
+                if (event.type === 'system' || event.type === 'error' || event.type === 'sent') {
+                    content = event.message;
+                    if (event.type === 'error') {
+                        eventEl.style.borderLeftColor = '#f44336';
+                    } else if (event.type === 'sent') {
+                        eventEl.style.borderLeftColor = '#2196F3';
+                    }
+                } else {
+                    content = JSON.stringify(event, null, 2);
+                    
+                    // Color-code by event source
+                    if (event.source === 'twitch') {
+                        eventEl.style.borderLeftColor = '#6441a5'; // Twitch purple
+                    } else if (event.source === 'obs') {
+                        eventEl.style.borderLeftColor = '#1a3c61'; // OBS blue
+                    }
+                }
+                
+                eventEl.textContent = content;
+                eventsContainer.appendChild(eventEl);
+            });
+        }
+    </script>
+</body>
+</html>

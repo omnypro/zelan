@@ -11,7 +11,11 @@ Zelan eliminates redundant integration work by providing a single access point f
 - Local hosting - no dependency on cloud services like Streamlabs or StreamElements
 - Unified data model across multiple streaming platforms and services
 - Configurable interface for adding/managing data sources
-- Standardized API for stream overlays and tools to consume aggregated data
+- **Enhanced WebSocket API** for stream overlays and tools to consume aggregated data:
+  - Event filtering and subscription capabilities
+  - Support for 13 different Twitch EventSub event types
+  - Optimized for low-latency event delivery
+  - Connection management with auto-reconnect features
 
 ## Setup & Configuration
 
@@ -39,3 +43,43 @@ TWITCH_CLIENT_ID=your_client_id_here
 ```
 
 Note: This project uses device code flow authentication, which is designed for desktop applications that cannot securely store client secrets.
+
+## WebSocket API
+
+Zelan provides a WebSocket API for real-time event streaming. The WebSocket server listens on port 8080 by default (configurable in the application settings).
+
+### Connecting to the WebSocket
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080');
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log(`Received ${data.event_type} from ${data.source}`);
+  console.log('Payload:', data.payload);
+};
+```
+
+### Event Filtering
+
+Clients can filter which events they receive using subscription commands:
+
+```javascript
+// Subscribe to only Twitch stream events
+ws.send(JSON.stringify({
+  command: 'subscribe.types',
+  data: ['stream.online', 'stream.offline']
+}));
+
+// Subscribe to only events from specific sources
+ws.send(JSON.stringify({
+  command: 'subscribe.sources',
+  data: ['twitch']
+}));
+```
+
+### Test Client
+
+Zelan includes a browser-based WebSocket test client to help you explore the API and test your integrations. You can access it by opening `websocket-test-client.html` in your browser.
+
+For complete documentation of the WebSocket API, see [WebSocket API Documentation](docs/websocket-api.md).
