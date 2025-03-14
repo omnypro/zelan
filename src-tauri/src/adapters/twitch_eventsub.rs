@@ -629,17 +629,23 @@ impl EventSubClient {
         broadcaster_id: &str,
         session_id: &str,
     ) -> Result<usize> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use twitch_api::{
             helix::HelixClient,
             eventsub::{
-                channel::{ChannelUpdateV2, ChannelChatMessageV1},
+                channel::{
+                    ChannelUpdateV2, ChannelChatMessageV1, ChannelFollowV2, 
+                    ChannelSubscribeV1, ChannelSubscriptionEndV1, ChannelSubscriptionGiftV1,
+                    ChannelSubscriptionMessageV1, ChannelCheerV1, ChannelRaidV1,
+                    ChannelBanV1, ChannelUnbanV1, ChannelModeratorAddV1, ChannelModeratorRemoveV1,
+                },
                 stream::{StreamOfflineV1, StreamOnlineV1},
             },
         };
         
         // Parse the broadcaster ID string into a UserId
         let broadcaster = UserId::new(broadcaster_id.to_string());
-        let mut success_count = 0;
+        let success_count = Arc::new(AtomicUsize::new(0));
         
         // Create a reqwest HTTP client for the Helix client
         let reqw_client = reqwest::Client::new();
@@ -649,92 +655,186 @@ impl EventSubClient {
         // Create the websocket transport for the session
         let transport = twitch_api::eventsub::Transport::websocket(session_id);
         
-        // Create and count the stream.online subscription
-        info!("Creating subscription for stream.online");
-        match helix_client.create_eventsub_subscription(
-            StreamOnlineV1::broadcaster_user_id(broadcaster.clone()),
-            transport.clone(),
-            token,
-        ).await {
-            Ok(_) => {
-                info!("Successfully created subscription for stream.online");
-                success_count += 1;
-            },
-            Err(e) => {
-                error!("Failed to create subscription for stream.online: {}", e);
+        // Helper function to create a subscription with error handling and delay
+        async fn create_sub<C>(
+            name: &str, 
+            helix_client: &HelixClient<'_, reqwest::Client>,
+            condition: C,
+            transport: &twitch_api::eventsub::Transport,
+            token: &UserToken,
+            success_count: Arc<AtomicUsize>
+        ) -> Result<()>
+        where 
+            C: twitch_api::eventsub::EventSubscription + std::fmt::Debug + Send
+        {
+            info!("Creating subscription for {}", name);
+            match helix_client.create_eventsub_subscription(
+                condition,
+                transport.clone(),
+                token,
+            ).await {
+                Ok(_) => {
+                    info!("Successfully created subscription for {}", name);
+                    success_count.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+                Err(e) => {
+                    error!("Failed to create subscription for {}: {}", name, e);
+                    Err(anyhow!("Failed to create subscription for {}: {}", name, e))
+                }
             }
         }
         
-        // Add a small delay between subscriptions to prevent rate limiting
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Vector of (name, subscription creation function) pairs
+        let subscriptions: Vec<(&str, Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> + Send>)> = vec![
+            // Stream events
+            ("stream.online", Box::new(|| Box::pin(create_sub(
+                "stream.online",
+                &helix_client,
+                StreamOnlineV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("stream.offline", Box::new(|| Box::pin(create_sub(
+                "stream.offline",
+                &helix_client,
+                StreamOfflineV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            
+            // Channel events
+            ("channel.update", Box::new(|| Box::pin(create_sub(
+                "channel.update",
+                &helix_client,
+                ChannelUpdateV2::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.follow", Box::new(|| Box::pin(create_sub(
+                "channel.follow",
+                &helix_client,
+                ChannelFollowV2::new(broadcaster.clone(), broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.subscribe", Box::new(|| Box::pin(create_sub(
+                "channel.subscribe",
+                &helix_client,
+                ChannelSubscribeV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.subscription.end", Box::new(|| Box::pin(create_sub(
+                "channel.subscription.end",
+                &helix_client,
+                ChannelSubscriptionEndV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.subscription.gift", Box::new(|| Box::pin(create_sub(
+                "channel.subscription.gift",
+                &helix_client,
+                ChannelSubscriptionGiftV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.subscription.message", Box::new(|| Box::pin(create_sub(
+                "channel.subscription.message",
+                &helix_client,
+                ChannelSubscriptionMessageV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.cheer", Box::new(|| Box::pin(create_sub(
+                "channel.cheer",
+                &helix_client,
+                ChannelCheerV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.raid", Box::new(|| Box::pin(create_sub(
+                "channel.raid",
+                &helix_client,
+                ChannelRaidV1::to_broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.ban", Box::new(|| Box::pin(create_sub(
+                "channel.ban",
+                &helix_client,
+                ChannelBanV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.unban", Box::new(|| Box::pin(create_sub(
+                "channel.unban",
+                &helix_client,
+                ChannelUnbanV1::broadcaster_user_id(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.moderator.add", Box::new(|| Box::pin(create_sub(
+                "channel.moderator.add",
+                &helix_client,
+                ChannelModeratorAddV1::new(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            ("channel.moderator.remove", Box::new(|| Box::pin(create_sub(
+                "channel.moderator.remove",
+                &helix_client,
+                ChannelModeratorRemoveV1::new(broadcaster.clone()),
+                &transport,
+                token,
+                success_count.clone()
+            )))),
+            
+            // Chat message event
+            ("channel.chat.message", Box::new(|| {
+                let chat_condition = ChannelChatMessageV1::new(
+                    broadcaster.clone(),
+                    broadcaster.clone(), // Using broadcaster ID for chatter too to match any user
+                );
+                Box::pin(create_sub(
+                    "channel.chat.message",
+                    &helix_client,
+                    chat_condition,
+                    &transport,
+                    token,
+                    success_count.clone()
+                ))
+            })),
+        ];
         
-        // Create and count the stream.offline subscription
-        info!("Creating subscription for stream.offline");
-        match helix_client.create_eventsub_subscription(
-            StreamOfflineV1::broadcaster_user_id(broadcaster.clone()),
-            transport.clone(),
-            token,
-        ).await {
-            Ok(_) => {
-                info!("Successfully created subscription for stream.offline");
-                success_count += 1;
-            },
-            Err(e) => {
-                error!("Failed to create subscription for stream.offline: {}", e);
-            }
+        // Create all subscriptions with delays between each
+        for (_, create_sub_fn) in subscriptions {
+            // Attempt to create the subscription
+            let _ = create_sub_fn().await;
+            
+            // Add a small delay between subscriptions to prevent rate limiting
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         
-        // Add a small delay between subscriptions to prevent rate limiting
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        
-        // Create and count the channel.update subscription
-        info!("Creating subscription for channel.update (v2)");
-        match helix_client.create_eventsub_subscription(
-            ChannelUpdateV2::broadcaster_user_id(broadcaster.clone()),
-            transport.clone(),
-            token,
-        ).await {
-            Ok(_) => {
-                info!("Successfully created subscription for channel.update");
-                success_count += 1;
-            },
-            Err(e) => {
-                error!("Failed to create subscription for channel.update: {}", e);
-            }
-        }
-        
-        // Add a small delay between subscriptions to prevent rate limiting
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        
-        // Create and count the channel.chat.message subscription
-        // For chat messages, typically you should specify BOTH broadcaster and user ID, but to get
-        // ALL chat messages in the channel, we can create a broadcaster user ID only condition
-        info!("Creating subscription for channel.chat.message");
-        
-        // Create a new chat message condition with broadcaster ID only
-        let chat_condition = ChannelChatMessageV1::new(
-            broadcaster.clone(),
-            broadcaster.clone(), // Using broadcaster ID for chatter too to match any user
-        );
-        
-        match helix_client.create_eventsub_subscription(
-            chat_condition,
-            transport.clone(),
-            token,
-        ).await {
-            Ok(_) => {
-                info!("Successfully created subscription for channel.chat.message");
-                success_count += 1;
-            },
-            Err(e) => {
-                error!("Failed to create subscription for channel.chat.message: {}", e);
-            }
-        }
-        
-        info!("Created a total of {} EventSub subscriptions", success_count);
+        // Get the final subscription count
+        let total_count = success_count.load(Ordering::SeqCst);
+        info!("Created a total of {} EventSub subscriptions", total_count);
         
         // Return the count of successfully created subscriptions
-        Ok(success_count)
+        Ok(total_count)
     }
 
     /// Process EventSub WebSocket messages
@@ -838,10 +938,28 @@ impl EventSubClient {
                                                     // Map the event type to our internal format
                                                     let event_type =
                                                         match metadata.subscription_type.to_str() {
+                                                            // Stream events
                                                             "stream.online" => "stream.online",
                                                             "stream.offline" => "stream.offline",
+                                                            
+                                                            // Channel events
                                                             "channel.update" => "channel.updated",
+                                                            "channel.follow" => "channel.follow",
+                                                            "channel.subscribe" => "channel.subscribe",
+                                                            "channel.subscription.end" => "channel.subscription.end",
+                                                            "channel.subscription.gift" => "channel.subscription.gift",
+                                                            "channel.subscription.message" => "channel.subscription.message",
+                                                            "channel.cheer" => "channel.cheer",
+                                                            "channel.raid" => "channel.raid",
+                                                            "channel.ban" => "channel.ban",
+                                                            "channel.unban" => "channel.unban",
+                                                            "channel.moderator.add" => "channel.moderator.add",
+                                                            "channel.moderator.remove" => "channel.moderator.remove",
+                                                            
+                                                            // Chat message events
                                                             "channel.chat.message" => "chat.message",
+                                                            
+                                                            // Unknown event type
                                                             _ => {
                                                                 warn!(
                                                                     "Unhandled event type: {}",
@@ -853,6 +971,7 @@ impl EventSubClient {
 
                                                     // Create payload based on event type
                                                     let payload = match event_type {
+                                                        // Stream events
                                                         "stream.online" => {
                                                             json!({
                                                                 "stream": event_json,
@@ -864,12 +983,16 @@ impl EventSubClient {
                                                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                                             })
                                                         }
+                                                        
+                                                        // Channel update event
                                                         "channel.updated" => {
                                                             json!({
                                                                 "channel": event_json,
                                                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                                             })
                                                         }
+                                                        
+                                                        // Chat message event
                                                         "chat.message" => {
                                                             // Pass through raw event data without parsing
                                                             json!({
@@ -877,7 +1000,27 @@ impl EventSubClient {
                                                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                                             })
                                                         }
-                                                        _ => json!({}),
+                                                        
+                                                        // Channel-related events (follow, subscribe, etc.)
+                                                        "channel.follow" | "channel.subscribe" | "channel.subscription.end" |
+                                                        "channel.subscription.gift" | "channel.subscription.message" |
+                                                        "channel.cheer" | "channel.raid" | "channel.ban" | "channel.unban" |
+                                                        "channel.moderator.add" | "channel.moderator.remove" => {
+                                                            json!({
+                                                                "channel": event_json,
+                                                                "event_type": event_type,
+                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                                            })
+                                                        }
+                                                        
+                                                        // For any other event types, use a generic format
+                                                        _ => {
+                                                            json!({
+                                                                "data": event_json,
+                                                                "event_type": event_type,
+                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                                            })
+                                                        }
                                                     };
 
                                                     // Publish the event
