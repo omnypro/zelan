@@ -47,10 +47,26 @@ This project requires environment variables for certain features to work properl
   - **ObsAdapter**: Connects to OBS via WebSockets for scene information
   - **TestAdapter**: Generates test events for debugging
 
+### WebSocket Server
+- Provides real-time event streaming to external clients
+- Configurable with customizable settings:
+  - Port configuration (default: 8080)
+  - Connection limits (default: 100 simultaneous connections)
+  - Timeout settings (default: 5 minutes of inactivity)
+  - Ping intervals (default: 60 seconds)
+- Client subscription system for filtering events:
+  - Filter by event source (e.g., only Twitch events)
+  - Filter by event type (e.g., only stream.online events)
+- Standard event format with versioning for backward compatibility
+- Efficient event serialization with caching for performance
+
 ### Event-Driven Design
 - Adapters publish events to a central EventBus
 - Events are propagated to subscribers (UI components, other services)
 - Async/await patterns used for non-blocking operations
+- WebSocket server provides real-time event delivery to external clients
+- Enhanced event filtering system with subscription capabilities
+- Support for 13 different Twitch EventSub event types
 
 ### Frontend Architecture
 - **Component-Based Structure**:
