@@ -1181,8 +1181,7 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
     // Client subscription preferences
     let mut preferences = WebSocketClientPreferences::default();
 
-    // Keep a cached version of the last serialized events to avoid redundant serialization
-    let mut event_cache: Option<(String, String)> = None;
+    // We no longer use event caching since all events are unique and high-variability
 
     // Handle incoming WebSocket messages
     loop {
@@ -1213,8 +1212,7 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                             continue;
                         }
 
-                        // Create a key for the event type+source
-                        let event_key = format!("{}.{}", event.source(), event.event_type());
+                        // We no longer need to create a cache key as we serialize each event
 
                         debug!(
                             client = %peer_addr,
@@ -1223,44 +1221,18 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                             "Forwarding event to client"
                         );
 
-                        // Check if we've already serialized this exact event type+source
-                        let json = if let Some((cached_key, cached_json)) = &event_cache {
-                            if *cached_key == event_key {
-                                cached_json.clone()
-                            } else {
-                                // Event type changed, serialize new event
-                                match serde_json::to_string(&event) {
-                                    Ok(json) => {
-                                        event_cache = Some((event_key, json.clone()));
-                                        json
-                                    },
-                                    Err(e) => {
-                                        error!(
-                                            error = %e,
-                                            event_source = %event.source(),
-                                            event_type = %event.event_type(),
-                                            "Error serializing event"
-                                        );
-                                        continue;
-                                    }
-                                }
-                            }
-                        } else {
-                            // No cached event, serialize new event
-                            match serde_json::to_string(&event) {
-                                Ok(json) => {
-                                    event_cache = Some((event_key, json.clone()));
-                                    json
-                                },
-                                Err(e) => {
-                                    error!(
-                                        error = %e,
-                                        event_source = %event.source(),
-                                        event_type = %event.event_type(),
-                                        "Error serializing event"
-                                    );
-                                    continue;
-                                }
+                        // Since all events are unique and high-variability, always serialize the current event
+                        // rather than relying on source/type-based caching
+                        let json = match serde_json::to_string(&event) {
+                            Ok(json) => json,
+                            Err(e) => {
+                                error!(
+                                    error = %e,
+                                    event_source = %event.source(),
+                                    event_type = %event.event_type(),
+                                    "Error serializing event"
+                                );
+                                continue;
                             }
                         };
 

@@ -969,58 +969,57 @@ impl EventSubClient {
                                                             }
                                                         };
 
-                                                    // Create payload based on event type
-                                                    let payload = match event_type {
-                                                        // Stream events
-                                                        "stream.online" => {
-                                                            json!({
-                                                                "stream": event_json,
-                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                                            })
+                                                    // Extract data specifically targeting the known Twitch API struct names
+                                                    let extract_by_struct_name = |json: &Value, struct_name: &str| -> Value {
+                                                        // Directly extract the data from the named struct
+                                                        if let Some(payload) = json.get(struct_name) {
+                                                            return payload.clone();
                                                         }
-                                                        "stream.offline" => {
-                                                            json!({
-                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                                            })
-                                                        }
-                                                        
-                                                        // Channel update event
-                                                        "channel.updated" => {
-                                                            json!({
-                                                                "channel": event_json,
-                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                                            })
-                                                        }
-                                                        
-                                                        // Chat message event
-                                                        "chat.message" => {
-                                                            // Pass through raw event data without parsing
-                                                            json!({
-                                                                "message": event_json,
-                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                                            })
-                                                        }
-                                                        
-                                                        // Channel-related events (follow, subscribe, etc.)
-                                                        "channel.follow" | "channel.subscribe" | "channel.subscription.end" |
-                                                        "channel.subscription.gift" | "channel.subscription.message" |
-                                                        "channel.cheer" | "channel.raid" | "channel.ban" | "channel.unban" |
-                                                        "channel.moderator.add" | "channel.moderator.remove" => {
-                                                            json!({
-                                                                "channel": event_json,
-                                                                "event_type": event_type,
-                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                                            })
-                                                        }
-                                                        
-                                                        // For any other event types, use a generic format
-                                                        _ => {
-                                                            json!({
-                                                                "data": event_json,
-                                                                "event_type": event_type,
-                                                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                                                            })
-                                                        }
+                                                        json.clone()
+                                                    };
+                                                    
+                                                    // Map the event type to the corresponding struct name from the Twitch API
+                                                    let struct_name = match event_type {
+                                                        "stream.online" => "StreamOnlineV1",
+                                                        "stream.offline" => "StreamOfflineV1",
+                                                        "channel.updated" => "ChannelUpdateV2",
+                                                        "chat.message" => "ChannelChatMessageV1", 
+                                                        "channel.follow" => "ChannelFollowV2",
+                                                        "channel.subscribe" => "ChannelSubscribeV1",
+                                                        "channel.subscription.end" => "ChannelSubscriptionEndV1",
+                                                        "channel.subscription.gift" => "ChannelSubscriptionGiftV1",
+                                                        "channel.subscription.message" => "ChannelSubscriptionMessageV1",
+                                                        "channel.cheer" => "ChannelCheerV1",
+                                                        "channel.raid" => "ChannelRaidV1",
+                                                        "channel.ban" => "ChannelBanV1",
+                                                        "channel.unban" => "ChannelUnbanV1",
+                                                        "channel.moderator.add" => "ChannelModeratorAddV1",
+                                                        "channel.moderator.remove" => "ChannelModeratorRemoveV1",
+                                                        _ => ""
+                                                    };
+                                                    
+                                                    // Extract the actual payload using the known struct name
+                                                    let extracted_data = if !struct_name.is_empty() {
+                                                        extract_by_struct_name(&event_json, struct_name)
+                                                    } else {
+                                                        event_json.clone()
+                                                    };
+                                                    
+                                                    // Debug log to see the structure after extraction
+                                                    debug!(
+                                                        event_type = %event_type,
+                                                        struct_name = %struct_name,
+                                                        "Extracted payload: {}",
+                                                        serde_json::to_string_pretty(&extracted_data).unwrap_or_default()
+                                                    );
+
+                                                    // For stream.offline, we don't have any data to send
+                                                    let payload = if event_type == "stream.offline" {
+                                                        // Empty JSON object
+                                                        json!({})
+                                                    } else {
+                                                        // For all other events, just use the extracted data directly
+                                                        extracted_data
                                                     };
 
                                                     // Publish the event
