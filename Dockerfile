@@ -1,44 +1,56 @@
-FROM rust:1.75-slim as builder
-
-WORKDIR /app
+# Stage 1: Build the application
+FROM rust:1.76-slim as builder
 
 # Install dependencies
-RUN apt-get update && apt-get install -y pkg-config libssl-dev
+RUN apt-get update && \
+    apt-get install -y pkg-config libssl-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy Cargo files for dependency caching
-COPY Cargo.toml Cargo.lock* ./
+# Create a new empty project
+WORKDIR /app
+RUN mkdir src
 
-# Create a dummy src/main.rs to cache dependencies
-RUN mkdir -p src && \
-    echo "fn main() {}" > src/main.rs && \
-    cargo build --release && \
-    rm -rf src
+# Copy Cargo.toml and Cargo.lock
+COPY Cargo.toml Cargo.lock ./
 
-# Copy the real source code
-COPY . .
+# Create dummy main.rs to build dependencies
+RUN echo "fn main() {}" > src/main.rs
+RUN echo "pub fn main() {}" > src/lib.rs
 
-# Build the application
+# Build only the dependencies to cache them
 RUN cargo build --release
 
-# Runtime image
-FROM debian:bookworm-slim
+# Remove the dummy files
+RUN rm -f src/main.rs src/lib.rs
 
-WORKDIR /app
+# Copy the source code
+COPY src ./src
+
+# Build the application
+RUN touch src/main.rs src/lib.rs
+RUN cargo build --release
+
+# Stage 2: Create the runtime image
+FROM debian:bullseye-slim
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y ca-certificates libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y ca-certificates libssl-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy the binary from builder
-COPY --from=builder /app/target/release/zelan /app/zelan
+# Copy the binary from the builder stage
+COPY --from=builder /app/target/release/zelan-api /usr/local/bin/zelan-api
 
-# Create a directory for persistent configuration
-RUN mkdir -p /app/config
+# Set environment variables
+ENV RUST_LOG=info
+ENV API_PORT=3000
+ENV WEBSOCKET_PORT=8080
 
-# Set the config path environment variable
-ENV ZELAN_CONFIG_PATH=/app/config/config.json
+# Expose ports
+EXPOSE 3000
+EXPOSE 8080
 
-# Expose WebSocket and API ports
-EXPOSE 9000 9001
-
-# Set the command
-CMD ["/app/zelan"]
+# Set the entrypoint
+ENTRYPOINT ["/usr/local/bin/zelan-api"]

@@ -1,12 +1,14 @@
 //! Core service implementation
+//!
+//! This module contains the central components of the Zelan service,
+//! including the event bus and stream service.
 
 mod event_bus;
 mod service;
 
-// We'll implement these properly later
+// Export main components
+pub use event_bus::{EventBus, EventBusStats, StreamEvent};
 pub use service::StreamService;
-// pub use event_bus::{EventBus, EventBusStats, StreamEvent};
-// pub use service::{ServiceStatus, AdapterSettings};
 
 // Re-export constants for default values
 pub const EVENT_BUS_CAPACITY: usize = 1000;

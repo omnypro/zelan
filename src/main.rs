@@ -1,68 +1,74 @@
-use tracing::{info, debug};
-use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-
 mod adapters;
 mod api;
 mod auth;
-mod config;
 mod core;
 mod error;
+mod service;
 mod websocket;
 
+use std::env;
+use tokio::signal;
+use tracing_subscriber::fmt::format::FmtSpan;
+
+use api::ApiServer;
+use service::StreamService;
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load environment variables from .env file if it exists
-    let env_file_path = match dotenvy::dotenv() {
-        Ok(path) => Some(path),
-        Err(_) => None,
-    };
-
-    // Initialize the tracing subscriber for structured logging
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            // Default to info level if RUST_LOG is not set
-            if cfg!(debug_assertions) {
-                // More verbose in debug mode
-                "zelan=info,zelan::core::event_bus=trace,zelan::adapters::obs=debug,warn"
-                    .into()
-            } else {
-                // Less verbose in release mode
-                "zelan=info,zelan::adapters::obs=info,warn".into()
-            }
-        }))
-        .with(tracing_subscriber::fmt::layer().with_target(true))
+    dotenvy::dotenv().ok();
+    
+    // Initialize logging
+    tracing_subscriber::fmt()
+        .with_env_filter("zelan_api=info")
+        .with_span_events(FmtSpan::CLOSE)
         .init();
-
-    info!("Zelan API server starting");
-
-    // Log environment loading after logger is initialized
-    match env_file_path {
-        Some(path) => info!("Loaded environment variables from {}", path.display()),
-        None => debug!("No .env file found. Using existing environment variables."),
-    };
-
-    // Load configuration
-    let config = config::load_config().await?;
     
-    // Initialize the core service
-    let service = core::StreamService::new(config.clone());
+    // Read configuration from environment variables
+    let websocket_port = env::var("WEBSOCKET_PORT")
+        .ok()
+        .and_then(|port| port.parse::<u16>().ok())
+        .unwrap_or(8080);
     
-    // Start the WebSocket server
-    service.start_websocket_server().await?;
+    let api_port = env::var("API_PORT")
+        .ok()
+        .and_then(|port| port.parse::<u16>().ok())
+        .unwrap_or(3000);
     
-    // Start the API server
-    let api_server = api::start_server(config.clone(), service.clone()).await?;
+    tracing::info!("Starting Zelan API service...");
     
-    info!("Server started successfully");
-    info!("Press Ctrl+C to stop the server");
+    // Create and initialize the stream service with all adapters
+    let mut service = StreamService::new()
+        .with_all_adapters()
+        .await?;
+    
+    // Start the stream service
+    service.start(Some(websocket_port)).await?;
+    tracing::info!("Service started successfully on WebSocket port {}", websocket_port);
+    
+    // Create and start the API server
+    let api_server = ApiServer::new(service, api_port);
+    
+    // Run the API server in a separate task
+    let api_handle = tokio::spawn(async move {
+        if let Err(e) = api_server.start().await {
+            tracing::error!("API server error: {:?}", e);
+        }
+    });
     
     // Wait for shutdown signal
-    tokio::signal::ctrl_c().await?;
-    info!("Shutdown signal received, stopping server...");
+    match signal::ctrl_c().await {
+        Ok(()) => {
+            tracing::info!("Shutdown signal received, stopping service gracefully...");
+        }
+        Err(err) => {
+            tracing::error!("Error waiting for shutdown signal: {}", err);
+        }
+    }
     
-    // Graceful shutdown
-    api_server.shutdown().await;
+    // Cancel API server task
+    api_handle.abort();
     
-    info!("Server shutdown complete");
+    tracing::info!("Service stopped successfully");
     Ok(())
 }

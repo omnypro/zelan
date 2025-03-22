@@ -432,7 +432,7 @@ impl ErrorRegistry {
         // Generate an error ID if not present
         if error.error_id.is_none() {
             let now = chrono::Utc::now();
-            let id = format!("err-{}-{}", now.timestamp_millis(), fastrand::u32(..));
+            let id = format!("err-{}-{}", now.timestamp_millis(), rand::random::<u32>());
             error.error_id = Some(id);
         }
 
