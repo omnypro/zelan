@@ -1,0 +1,56 @@
+[package]
+name = "zelan"
+version = "0.1.0"
+edition = "2021"
+description = "A unified API service for streaming platforms"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+
+# Web framework
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace", "auth"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# WebSockets
+tokio-tungstenite = "0.21"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# Authentication
+jsonwebtoken = "9.2"
+oauth2 = "4.4"
+
+# Utilities
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.7", features = ["v4", "serde"] }
+dotenvy = "0.15"
+config = "0.13"
+lazy_static = "1.4"
+parking_lot = "0.12"
+rand = "0.8"
+
+# For OBS WebSocket
+obs-websocket-client = "0.1"
+
+# For migrations from the desktop app
+home = "0.5"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.12"
+test-log = "0.2"

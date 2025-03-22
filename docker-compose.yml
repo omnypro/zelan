@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  zelan:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zelan:latest
+    ports:
+      - "9000:9000" # WebSocket server port
+      - "9001:9001" # API server port
+    volumes:
+      - ./config:/app/config
+    environment:
+      - RUST_LOG=zelan=info,zelan::core::event_bus=debug
+      - ZELAN_CONFIG_PATH=/app/config/config.json
+      # Add your Twitch client ID if using Twitch adapter
+      # - TWITCH_CLIENT_ID=your_client_id
+      # - TWITCH_CLIENT_SECRET=your_client_secret
+    restart: unless-stopped

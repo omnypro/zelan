@@ -1,85 +1,100 @@
 # Zelan
 
-A lightweight, locally-hosted data aggregation service that ingests data from streaming platforms (Twitch, OBS, etc.) and exposes it through a standardized API. Built with Rust and Tauri, Zelan enables stream overlays and third-party applications to access unified data without direct coupling to source services.
+Zelan is a unified API service for streaming platforms that aggregates data from various sources (Twitch, OBS, etc.) and exposes it through a standardized API.
 
-## Purpose
+## Features
 
-Zelan eliminates redundant integration work by providing a single access point for streaming-related data. Instead of implementing and debugging authentication, OAuth flows, and API interactions for each service in every project, one can connect to Zelan's local API once and access data from all supported platforms through a consistent interface.
+- **Unified API**: Access data from multiple streaming platforms through a single API
+- **Real-time Events**: WebSocket server for real-time event streaming
+- **Adapters**: Modular adapters for different services (Twitch, OBS, etc.)
+- **Docker Support**: Easy deployment with Docker and Docker Compose
+- **Authentication**: OAuth and API key support
+- **Configuration**: Environment variables and file-based configuration
 
-## Key Features
+## Getting Started
 
-- Local hosting - no dependency on cloud services like Streamlabs or StreamElements
-- Unified data model across multiple streaming platforms and services
-- Configurable interface for adding/managing data sources
-- **Enhanced WebSocket API** for stream overlays and tools to consume aggregated data:
-  - Event filtering and subscription capabilities
-  - Support for 13 different Twitch EventSub event types
-  - Optimized for low-latency event delivery
-  - Connection management with auto-reconnect features
+### Prerequisites
 
-## Setup & Configuration
+- Rust 1.75+ (for development)
+- Docker and Docker Compose (for deployment)
+- Twitch Developer Account (for Twitch integration)
+
+### Development Setup
+
+1. Clone the repository
+   ```bash
+   git clone https://github.com/yourusername/zelan.git
+   cd zelan
+   ```
+
+2. Copy the example environment file
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Edit the .env file with your own settings
+   ```bash
+   # Set your Twitch credentials
+   TWITCH_CLIENT_ID=your_twitch_client_id
+   TWITCH_CLIENT_SECRET=your_twitch_client_secret
+   ```
+
+4. Build and run the project
+   ```bash
+   cargo run
+   ```
+
+### Docker Deployment
+
+1. Clone the repository
+   ```bash
+   git clone https://github.com/yourusername/zelan.git
+   cd zelan
+   ```
+
+2. Build and run with Docker Compose
+   ```bash
+   docker-compose up -d
+   ```
+
+## API Documentation
+
+### REST API
+
+The REST API is available at `http://localhost:9001/api/v1` with the following endpoints:
+
+- **GET /api/v1/adapters** - List all adapters
+- **GET /api/v1/adapters/:name** - Get adapter details
+- **POST /api/v1/adapters/:name/connect** - Connect an adapter
+- **POST /api/v1/adapters/:name/disconnect** - Disconnect an adapter
+- **GET /api/v1/events** - Get event history
+- **GET /api/v1/stats** - Get event bus statistics
+
+### WebSocket API
+
+The WebSocket server is available at `ws://localhost:9000` and supports the following commands:
+
+- `ping` - Check connection
+- `subscribe.sources` - Subscribe to specific event sources
+- `subscribe.types` - Subscribe to specific event types
+- `unsubscribe.all` - Unsubscribe from all filters
+
+## Configuration
 
 ### Environment Variables
 
-Zelan requires environment variables for certain adapters to function properly. Copy the `.env.example` file to a new file named `.env` in the project root:
+See the `.env.example` file for a list of all available environment variables.
 
-```bash
-cp .env.example .env
-```
+### Configuration File
 
-Then edit the `.env` file to set the required values:
+The configuration is stored in a JSON file. The default location depends on the platform:
 
-#### Twitch Integration
+- **Linux**: `~/.config/zelan/config.json`
+- **macOS**: `~/Library/Application Support/zelan/config.json`
+- **Windows**: `%APPDATA%\zelan\config.json`
 
-To use the Twitch adapter, you need to obtain a Client ID:
+You can override the location with the `ZELAN_CONFIG_PATH` environment variable.
 
-1. Register a new application at the [Twitch Developer Console](https://dev.twitch.tv/console/apps)
-2. Set the OAuth Redirect URL to `http://localhost`
-3. Set your application's Category to "Other"
-4. After creating the application, copy the Client ID (not the Client Secret) to your `.env` file:
+## License
 
-```
-TWITCH_CLIENT_ID=your_client_id_here
-```
-
-Note: This project uses device code flow authentication, which is designed for desktop applications that cannot securely store client secrets.
-
-## WebSocket API
-
-Zelan provides a WebSocket API for real-time event streaming. The WebSocket server listens on port 8080 by default (configurable in the application settings).
-
-### Connecting to the WebSocket
-
-```javascript
-const ws = new WebSocket('ws://localhost:8080');
-
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log(`Received ${data.event_type} from ${data.source}`);
-  console.log('Payload:', data.payload);
-};
-```
-
-### Event Filtering
-
-Clients can filter which events they receive using subscription commands:
-
-```javascript
-// Subscribe to only Twitch stream events
-ws.send(JSON.stringify({
-  command: 'subscribe.types',
-  data: ['stream.online', 'stream.offline']
-}));
-
-// Subscribe to only events from specific sources
-ws.send(JSON.stringify({
-  command: 'subscribe.sources',
-  data: ['twitch']
-}));
-```
-
-### Test Client
-
-Zelan includes a browser-based WebSocket test client to help you explore the API and test your integrations. You can access it by opening `websocket-test-client.html` in your browser.
-
-For complete documentation of the WebSocket API, see [WebSocket API Documentation](docs/websocket-api.md).
+This project is licensed under the MIT License - see the LICENSE file for details.
