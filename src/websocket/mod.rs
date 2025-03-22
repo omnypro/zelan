@@ -1,8 +1,11 @@
+//! WebSocket server implementation
+
 mod server;
 mod client_preferences;
 
-pub use server::WebSocketServer;
-pub use client_preferences::WebSocketClientPreferences;
+// We'll implement these properly later
+// pub use server::WebSocketServer;
+// pub use client_preferences::WebSocketClientPreferences;
 
 /// Configuration for the WebSocket server
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

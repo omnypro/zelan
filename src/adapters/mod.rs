@@ -1,3 +1,5 @@
+//! Service adapter implementations
+
 mod base;
 mod http_client;
 mod obs;
@@ -8,13 +10,14 @@ mod twitch_auth;
 mod twitch_eventsub;
 
 // Export the adapter trait and implementations
-pub use base::BaseAdapter;
-pub use obs::ObsAdapter;
-pub use test::TestAdapter;
-pub use twitch::TwitchAdapter;
+// These are just placeholders for now, we'll implement them properly later
+// pub use base::BaseAdapter;
+// pub use obs::ObsAdapter;
+// pub use test::TestAdapter;
+// pub use twitch::TwitchAdapter;
 
 // Re-export the HTTP client for use in adapters
-pub use http_client::{HttpClient, MockHttpClient, ReqwestHttpClient, SimpleHttpResponse};
+// pub use http_client::{HttpClient, MockHttpClient, ReqwestHttpClient, SimpleHttpResponse};
 
 // Export trait for adapter implementations
 use async_trait::async_trait;

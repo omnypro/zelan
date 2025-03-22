@@ -1,8 +1,12 @@
+//! Core service implementation
+
 mod event_bus;
 mod service;
 
-pub use event_bus::{EventBus, EventBusStats, StreamEvent};
-pub use service::{StreamService, ServiceStatus, AdapterSettings};
+// We'll implement these properly later
+pub use service::StreamService;
+// pub use event_bus::{EventBus, EventBusStats, StreamEvent};
+// pub use service::{ServiceStatus, AdapterSettings};
 
 // Re-export constants for default values
 pub const EVENT_BUS_CAPACITY: usize = 1000;
