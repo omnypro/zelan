@@ -2109,9 +2109,25 @@ impl Clone for TwitchAdapter {
         // Create a new instance with the same event bus
         let event_bus = self.base.event_bus();
 
-        // IMPORTANT: Instead of creating a completely fresh auth manager,
-        // we'll use the same shared Arc to keep the same auth manager instance
-        // This ensures callbacks stay registered across clones
+        // CRITICAL: Maintaining callback integrity across async boundaries
+        //
+        // This was the source of a significant bug where EventSub wasn't activating
+        // on initial authentication. The issue was that we were creating a fresh auth
+        // manager for each clone, which meant:
+        //
+        // 1. Callbacks registered on the original instance were lost in the clones
+        // 2. Auth events weren't propagating to the reactive handlers
+        // 3. The EventSub activation which depended on auth callbacks wasn't triggered
+        //
+        // The fix is to share the SAME auth_manager instance across all clones
+        // using Arc::clone() instead of creating a new instance. This ensures:
+        //
+        // 1. All auth callbacks remain registered no matter which clone processes an event
+        // 2. The reactive architecture works properly, with auth events triggering appropriate actions
+        // 3. EventSub activation happens automatically in response to auth events
+        //
+        // This pattern should be used for ALL adapter types with callbacks or shared state!
+        
         Self {
             base: self.base.clone(),
             config: Arc::clone(&self.config),

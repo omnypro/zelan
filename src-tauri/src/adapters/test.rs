@@ -19,7 +19,7 @@ pub struct TestAdapter {
     /// Base adapter implementation
     base: BaseAdapter,
     /// Configuration specific to the TestAdapter
-    config: RwLock<TestConfig>,
+    config: Arc<RwLock<TestConfig>>,
 }
 
 /// Configuration for the test adapter
@@ -90,7 +90,7 @@ impl TestAdapter {
         info!("Creating new test adapter");
         Self {
             base: BaseAdapter::new("test", event_bus),
-            config: RwLock::new(TestConfig::default()),
+            config: Arc::new(RwLock::new(TestConfig::default())),
         }
     }
 
@@ -103,7 +103,7 @@ impl TestAdapter {
         );
         Self {
             base: BaseAdapter::new("test", event_bus),
-            config: RwLock::new(config),
+            config: Arc::new(RwLock::new(config)),
         }
     }
 
@@ -340,18 +340,17 @@ impl Clone for TestAdapter {
         // Create a new instance with the same event bus
         let event_bus = self.base.event_bus();
         
-        // For tests, we need a very fast interval to ensure events are generated quickly
-        // This is a key fix - the default interval might be too slow for tests
-        let config = TestConfig {
-            interval_ms: 20, // Very fast event generation (20ms interval = 50 per second)
-            generate_special_events: true,
-        };
-        
-        info!("Cloning TestAdapter with fast interval: {}ms", config.interval_ms);
+        // IMPORTANT: Don't create a new config with hardcoded values - this would
+        // break reactive configuration changes. Instead, share the same config lock.
+        // This ensures all clones observe the same configuration state and callbacks
+        // are maintained across clone boundaries.
+        //
+        // Previously, this was creating a new RwLock with hardcoded config values,
+        // which broke reactive patterns as config changes didn't propagate to clones.
         
         Self {
-            base: BaseAdapter::new("test", event_bus),
-            config: RwLock::new(config),
+            base: self.base.clone(), // Use BaseAdapter's clone implementation
+            config: Arc::clone(&self.config), // Share the same config instance
         }
     }
 }

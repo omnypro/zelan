@@ -107,6 +107,16 @@ This project requires environment variables for certain features to work properl
 - Follow 4-space indentation
 - Use structs and traits for adapter interfaces
 
+### Callback and Event Integrity
+- **CRITICAL**: When implementing Clone for adapters with callbacks, ensure the same callback instances are shared by using Arc::clone()
+- Never create new instances of objects that hold callbacks in Clone implementations
+- Wrap all shared state (RwLock, Mutex) in Arc to maintain shared access across clones
+- Always share the same instances of managers that hold callbacks (auth_manager, event_manager, etc.)
+- Use the pattern `x: Arc::clone(&self.x)` rather than creating new locks
+- Ensure reactive patterns preserve callback integrity across async tasks and clones
+- Be careful with event propagation across clone boundaries - events should reach all callback handlers
+- When debugging reactive system failures, check if events are correctly propagating to registered callbacks
+
 ### Twitch Integration
 - NEVER use `UserToken::from_existing_unchecked()`. Always use `UserToken::from_existing()` instead which performs proper validation.
 - Always ensure token expiration times are properly tracked and stored in TokenManager.

@@ -51,8 +51,8 @@ pub struct ObsAdapter {
     name: String,
     event_bus: Arc<EventBus>,
     connected: AtomicBool,
-    client: Mutex<Option<Arc<Client>>>,
-    config: RwLock<ObsConfig>,
+    client: Arc<Mutex<Option<Arc<Client>>>>,
+    config: Arc<RwLock<ObsConfig>>,
     event_handler: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     shutdown_signal: Mutex<Option<mpsc::Sender<()>>>,
 }
@@ -63,8 +63,8 @@ impl ObsAdapter {
             name: "obs".to_string(),
             event_bus,
             connected: AtomicBool::new(false),
-            client: Mutex::new(None),
-            config: RwLock::new(ObsConfig::default()),
+            client: Arc::new(Mutex::new(None)),
+            config: Arc::new(RwLock::new(ObsConfig::default())),
             event_handler: Mutex::new(None),
             shutdown_signal: Mutex::new(None),
         }
@@ -76,8 +76,8 @@ impl ObsAdapter {
             name: "obs".to_string(),
             event_bus,
             connected: AtomicBool::new(false),
-            client: Mutex::new(None),
-            config: RwLock::new(config),
+            client: Arc::new(Mutex::new(None)),
+            config: Arc::new(RwLock::new(config)),
             event_handler: Mutex::new(None),
             shutdown_signal: Mutex::new(None),
         }
@@ -762,14 +762,30 @@ impl ServiceAdapter for ObsAdapter {
 
 impl Clone for ObsAdapter {
     fn clone(&self) -> Self {
+        // IMPORTANT: We must ensure shared state is properly maintained across clones,
+        // particularly for callback registration and stateful objects.
+        //
+        // Previously, this implementation was problematic because:
+        // 1. It was creating new RwLock instances instead of sharing existing ones
+        // 2. It was using blocking_read which can cause deadlocks in async contexts
+        // 3. State changes in one clone weren't visible in others
+        //
+        // The corrected pattern ensures:
+        // 1. All shared state is wrapped in Arc and the same instances are used across clones
+        // 2. Callbacks and event handlers remain registered and functional
+        // 3. Configuration changes are immediately visible to all clones
+        
         Self {
             name: self.name.clone(),
             event_bus: Arc::clone(&self.event_bus),
             connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
-            client: Mutex::new(None), // Don't clone the client itself
-            config: RwLock::new(self.config.blocking_read().clone()),
-            event_handler: Mutex::new(None), // Don't clone the task handle
-            shutdown_signal: Mutex::new(None), // Don't clone the shutdown signal
+            // Share the client Mutex to ensure all clones observe the same client state
+            client: Arc::clone(&self.client),
+            // Share the same config RwLock to maintain configuration consistency
+            config: Arc::clone(&self.config),
+            // The event handler and shutdown signal are task-specific and shouldn't be shared
+            event_handler: Mutex::new(None),
+            shutdown_signal: Mutex::new(None),
         }
     }
 }
