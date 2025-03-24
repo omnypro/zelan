@@ -18,7 +18,10 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 // use tokio::time::sleep;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
-use tracing::{debug, error, info, instrument, span, warn, Instrument, Level, trace};
+// Import tracing from external crate
+use ::tracing::{debug, error, info, warn, trace};
+use ::tracing::{instrument, span};
+use ::tracing::{Level, Instrument};
 
 // Re-export modules
 pub mod adapters;
@@ -26,9 +29,11 @@ pub mod auth;
 pub mod error;
 pub mod plugin;
 pub mod recovery;
+pub mod flow;
 
 pub use error::{ErrorCategory, ErrorCode, ErrorSeverity, RetryPolicy, ZelanError, ZelanResult};
 pub use recovery::{AdapterRecovery, RecoveryManager};
+pub use flow::TraceContext;
 
 // Import specific adapters for type casting in helper methods
 // use crate::adapters::twitch::TwitchAdapter;
@@ -95,6 +100,9 @@ pub struct StreamEvent {
     /// Unique event ID
     #[serde(default = "generate_uuid")]
     id: String,
+    /// Trace context for observability (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trace_context: Option<crate::flow::TraceContext>,
 }
 
 /// Default version for events
@@ -109,6 +117,7 @@ fn generate_uuid() -> String {
 }
 
 impl StreamEvent {
+    /// Create a new event without trace context
     pub fn new(source: &str, event_type: &str, payload: serde_json::Value) -> Self {
         Self {
             source: source.to_string(),
@@ -117,6 +126,20 @@ impl StreamEvent {
             timestamp: chrono::Utc::now(),
             version: default_version(),
             id: generate_uuid(),
+            trace_context: None,
+        }
+    }
+    
+    /// Create a new event with trace context
+    pub fn new_with_trace(source: &str, event_type: &str, payload: serde_json::Value, trace_context: crate::flow::TraceContext) -> Self {
+        Self {
+            source: source.to_string(),
+            event_type: event_type.to_string(),
+            payload,
+            timestamp: chrono::Utc::now(),
+            version: default_version(),
+            id: generate_uuid(),
+            trace_context: Some(trace_context),
         }
     }
 
@@ -133,6 +156,22 @@ impl StreamEvent {
     /// Get the payload
     pub fn payload(&self) -> &serde_json::Value {
         &self.payload
+    }
+    
+    /// Get the trace context if available
+    pub fn trace_context(&self) -> Option<&crate::flow::TraceContext> {
+        self.trace_context.as_ref()
+    }
+    
+    /// Get a mutable reference to the trace context
+    pub fn trace_context_mut(&mut self) -> Option<&mut crate::flow::TraceContext> {
+        self.trace_context.as_mut()
+    }
+    
+    /// Add trace context to an event
+    pub fn with_trace_context(mut self, trace_context: crate::flow::TraceContext) -> Self {
+        self.trace_context = Some(trace_context);
+        self
     }
 }
 
@@ -183,13 +222,26 @@ impl EventBus {
     }
 
     /// Publish an event to all subscribers with optimized statistics handling
-    #[instrument(skip(self, event), fields(source = %event.source(), event_type = %event.event_type()), level = "debug")]
+    #[instrument(skip(self, event), fields(source = %event.source(), event_type = %event.event_type(), trace_id = ?event.trace_context().map(|tc| tc.trace_id)), level = "debug")]
     pub async fn publish(&self, event: StreamEvent) -> ZelanResult<usize> {
         // Cache event details before acquiring lock
         let source = event.source.clone();
         let event_type = event.event_type.clone();
+        
+        // Add event bus span to trace context if present
+        let mut event = event;
+        let event_id = event.id.clone();
+        let subscribers = self.sender.receiver_count();
+        let trace_id = event.trace_context_mut().map(|tc| {
+            tc.add_span("publish", "EventBus")
+                .context(Some(serde_json::json!({
+                    "event_id": &event_id,
+                    "subscribers": subscribers
+                })));
+            tc.trace_id
+        });
 
-        debug!("Publishing event to bus");
+        debug!(trace_id = ?trace_id, "Publishing event to bus");
 
         // Attempt to send the event first (most common operation)
         match self.sender.send(event) {
@@ -264,6 +316,23 @@ impl EventBus {
     pub fn capacity(&self) -> usize {
         debug!(capacity = self.buffer_size, "Retrieved event bus capacity");
         self.buffer_size
+    }
+    
+    /// Publish an event with trace context
+    #[instrument(skip(self, event, trace), fields(trace_id = %trace.trace_id), level = "debug")]
+    pub async fn publish_with_trace(&self, mut event: StreamEvent, mut trace: crate::flow::TraceContext) -> ZelanResult<usize> {
+        // Add event bus span
+        trace.add_span("publish", "EventBus")
+            .context(Some(serde_json::json!({
+                "event_id": &event.id,
+                "subscribers": self.sender.receiver_count()
+            })));
+        
+        // Add trace to event
+        event = event.with_trace_context(trace);
+        
+        // Publish normally
+        self.publish(event).await
     }
 }
 

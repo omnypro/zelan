@@ -149,7 +149,20 @@ impl BaseAdapter {
             "Publishing event"
         );
 
-        let stream_event = StreamEvent::new(&self.name, event_type, payload);
+        // Create trace context for tracking this event's journey
+        let trace = crate::flow::TraceContext::new(self.name.clone(), event_type.to_string());
+        
+        // Add the initial span for adapter publishing
+        let mut trace = trace;
+        trace.add_span("create", &self.name)
+            .context(Some(serde_json::json!({
+                "adapter_connected": self.is_connected(),
+                "event_type": event_type
+            })));
+        
+        // Create the event with trace context
+        let stream_event = StreamEvent::new_with_trace(&self.name, event_type, payload, trace);
+        
         match self.event_bus.publish(stream_event).await {
             Ok(receivers) => {
                 debug!(

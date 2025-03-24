@@ -209,6 +209,9 @@ fn main() {
             plugin::send_test_event,
             plugin::set_websocket_port,
             plugin::update_adapter_settings,
+            plugin::get_recent_traces,
+            plugin::get_trace_by_id,
+            plugin::clear_traces,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1285,6 +1285,56 @@ pub async fn get_adapter_auth_status(
     }))
 }
 
+/// Get recent event traces
+#[tauri::command]
+pub async fn get_recent_traces(
+    limit: Option<usize>,
+) -> Result<Vec<crate::flow::TraceContext>, ZelanError> {
+    let registry = crate::flow::get_trace_registry();
+    let limit = limit.unwrap_or(10);
+    
+    // Get recent traces
+    let traces = registry.get_recent_traces(limit).await;
+    Ok(traces)
+}
+
+/// Get a specific trace by ID
+#[tauri::command]
+pub async fn get_trace_by_id(
+    trace_id: String,
+) -> Result<Option<crate::flow::TraceContext>, ZelanError> {
+    let registry = crate::flow::get_trace_registry();
+    
+    // Parse UUID from string
+    let trace_id = match uuid::Uuid::parse_str(&trace_id) {
+        Ok(id) => id,
+        Err(e) => {
+            return Err(ZelanError {
+                code: ErrorCode::ConfigInvalid,
+                message: "Invalid trace ID format".to_string(),
+                context: Some(e.to_string()),
+                severity: ErrorSeverity::Error,
+                category: Some(crate::ErrorCategory::Configuration),
+                error_id: None,
+            });
+        }
+    };
+    
+    // Get the trace
+    let trace = registry.get_trace(trace_id).await;
+    Ok(trace)
+}
+
+/// Clear all traces
+#[tauri::command]
+pub async fn clear_traces() -> Result<String, ZelanError> {
+    let registry = crate::flow::get_trace_registry();
+    
+    // Clear all traces
+    registry.clear().await;
+    Ok("Traces cleared successfully".to_string())
+}
+
 /// Initialize the Zelan state
 pub fn init_state() -> ZelanState {
     match ZelanState::new() {
