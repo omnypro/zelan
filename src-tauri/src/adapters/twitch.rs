@@ -663,84 +663,151 @@ impl TwitchAdapter {
 
         // Spawn a task to set up the auth callback asynchronously
         tauri::async_runtime::spawn(async move {
-            if let Ok(mut auth_manager) = adapter_clone.auth_manager.try_write() {
-                auth_manager.set_auth_callback(move |event| -> Result<()> {
-                    let event_type = match &event {
-                        AuthEvent::DeviceCodeReceived { .. } => "device_code",
-                        AuthEvent::AuthenticationSuccess => "success",
-                        AuthEvent::AuthenticationFailed { .. } => "failed",
-                        AuthEvent::TokenRefreshed => "token_refreshed",
-                        AuthEvent::TokenRefreshDetails { .. } => "token_refresh_details",
-                        AuthEvent::TokenExpired { .. } => "token_expired",
-                    };
+            // Make sure the auth_manager write lock is dropped before we use adapter_clone in the callback
+            let setup_result = {
+                let auth_manager_result = adapter_clone.auth_manager.try_write();
+                if let Ok(mut auth_manager) = auth_manager_result {
+                    // Create a clone specifically for the callback to avoid borrowing adapter_clone
+                    let adapter_for_callback = adapter_clone.clone();
+                    let event_bus_for_callback = event_bus_clone.clone();
+                    
+                    auth_manager.set_auth_callback(move |event| -> Result<()> {
+                        let event_type = match &event {
+                            AuthEvent::DeviceCodeReceived { .. } => "device_code",
+                            AuthEvent::AuthenticationSuccess => "success",
+                            AuthEvent::AuthenticationFailed { .. } => "failed",
+                            AuthEvent::TokenRefreshed => "token_refreshed",
+                            AuthEvent::TokenRefreshDetails { .. } => "token_refresh_details",
+                            AuthEvent::TokenExpired { .. } => "token_expired",
+                        };
 
-                    let payload = match event {
-                        AuthEvent::DeviceCodeReceived {
-                            verification_uri,
-                            user_code,
-                            expires_in,
-                        } => {
-                            json!({
-                                "event": "device_code_received",
-                                "verification_uri": verification_uri,
-                                "user_code": user_code,
-                                "expires_in": expires_in,
-                                "message": format!("Please visit {} and enter code: {}",
-                                                  verification_uri,
-                                                  user_code),
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })
-                        }
-                        AuthEvent::AuthenticationSuccess => {
-                            json!({
-                                "event": "authentication_success",
-                                "message": "Successfully authenticated with Twitch",
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })
-                        }
-                        AuthEvent::AuthenticationFailed { error } => {
-                            json!({
-                                "event": "authentication_failed",
-                                "error": error,
-                                "message": "Failed to authenticate with Twitch",
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })
-                        }
-                        AuthEvent::TokenRefreshed => {
-                            json!({
-                                "event": "token_refreshed",
-                                "message": "Successfully refreshed Twitch token",
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })
-                        }
-                        AuthEvent::TokenRefreshDetails { expires_in: _, payload } => {
-                            // Forward the payload from the auth manager
-                            payload.clone()
-                        }
-                        AuthEvent::TokenExpired { error } => {
-                            json!({
-                                "event": "token_expired",
-                                "message": "Token refresh failed, need to re-authenticate",
-                                "error": error,
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })
-                        }
-                    };
+                        let payload = match event {
+                            AuthEvent::DeviceCodeReceived {
+                                verification_uri,
+                                user_code,
+                                expires_in,
+                            } => {
+                                json!({
+                                    "event": "device_code_received",
+                                    "verification_uri": verification_uri,
+                                    "user_code": user_code,
+                                    "expires_in": expires_in,
+                                    "message": format!("Please visit {} and enter code: {}",
+                                                      verification_uri,
+                                                      user_code),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })
+                            }
+                            AuthEvent::AuthenticationSuccess => {
+                                // When authentication succeeds, trigger EventSub activation
+                                // Clone for the task
+                                let adapter_for_eventsub = adapter_for_callback.clone();
+                                
+                                // We cannot await here directly, so spawn a task to handle activation
+                                tauri::async_runtime::spawn(async move {
+                                    info!("Authentication success detected in callback - activating EventSub reactively");
+                                    
+                                    // First make sure EventSub is enabled in config
+                                    {
+                                        let mut config = adapter_for_eventsub.config.write().await;
+                                        if !config.use_eventsub {
+                                            info!("Enabling EventSub in config (was disabled)");
+                                            config.use_eventsub = true;
+                                        }
+                                    }
+                                    
+                                    // Attempt to start EventSub
+                                    match adapter_for_eventsub.start_eventsub().await {
+                                        Ok(_) => info!("Successfully activated EventSub reactively after authentication"),
+                                        Err(e) => warn!("Failed to activate EventSub reactively after authentication: {}", e)
+                                    }
+                                });
+                                
+                                json!({
+                                    "event": "authentication_success",
+                                    "message": "Successfully authenticated with Twitch",
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })
+                            }
+                            AuthEvent::AuthenticationFailed { error } => {
+                                json!({
+                                    "event": "authentication_failed",
+                                    "error": error,
+                                    "message": "Failed to authenticate with Twitch",
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })
+                            }
+                            AuthEvent::TokenRefreshed => {
+                                // When token is refreshed, ensure EventSub is active if needed
+                                // Clone for the task
+                                let adapter_for_eventsub = adapter_for_callback.clone();
+                                
+                                // Spawn a task to check and activate if needed
+                                tauri::async_runtime::spawn(async move {
+                                    // Check if we need to (re)start EventSub
+                                    let is_connected = adapter_for_eventsub.base.is_connected();
+                                    let use_eventsub = adapter_for_eventsub.config.read().await.use_eventsub;
+                                    
+                                    if is_connected && use_eventsub {
+                                        // Check current client state
+                                        let client_status = adapter_for_eventsub.eventsub_client.read().await
+                                            .as_ref()
+                                            .map(|client| client.is_connected());
+                                        
+                                        // If no client or client isn't connected, activate
+                                        if client_status.unwrap_or(false) == false {
+                                            info!("Token refreshed and EventSub not active - activating EventSub reactively");
+                                            match adapter_for_eventsub.start_eventsub().await {
+                                                Ok(_) => info!("Successfully activated EventSub after token refresh"),
+                                                Err(e) => warn!("Failed to activate EventSub after token refresh: {}", e)
+                                            }
+                                        }
+                                    }
+                                });
+                                
+                                json!({
+                                    "event": "token_refreshed",
+                                    "message": "Successfully refreshed Twitch token",
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })
+                            }
+                            AuthEvent::TokenRefreshDetails { expires_in: _, payload } => {
+                                // Forward the payload from the auth manager
+                                payload.clone()
+                            }
+                            AuthEvent::TokenExpired { error } => {
+                                json!({
+                                    "event": "token_expired",
+                                    "message": "Token refresh failed, need to re-authenticate",
+                                    "error": error,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })
+                            }
+                        };
 
-                    // Since we can't use await in this callback, we'll spawn a task to publish
-                    let event_type_str = format!("auth.{}", event_type);
-                    let event = StreamEvent::new("twitch", &event_type_str, payload);
+                        // Since we can't use await in this callback, we'll spawn a task to publish
+                        let event_type_str = format!("auth.{}", event_type);
+                        let event = StreamEvent::new("twitch", &event_type_str, payload);
 
-                    // Spawn a task to publish the event
-                    let event_bus = event_bus_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = event_bus.publish(event).await {
-                            error!("Failed to publish event: {}", e);
-                        }
+                        // Spawn a task to publish the event
+                        let event_bus = event_bus_for_callback.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = event_bus.publish(event).await {
+                                error!("Failed to publish event: {}", e);
+                            }
+                        });
+
+                        Ok(())
                     });
-
                     Ok(())
-                });
+                } else {
+                    Err(anyhow!("Failed to acquire auth manager write lock"))
+                }
+            };
+            
+            // Log any errors from the setup
+            if let Err(e) = setup_result {
+                error!("Failed to set up auth callback: {}", e);
             }
         });
 
@@ -773,12 +840,24 @@ impl TwitchAdapter {
                             }
                         }
                         
-                        // Start EventSub directly - the client itself now handles synchronization
-                        info!("Starting EventSub after token restoration");
-                        match adapter_clone.start_eventsub().await {
-                            Ok(_) => info!("Successfully started EventSub after token restoration"),
-                            Err(e) => info!("Note: EventSub start after token restoration returned: {}", e)
-                        };
+                        // Publish a token refresh event to trigger the auth callback's reactive behavior
+                        info!("Publishing token refresh event to activate EventSub after token restoration");
+                        
+                        // Trigger the TokenRefreshed event through the auth manager
+                        // This will cause the auth callback to activate EventSub reactively
+                        match adapter_clone.auth_manager.read().await.trigger_auth_event(AuthEvent::TokenRefreshed).await {
+                            Ok(_) => info!("Successfully triggered auth event for reactive EventSub activation"),
+                            Err(e) => {
+                                warn!("Failed to trigger auth event after token restoration: {}", e);
+                                
+                                // Fall back to direct activation as a safety measure
+                                info!("Falling back to direct EventSub activation");
+                                match adapter_clone.start_eventsub().await {
+                                    Ok(_) => info!("Successfully started EventSub after token restoration (fallback)"),
+                                    Err(err) => warn!("Failed to activate EventSub after token restoration: {}", err)
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         // Token validation failed, we need to notify the user
@@ -860,19 +939,8 @@ impl TwitchAdapter {
 
         info!("Starting Twitch authentication using device code flow");
 
-        // Create a safe clone with a shared auth_manager
-        // event_bus is declared but not used - might be needed for future implementation
-        let _event_bus = self.base.event_bus();
-        let self_clone = Self {
-            base: self.base.clone(),
-            config: Arc::clone(&self.config),
-            auth_manager: Arc::clone(&self.auth_manager), // Keep the same auth manager
-            api_client: self.api_client.clone(),
-            state: Arc::clone(&self.state),
-            token_manager: self.token_manager.clone(),
-            eventsub_client: Arc::clone(&self.eventsub_client),
-            recovery_manager: self.recovery_manager.clone(),
-        };
+        // Create a clone that shares the auth manager thanks to our improved Clone implementation
+        let self_clone = self.clone();
 
         // Start the authentication process in a background task to avoid blocking
         tauri::async_runtime::spawn(async move {
@@ -993,15 +1061,20 @@ impl TwitchAdapter {
                         info!("Successfully authenticated with Twitch!");
 
                         // Store the token in the auth manager
-                        if let Err(e) = self_clone
-                            .auth_manager
-                            .write()
-                            .await
-                            .set_token(token.clone())
-                        {
+                        let mut auth_manager = self_clone.auth_manager.write().await;
+                        if let Err(e) = auth_manager.set_token(token.clone()) {
                             error!("Failed to store token: {}", e);
                             return;
                         }
+                        
+                        // Explicitly trigger AuthenticationSuccess event to activate EventSub reactively
+                        if let Err(e) = auth_manager.trigger_auth_event(AuthEvent::AuthenticationSuccess).await {
+                            warn!("Failed to trigger auth success event: {}", e);
+                            // Continue anyway - the token is stored and we can still use it
+                        }
+                        
+                        // Release the lock
+                        drop(auth_manager);
 
                         // Extract tokens for config
                         let access_token = token.access_token.secret().to_string();
@@ -1231,23 +1304,10 @@ impl TwitchAdapter {
                         let auth_manager = self_clone.auth_manager.read().await;
                         if auth_manager.is_authenticated().await {
                             info!("Authentication state verified: is_authenticated=true");
-                            drop(auth_manager);
                             
-                            // Enable EventSub in config
-                            {
-                                let mut config = self_clone.config.write().await;
-                                if !config.use_eventsub {
-                                    info!("Enabling EventSub in config (was disabled)");
-                                    config.use_eventsub = true;
-                                }
-                            }
-                            
-                            // Start EventSub directly - the client itself handles synchronization now
-                            info!("Starting EventSub after successful authentication");
-                            match self_clone.start_eventsub().await {
-                                Ok(_) => info!("Successfully started EventSub after authentication"),
-                                Err(e) => info!("Note: EventSub start after auth returned: {}", e)
-                            };
+                            // No need to explicitly start EventSub here anymore:
+                            // The auth callback will trigger EventSub activation reactively
+                            // when it receives the AuthenticationSuccess event
                         } else {
                             warn!("Authentication state inconsistency: is_authenticated=false despite successful token");
                         }
@@ -2047,15 +2107,15 @@ impl ServiceAdapter for TwitchAdapter {
 impl Clone for TwitchAdapter {
     fn clone(&self) -> Self {
         // Create a new instance with the same event bus
-        let _event_bus = self.base.event_bus();
+        let event_bus = self.base.event_bus();
 
-        // Create a fresh auth manager to avoid blocking issues
-        // This is needed because we can't safely clone the auth manager's state
-        // in all contexts
+        // IMPORTANT: Instead of creating a completely fresh auth manager,
+        // we'll use the same shared Arc to keep the same auth manager instance
+        // This ensures callbacks stay registered across clones
         Self {
             base: self.base.clone(),
             config: Arc::clone(&self.config),
-            auth_manager: Arc::new(RwLock::new(TwitchAuthManager::new(String::new()))),
+            auth_manager: Arc::clone(&self.auth_manager), // Keep the SAME auth manager
             api_client: self.api_client.clone(),
             state: Arc::clone(&self.state),
             token_manager: self.token_manager.clone(),

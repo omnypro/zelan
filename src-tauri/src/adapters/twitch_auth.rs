@@ -181,6 +181,12 @@ impl TwitchAuthManager {
         }
         Ok(())
     }
+    
+    /// Manually trigger an auth event for reactive handling
+    pub async fn trigger_auth_event(&self, event: AuthEvent) -> Result<()> {
+        info!("Manually triggering auth event: {:?}", event);
+        self.send_event(event).await
+    }
 
     /// Get the scopes for Twitch authentication
     pub fn get_scopes(&self) -> Result<Vec<Scope>> {

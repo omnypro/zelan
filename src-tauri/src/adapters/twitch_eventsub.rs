@@ -521,6 +521,20 @@ impl EventSubClient {
 
         Ok(())
     }
+    
+    /// Check if the client is currently connected
+    pub fn is_connected(&self) -> bool {
+        // Since we can't easily await in this context, we'll use try_lock
+        // If we can't get the lock, we assume the connection is in use (likely connected)
+        if let Ok(conn) = self.connection.try_lock() {
+            // If we got the lock, check if the connection exists
+            conn.is_some()
+        } else {
+            // If we couldn't get the lock, the connection is being used,
+            // which generally means it's connected or in the process of connecting
+            true
+        }
+    }
 
     /// Connect to Twitch EventSub WebSocket
     async fn connect_to_eventsub(
