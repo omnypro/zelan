@@ -361,7 +361,7 @@ mod tests {
         // Create a new manager with these policies
         let manager = RecoveryManager {
             error_registry: Arc::new(ErrorRegistry::new(1000)),
-            circuit_breakers: RwLock::new(HashMap::new()),
+            circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             default_policies: custom_policies,
         };
 
@@ -476,7 +476,7 @@ mod tests {
         // Create a new manager with these policies
         let manager = RecoveryManager {
             error_registry: Arc::new(ErrorRegistry::new(1000)),
-            circuit_breakers: RwLock::new(HashMap::new()),
+            circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             default_policies: custom_policies,
         };
 

@@ -2107,7 +2107,7 @@ impl ServiceAdapter for TwitchAdapter {
 impl Clone for TwitchAdapter {
     fn clone(&self) -> Self {
         // Create a new instance with the same event bus
-        let event_bus = self.base.event_bus();
+        let _event_bus = self.base.event_bus();
 
         // CRITICAL: Maintaining callback integrity across async boundaries
         //
@@ -2138,6 +2138,43 @@ impl Clone for TwitchAdapter {
             eventsub_client: Arc::clone(&self.eventsub_client),
             recovery_manager: self.recovery_manager.clone(),
         }
+    }
+}
+
+// Add testing methods for TwitchAdapter
+impl TwitchAdapter {
+    /// Register auth callback for handling authentication events
+    /// This is primarily for testing, but could be used for custom integrations
+    pub async fn register_auth_callback<F>(&self, callback: F) -> Result<()>
+    where
+        F: Fn(AuthEvent) -> Result<()> + Send + Sync + 'static,
+    {
+        // Get a write lock on the auth manager
+        let mut auth_manager = self.auth_manager.write().await;
+        
+        // Set the callback
+        auth_manager.set_auth_callback(callback);
+        
+        Ok(())
+    }
+    
+    /// Trigger an auth event manually
+    /// This is primarily for testing the reactive callback mechanism
+    pub async fn trigger_auth_event(&self, event: AuthEvent) -> Result<()> {
+        // Get a read lock on the auth manager
+        let auth_manager = self.auth_manager.read().await;
+        
+        // Trigger the event manually
+        auth_manager.trigger_auth_event(event).await
+    }
+    
+    /// Get the current configuration as JSON
+    pub async fn get_config(&self) -> Result<Value> {
+        // Get a read lock on the config
+        let config = self.config.read().await;
+        
+        // Convert to JSON
+        Ok(config.to_json())
     }
 }
 

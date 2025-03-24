@@ -338,7 +338,7 @@ impl ServiceAdapter for TestAdapter {
 impl Clone for TestAdapter {
     fn clone(&self) -> Self {
         // Create a new instance with the same event bus
-        let event_bus = self.base.event_bus();
+        let _event_bus = self.base.event_bus();
         
         // IMPORTANT: Don't create a new config with hardcoded values - this would
         // break reactive configuration changes. Instead, share the same config lock.

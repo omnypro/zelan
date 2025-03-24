@@ -625,16 +625,8 @@ impl Default for TokenManager {
     }
 }
 
-// Allow cloning the TokenManager
-// This is safe because all state is stored in Arc<RwLock<>>
-impl Clone for TokenManager {
-    fn clone(&self) -> Self {
-        Self {
-            app: Arc::clone(&self.app),
-            tokens: Arc::clone(&self.tokens),
-        }
-    }
-}
+// The TokenManager already has a Clone implementation above
+// removed duplicate impl
 
 #[cfg(test)]
 mod tests {
