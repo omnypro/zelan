@@ -166,6 +166,24 @@ pub struct EventSubClient {
     token_hash: Arc<RwLock<Option<u64>>>,
 }
 
+impl Clone for EventSubClient {
+    fn clone(&self) -> Self {
+        // IMPORTANT: All fields that need to maintain state consistency
+        // are already wrapped in Arc, so we just need to clone those Arcs
+        // to preserve shared state, especially callbacks like token_refresher
+        Self {
+            event_bus: Arc::clone(&self.event_bus),
+            client_id: self.client_id.clone(),
+            connection: Arc::clone(&self.connection),
+            shutdown_tx: Arc::clone(&self.shutdown_tx),
+            user_id: Arc::clone(&self.user_id),
+            token: Arc::clone(&self.token),
+            token_refresher: Arc::clone(&self.token_refresher),
+            token_hash: Arc::clone(&self.token_hash),
+        }
+    }
+}
+
 // We're no longer parsing chat messages and just passing through the raw data
 
 impl EventSubClient {

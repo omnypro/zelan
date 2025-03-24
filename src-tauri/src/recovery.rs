@@ -12,9 +12,23 @@ pub struct RecoveryManager {
     /// Error registry for tracking errors
     error_registry: Arc<ErrorRegistry>,
     /// Circuit breakers for different operations
-    circuit_breakers: RwLock<HashMap<String, Arc<CircuitBreaker>>>,
+    /// Now wrapped in Arc to ensure shared state across clones
+    circuit_breakers: Arc<RwLock<HashMap<String, Arc<CircuitBreaker>>>>,
     /// Default retry policies for different error categories
     default_policies: HashMap<ErrorCategory, RetryPolicy>,
+}
+
+impl Clone for RecoveryManager {
+    fn clone(&self) -> Self {
+        // IMPORTANT: Maintain shared state across clones
+        // Both error_registry and circuit_breakers are wrapped in Arc
+        // to ensure all clones share the same state
+        Self {
+            error_registry: Arc::clone(&self.error_registry),
+            circuit_breakers: Arc::clone(&self.circuit_breakers),
+            default_policies: self.default_policies.clone(),
+        }
+    }
 }
 
 impl RecoveryManager {
@@ -58,7 +72,7 @@ impl RecoveryManager {
 
         Self {
             error_registry,
-            circuit_breakers: RwLock::new(HashMap::new()),
+            circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             default_policies,
         }
     }

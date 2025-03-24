@@ -123,6 +123,18 @@ pub struct TokenManager {
     tokens: Arc<RwLock<HashMap<String, TokenData>>>,
 }
 
+impl Clone for TokenManager {
+    fn clone(&self) -> Self {
+        // IMPORTANT: Properly share the same instances of RwLocks
+        // This ensures all clones have consistent state and can see
+        // updates made by any instance
+        Self {
+            app: Arc::clone(&self.app),
+            tokens: Arc::clone(&self.tokens),
+        }
+    }
+}
+
 impl TokenManager {
     /// Create a new token manager instance
     pub fn new() -> Self {
