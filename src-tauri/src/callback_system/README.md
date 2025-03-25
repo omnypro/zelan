@@ -104,6 +104,7 @@ impl MyAdapter {
 3. **Error Handling**: Robust error collection and reporting
 4. **Diagnostics**: Detailed logging for callback operations
 5. **Centralization**: Consistent approach across the codebase
+6. **Monitoring**: Statistics exposed via the WebSocket API (`callback.stats` command) and HTTP API (`/callbacks` endpoint)
 
 ## Implementation Details
 

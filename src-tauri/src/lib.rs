@@ -404,6 +404,7 @@ pub struct StreamService {
     ws_config: WebSocketConfig,
     pub token_manager: Arc<auth::TokenManager>,
     pub recovery_manager: Arc<RecoveryManager>,
+    pub callback_manager: Arc<CallbackManager>,
 }
 
 // Implement Clone for StreamService so it can be used in async contexts
@@ -419,6 +420,7 @@ impl Clone for StreamService {
             ws_config: self.ws_config.clone(),
             token_manager: self.token_manager.clone(),
             recovery_manager: self.recovery_manager.clone(),
+            callback_manager: self.callback_manager.clone(),
         }
     }
 }
@@ -430,6 +432,7 @@ impl StreamService {
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         let token_manager = Arc::new(auth::TokenManager::new());
         let recovery_manager = Arc::new(RecoveryManager::new());
+        let callback_manager = Arc::new(CallbackManager::new());
 
         Self {
             event_bus,
@@ -446,6 +449,7 @@ impl StreamService {
             },
             token_manager,
             recovery_manager,
+            callback_manager,
         }
     }
 
@@ -456,6 +460,7 @@ impl StreamService {
         let event_bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
         let token_manager = Arc::new(auth::TokenManager::new());
         let recovery_manager = Arc::new(RecoveryManager::new());
+        let callback_manager = Arc::new(CallbackManager::new());
 
         Self {
             event_bus,
@@ -467,6 +472,7 @@ impl StreamService {
             ws_config,
             token_manager,
             recovery_manager,
+            callback_manager,
         }
     }
 
@@ -483,6 +489,7 @@ impl StreamService {
         let adapter_settings = Arc::new(RwLock::new(config.adapters));
         let token_manager = Arc::new(auth::TokenManager::new());
         let recovery_manager = Arc::new(RecoveryManager::new());
+        let callback_manager = Arc::new(CallbackManager::new());
 
         Self {
             event_bus,
@@ -494,6 +501,7 @@ impl StreamService {
             ws_config: config.websocket,
             token_manager,
             recovery_manager,
+            callback_manager,
         }
     }
 
@@ -956,10 +964,11 @@ impl StreamService {
                                     let event_bus_clone = event_bus.clone();
                                     let ws_config_clone = ws_config.clone();
                                     let counter_clone = Arc::clone(&connection_count);
+                                    let callback_manager_clone = Arc::clone(&self.callback_manager);
                                     
                                     tauri::async_runtime::spawn(
                                         async move {
-                                            if let Err(e) = handle_websocket_client(stream, event_bus_clone, ws_config_clone).await {
+                                            if let Err(e) = handle_websocket_client(stream, event_bus_clone, ws_config_clone, callback_manager_clone).await {
                                                 error!(error = %e, client = %addr, "Error in WebSocket connection");
                                             }
                                             
@@ -1001,6 +1010,18 @@ impl StreamService {
         }
     }
 
+    /// Get statistics for all callback registries
+    #[instrument(skip(self), level = "debug")]
+    pub async fn get_callback_stats(&self) -> HashMap<String, usize> {
+        debug!("Retrieving callback statistics");
+        let stats = self.callback_manager.stats().await;
+        debug!(
+            registry_count = stats.len(),
+            "Retrieved callback statistics"
+        );
+        stats
+    }
+
     /// Start REST API for service control
     pub async fn start_http_api(&self) -> Result<()> {
         // Create shared state for the API handlers
@@ -1008,6 +1029,7 @@ impl StreamService {
             event_bus: self.event_bus.clone(),
             status: Arc::clone(&self.status),
             adapters: Arc::clone(&self.adapters),
+            callback_manager: Arc::clone(&self.callback_manager),
         };
 
         // Build our routes using Axum
@@ -1015,6 +1037,7 @@ impl StreamService {
             .route("/stats", get(get_stats_handler))
             .route("/events", get(stream_events_handler))
             .route("/status", get(get_status_handler))
+            .route("/callbacks", get(get_callback_stats_handler))
             .route("/adapters/:name/connect", post(connect_adapter_handler))
             .route(
                 "/adapters/:name/disconnect",
@@ -1042,6 +1065,7 @@ struct ApiState {
     event_bus: Arc<EventBus>,
     status: Arc<RwLock<HashMap<String, ServiceStatus>>>,
     adapters: Arc<RwLock<HashMap<String, Arc<Box<dyn ServiceAdapter>>>>>,
+    callback_manager: Arc<CallbackManager>,
 }
 
 // Wrapper type for anyhow::Error to implement IntoResponse
@@ -1079,6 +1103,11 @@ async fn stream_events_handler(State(state): State<ApiState>) -> impl IntoRespon
 async fn get_status_handler(State(state): State<ApiState>) -> Json<HashMap<String, ServiceStatus>> {
     let status_map = state.status.read().await.clone();
     Json(status_map)
+}
+
+async fn get_callback_stats_handler(State(state): State<ApiState>) -> Json<HashMap<String, usize>> {
+    let stats = state.callback_manager.stats().await;
+    Json(stats)
 }
 
 async fn connect_adapter_handler(
@@ -1206,8 +1235,8 @@ impl WebSocketClientPreferences {
 }
 
 /// Handler for WebSocket client connections
-#[instrument(skip(stream, event_bus, config), fields(client = ?stream.peer_addr().map_or("unknown".to_string(), |addr| addr.to_string())))]
-async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, config: WebSocketConfig) -> ZelanResult<()> {
+#[instrument(skip(stream, event_bus, config, callback_manager), fields(client = ?stream.peer_addr().map_or("unknown".to_string(), |addr| addr.to_string())))]
+async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, config: WebSocketConfig, callback_manager: Arc<CallbackManager>) -> ZelanResult<()> {
     // Get client IP for logging
     let peer_addr = stream
         .peer_addr()
@@ -1398,6 +1427,13 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                                                     }
                                                 } else if command == "info" {
                                                     // Send info about available commands
+                                                    // Get the number of event types being produced through the callback systems
+                                                    let callback_info = serde_json::json!({
+                                                        "twitch_auth": "Authentication events from Twitch - auth state changes, token refresh, etc.",
+                                                        "obs_events": "OBS scene changes, stream status, connection events",
+                                                        "test_events": "Test events (standard, special, initial)" 
+                                                    });
+                                                    
                                                     let info_json = serde_json::json!({
                                                         "success": true,
                                                         "command": "info",
@@ -1407,17 +1443,45 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                                                                 "info",
                                                                 "subscribe.sources",
                                                                 "subscribe.types",
-                                                                "unsubscribe.all"
+                                                                "unsubscribe.all",
+                                                                "callback.stats"
                                                             ],
                                                             "active_filters": {
                                                                 "filtering_active": preferences.filtering_active,
                                                                 "sources": preferences.source_filters,
                                                                 "types": preferences.type_filters
-                                                            }
+                                                            },
+                                                            "event_sources": [
+                                                                "twitch", 
+                                                                "obs", 
+                                                                "test"
+                                                            ],
+                                                            "callback_systems": callback_info
                                                         }
                                                     });
                                                     if let Err(e) = ws_sender.send(Message::Text(info_json.to_string().into())).await {
                                                         error!(error = %e, client = %peer_addr, "Error sending info response");
+                                                        break;
+                                                    }
+                                                } else if command == "callback.stats" {
+                                                    debug!(client = %peer_addr, "Retrieving callback statistics");
+                                                    
+                                                    // Get the callback statistics
+                                                    let stats = callback_manager.stats().await;
+                                                    
+                                                    // Send the statistics back to the client
+                                                    let stats_json = serde_json::json!({
+                                                        "success": true,
+                                                        "command": "callback.stats",
+                                                        "data": {
+                                                            "stats": stats,
+                                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                                            "description": "Number of callbacks registered per system"
+                                                        }
+                                                    });
+                                                    
+                                                    if let Err(e) = ws_sender.send(Message::Text(stats_json.to_string().into())).await {
+                                                        error!(error = %e, client = %peer_addr, "Error sending callback stats");
                                                         break;
                                                     }
                                                 } else {
