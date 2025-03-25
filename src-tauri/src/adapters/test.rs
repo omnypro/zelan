@@ -13,6 +13,9 @@ use tauri::async_runtime::RwLock;
 use tokio::time::sleep;
 use tracing::{debug, error, info, instrument, warn};
 
+// Import the callback registry for test events
+use crate::adapters::test_callback::{TestCallbackRegistry, TestEvent};
+
 /// A simple test adapter that generates events at regular intervals
 /// Useful for testing the event bus and WebSocket server without external services
 pub struct TestAdapter {
@@ -20,6 +23,8 @@ pub struct TestAdapter {
     base: BaseAdapter,
     /// Configuration specific to the TestAdapter
     config: Arc<RwLock<TestConfig>>,
+    /// Callback registry for test events
+    callbacks: Arc<TestCallbackRegistry>,
 }
 
 /// Configuration for the test adapter
@@ -91,6 +96,7 @@ impl TestAdapter {
         Self {
             base: BaseAdapter::new("test", event_bus),
             config: Arc::new(RwLock::new(TestConfig::default())),
+            callbacks: Arc::new(TestCallbackRegistry::new()),
         }
     }
 
@@ -104,7 +110,18 @@ impl TestAdapter {
         Self {
             base: BaseAdapter::new("test", event_bus),
             config: Arc::new(RwLock::new(config)),
+            callbacks: Arc::new(TestCallbackRegistry::new()),
         }
+    }
+    
+    /// Register a callback for test events
+    pub async fn register_test_callback<F>(&self, callback: F) -> Result<crate::callback_system::CallbackId>
+    where
+        F: Fn(TestEvent) -> Result<()> + Send + Sync + 'static,
+    {
+        let id = self.callbacks.register(callback).await;
+        info!(callback_id = %id, "Registered test event callback");
+        Ok(id)
     }
 
     /// Convert a JSON config to a TestConfig
@@ -119,6 +136,8 @@ impl TestAdapter {
         &self,
         mut shutdown_rx: tokio::sync::mpsc::Receiver<()>,
     ) -> Result<()> {
+        // Make a clone of the callbacks registry for use in the event generation loop
+        let callbacks = Arc::clone(&self.callbacks);
         // Force a log entry to confirm execution
         eprintln!("TEST ADAPTER: Starting test event generator");
         info!("Starting test event generator");
@@ -142,14 +161,31 @@ impl TestAdapter {
 
         // Force publish multiple initial events to make sure something happens
         for i in 0..3 {
+            let message = format!("Initial test event #{}", i);
             let payload = json!({
                 "counter": i,
-                "message": format!("Initial test event #{}", i),
+                "message": message.clone(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
-            if let Ok(receivers) = self.base.publish_event("test.initial", payload).await {
+            
+            // Publish to event bus
+            if let Ok(receivers) = self.base.publish_event("test.initial", payload.clone()).await {
                 eprintln!("TEST ADAPTER: Published initial event #{} to {} receivers", i, receivers);
             }
+            
+            // Also trigger callbacks
+            let callback_event = TestEvent::Initial {
+                counter: i,
+                message: message.clone(),
+                data: payload,
+            };
+            
+            if let Err(e) = callbacks.trigger(callback_event).await {
+                error!(error = %e, "Failed to trigger test initial event callbacks");
+            } else {
+                debug!(counter = i, "Triggered initial test event callbacks");
+            }
+            
             // Small delay between initial events
             sleep(Duration::from_millis(10)).await;
         }
@@ -184,9 +220,10 @@ impl TestAdapter {
             let config = self.config.read().await.clone();
 
             // Generate a test event
+            let message = format!("Test event #{}", counter);
             let payload = json!({
                 "counter": counter,
-                "message": format!("Test event #{}", counter),
+                "message": message.clone(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
 
@@ -194,7 +231,7 @@ impl TestAdapter {
 
             // Use BaseAdapter to publish the event
             // Publish the event and capture the result
-            let publish_result = self.base.publish_event("test.event", payload).await;
+            let publish_result = self.base.publish_event("test.event", payload.clone()).await;
             match publish_result {
                 Ok(receivers) => {
                     if receivers > 0 {
@@ -210,20 +247,34 @@ impl TestAdapter {
                     error!(error = %e, counter, "Failed to publish test event");
                 }
             }
+            
+            // Also trigger callbacks
+            let callback_event = TestEvent::Standard {
+                counter,
+                message: message.clone(),
+                data: payload,
+            };
+            
+            if let Err(e) = callbacks.trigger(callback_event).await {
+                error!(error = %e, counter, "Failed to trigger test event callbacks");
+            } else {
+                debug!(counter, "Triggered test event callbacks");
+            }
 
             // Generate a different event every 5 counts if enabled
             if config.generate_special_events && counter % 5 == 0 {
+                let special_message = "This is a special test event";
                 let special_payload = json!({
                     "counter": counter,
                     "special": true,
-                    "message": "This is a special test event",
+                    "message": special_message,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 });
 
                 debug!(counter, "Publishing special test event");
 
                 // Publish the special event and capture the result
-                let special_result = self.base.publish_event("test.special", special_payload).await;
+                let special_result = self.base.publish_event("test.special", special_payload.clone()).await;
                 match special_result {
                     Ok(receivers) => {
                         if receivers > 0 {
@@ -238,6 +289,19 @@ impl TestAdapter {
                         eprintln!("TEST ADAPTER: Failed to publish special event #{}: {}", counter, e);
                         error!(error = %e, counter, "Failed to publish special test event");
                     }
+                }
+                
+                // Also trigger callbacks for special event
+                let callback_event = TestEvent::Special {
+                    counter,
+                    message: special_message.to_string(),
+                    data: special_payload,
+                };
+                
+                if let Err(e) = callbacks.trigger(callback_event).await {
+                    error!(error = %e, counter, "Failed to trigger special test event callbacks");
+                } else {
+                    debug!(counter, "Triggered special test event callbacks");
                 }
             }
 
@@ -351,6 +415,7 @@ impl Clone for TestAdapter {
         Self {
             base: self.base.clone(), // Use BaseAdapter's clone implementation
             config: Arc::clone(&self.config), // Share the same config instance
+            callbacks: Arc::clone(&self.callbacks), // Share the same callback registry
         }
     }
 }

@@ -12,6 +12,9 @@ use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, instrument, warn, Instrument};
 
+// Import the callback registry for OBS events
+use crate::adapters::obs_callback::{ObsCallbackRegistry, ObsEvent};
+
 // Default connection settings
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: u16 = 4455;
@@ -55,6 +58,8 @@ pub struct ObsAdapter {
     config: Arc<RwLock<ObsConfig>>,
     event_handler: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     shutdown_signal: Mutex<Option<mpsc::Sender<()>>>,
+    /// Callback registry for OBS events
+    callbacks: Arc<ObsCallbackRegistry>,
 }
 
 impl ObsAdapter {
@@ -67,6 +72,7 @@ impl ObsAdapter {
             config: Arc::new(RwLock::new(ObsConfig::default())),
             event_handler: Mutex::new(None),
             shutdown_signal: Mutex::new(None),
+            callbacks: Arc::new(ObsCallbackRegistry::new()),
         }
     }
 
@@ -80,12 +86,23 @@ impl ObsAdapter {
             config: Arc::new(RwLock::new(config)),
             event_handler: Mutex::new(None),
             shutdown_signal: Mutex::new(None),
+            callbacks: Arc::new(ObsCallbackRegistry::new()),
         }
+    }
+    
+    /// Register a callback for OBS events
+    pub async fn register_obs_callback<F>(&self, callback: F) -> Result<crate::callback_system::CallbackId>
+    where
+        F: Fn(ObsEvent) -> Result<()> + Send + Sync + 'static,
+    {
+        let id = self.callbacks.register(callback).await;
+        info!(callback_id = %id, "Registered OBS event callback");
+        Ok(id)
     }
 
     /// Handles incoming OBS events and converts them to StreamEvents
     #[instrument(
-        skip(client, event_bus, config, connected, shutdown_rx),
+        skip(client, event_bus, config, connected, shutdown_rx, callbacks),
         level = "debug"
     )]
     async fn handle_obs_events(
@@ -94,6 +111,7 @@ impl ObsAdapter {
         config: ObsConfig,
         connected: Arc<AtomicBool>,
         mut shutdown_rx: mpsc::Receiver<()>,
+        callbacks: Arc<ObsCallbackRegistry>,
     ) -> Result<()> {
         // Set up OBS event listener
         let events = match client.events() {
@@ -174,11 +192,23 @@ impl ObsAdapter {
                             }
 
                             // Create and publish the event
-                            let stream_event = StreamEvent::new("obs", "scene.changed", payload);
+                            let stream_event = StreamEvent::new("obs", "scene.changed", payload.clone());
                             if let Err(e) = event_bus.publish(stream_event).await {
                                 error!(error = %e, "Failed to publish OBS scene change event");
                             } else {
                                 debug!(scene = %scene_name, "Published scene change event");
+                            }
+                            
+                            // Also trigger callbacks using the callback registry
+                            let callback_event = ObsEvent::SceneChanged { 
+                                scene_name: scene_name.clone(),
+                                data: payload,
+                            };
+                            
+                            if let Err(e) = callbacks.trigger(callback_event).await {
+                                error!(error = %e, "Failed to trigger OBS scene change callbacks");
+                            } else {
+                                debug!(scene = %scene_name, "Triggered scene change callbacks");
                             }
                         }
                         obws::events::Event::SceneItemEnableStateChanged {
@@ -225,9 +255,21 @@ impl ObsAdapter {
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             });
 
-                            let stream_event = StreamEvent::new("obs", event_type, payload);
+                            let stream_event = StreamEvent::new("obs", event_type, payload.clone());
                             if let Err(e) = event_bus.publish(stream_event).await {
                                 error!(error = %e, "Failed to publish OBS stream state event");
+                            }
+                            
+                            // Also trigger callbacks
+                            let callback_event = ObsEvent::StreamStateChanged { 
+                                active,
+                                data: payload,
+                            };
+                            
+                            if let Err(e) = callbacks.trigger(callback_event).await {
+                                error!(error = %e, "Failed to trigger OBS stream state callbacks");
+                            } else {
+                                debug!(active = active, "Triggered stream state callbacks");
                             }
                         }
                         obws::events::Event::RecordStateChanged { active, .. } => {
@@ -522,6 +564,7 @@ impl ServiceAdapter for ObsAdapter {
                 let client_clone = Arc::clone(&client);
                 let event_bus_clone = Arc::clone(&self.event_bus);
                 let config_clone = config.clone();
+                let callbacks_clone = Arc::clone(&self.callbacks);
 
                 let handle = tauri::async_runtime::spawn(
                     async move {
@@ -531,6 +574,7 @@ impl ServiceAdapter for ObsAdapter {
                             config_clone,
                             connected_flag,
                             shutdown_rx,
+                            callbacks_clone,
                         )
                         .await
                         {
@@ -550,11 +594,23 @@ impl ServiceAdapter for ObsAdapter {
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 });
 
-                let stream_event = StreamEvent::new("obs", "connection.established", payload);
+                let stream_event = StreamEvent::new("obs", "connection.established", payload.clone());
                 if let Err(e) = self.event_bus.publish(stream_event).await {
                     error!(error = %e, "Failed to publish OBS connection event");
                 } else {
                     debug!("Published OBS connection event");
+                }
+                
+                // Trigger connection callbacks
+                let callback_event = ObsEvent::ConnectionChanged {
+                    connected: true,
+                    data: payload,
+                };
+                
+                if let Err(e) = self.callbacks.trigger(callback_event).await {
+                    error!(error = %e, "Failed to trigger OBS connection callbacks");
+                } else {
+                    debug!("Triggered OBS connection callbacks");
                 }
 
                 Ok(())
@@ -786,6 +842,8 @@ impl Clone for ObsAdapter {
             // The event handler and shutdown signal are task-specific and shouldn't be shared
             event_handler: Mutex::new(None),
             shutdown_signal: Mutex::new(None),
+            // Share the callback registry to ensure callbacks are maintained across clones
+            callbacks: Arc::clone(&self.callbacks),
         }
     }
 }

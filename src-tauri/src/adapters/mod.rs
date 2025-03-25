@@ -1,7 +1,9 @@
 pub mod base;
 pub mod http_client;
 pub mod obs;
+pub mod obs_callback;
 pub mod test;
+pub mod test_callback;
 pub mod twitch;
 pub mod twitch_api;
 pub mod twitch_auth;
