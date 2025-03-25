@@ -198,6 +198,16 @@ pub struct TwitchAdapter {
 }
 
 impl TwitchAdapter {
+    /// Register a callback for auth events
+    pub async fn register_auth_callback<F>(&self, callback: F) -> Result<crate::callback_system::CallbackId>
+    where
+        F: Fn(AuthEvent) -> Result<()> + Send + Sync + 'static,
+    {
+        // Use the auth manager's register_auth_callback method directly with our new callback system
+        let auth_manager = self.auth_manager.read().await;
+        auth_manager.register_auth_callback(callback).await
+    }
+    
     /// Create a new Twitch adapter
     #[instrument(skip(event_bus), level = "debug")]
     pub fn new(event_bus: Arc<EventBus>) -> Self {
@@ -645,7 +655,7 @@ impl TwitchAdapter {
             }
         };
 
-        // Create adapter instance - we'll set the auth callback separately
+        // Create adapter instance - we'll set up the auth callback separately
         let adapter = Self {
             base: BaseAdapter::new("twitch", event_bus.clone()),
             config: Arc::new(RwLock::new(config.clone())),
@@ -663,15 +673,12 @@ impl TwitchAdapter {
 
         // Spawn a task to set up the auth callback asynchronously
         tauri::async_runtime::spawn(async move {
-            // Make sure the auth_manager write lock is dropped before we use adapter_clone in the callback
-            let setup_result = {
-                let auth_manager_result = adapter_clone.auth_manager.try_write();
-                if let Ok(mut auth_manager) = auth_manager_result {
-                    // Create a clone specifically for the callback to avoid borrowing adapter_clone
-                    let adapter_for_callback = adapter_clone.clone();
-                    let event_bus_for_callback = event_bus_clone.clone();
-                    
-                    auth_manager.set_auth_callback(move |event| -> Result<()> {
+            // Create a clone specifically for the callback
+            let adapter_for_callback = adapter_clone.clone();
+            let event_bus_for_callback = event_bus_clone.clone();
+            
+            // Register the callback using our callback system
+            let setup_result = adapter_clone.register_auth_callback(move |event| -> Result<()> {
                         let event_type = match &event {
                             AuthEvent::DeviceCodeReceived { .. } => "device_code",
                             AuthEvent::AuthenticationSuccess => "success",
@@ -798,16 +805,13 @@ impl TwitchAdapter {
                         });
 
                         Ok(())
-                    });
-                    Ok(())
-                } else {
-                    Err(anyhow!("Failed to acquire auth manager write lock"))
-                }
-            };
-            
+                    }).await;
+                    
             // Log any errors from the setup
             if let Err(e) = setup_result {
                 error!("Failed to set up auth callback: {}", e);
+            } else {
+                info!(callback_id = ?setup_result.ok(), "Successfully registered auth callback");
             }
         });
 
@@ -2143,21 +2147,6 @@ impl Clone for TwitchAdapter {
 
 // Add testing methods for TwitchAdapter
 impl TwitchAdapter {
-    /// Register auth callback for handling authentication events
-    /// This is primarily for testing, but could be used for custom integrations
-    pub async fn register_auth_callback<F>(&self, callback: F) -> Result<()>
-    where
-        F: Fn(AuthEvent) -> Result<()> + Send + Sync + 'static,
-    {
-        // Get a write lock on the auth manager
-        let mut auth_manager = self.auth_manager.write().await;
-        
-        // Set the callback
-        auth_manager.set_auth_callback(callback);
-        
-        Ok(())
-    }
-    
     /// Trigger an auth event manually
     /// This is primarily for testing the reactive callback mechanism
     pub async fn trigger_auth_event(&self, event: AuthEvent) -> Result<()> {

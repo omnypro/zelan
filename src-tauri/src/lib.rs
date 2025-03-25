@@ -26,6 +26,7 @@ use ::tracing::{Level, Instrument};
 // Re-export modules
 pub mod adapters;
 pub mod auth;
+pub mod callback_system;
 pub mod error;
 pub mod plugin;
 pub mod recovery;
@@ -34,6 +35,7 @@ pub mod flow;
 pub use error::{ErrorCategory, ErrorCode, ErrorSeverity, RetryPolicy, ZelanError, ZelanResult};
 pub use recovery::{AdapterRecovery, RecoveryManager};
 pub use flow::TraceContext;
+pub use callback_system::{CallbackRegistry, CallbackManager, CallbackData, CallbackId};
 
 // Import specific adapters for type casting in helper methods
 // use crate::adapters::twitch::TwitchAdapter;

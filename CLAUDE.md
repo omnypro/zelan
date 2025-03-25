@@ -18,6 +18,12 @@ We also completed the frontend refactoring:
 - Added proper TypeScript interfaces for all data structures
 - Designed desktop-style UI components (status indicators, notifications)
 
+We fixed critical issues with callback integrity:
+- Fixed EventSub activation not happening after initial authentication
+- Enhanced Clone implementations to maintain state and callback integrity
+- Added proper Arc wrapping for shared state across async boundaries
+- Documented patterns for maintaining reactive integrity
+
 ## Build Commands
 - `bun dev` - Start Vite development server
 - `bun tauri dev` - Start Tauri app in development mode
@@ -68,6 +74,13 @@ This project requires environment variables for certain features to work properl
 - Enhanced event filtering system with subscription capabilities
 - Support for 13 different Twitch EventSub event types
 
+### Reactive Architecture
+- Events trigger callbacks through well-defined channels
+- Authentication events trigger feature activation (e.g., EventSub)
+- Callbacks preserved across Clone boundaries through proper Arc sharing
+- Token refreshing automatically triggers appropriate state updates
+- Centralized EventBus for all internal communication
+
 ### Frontend Architecture
 - **Component-Based Structure**:
   - Modular components (Dashboard, Settings, ErrorNotification, etc.)
@@ -116,6 +129,46 @@ This project requires environment variables for certain features to work properl
 - Ensure reactive patterns preserve callback integrity across async tasks and clones
 - Be careful with event propagation across clone boundaries - events should reach all callback handlers
 - When debugging reactive system failures, check if events are correctly propagating to registered callbacks
+
+#### Proper Struct Design for Cloneable Types with Shared State
+- Always wrap RwLock and Mutex fields in Arc if the containing type might be cloned
+- Follow this pattern for field declarations:
+  ```rust
+  struct MyType {
+      // Good - wrapped in Arc for sharing across clones
+      field1: Arc<RwLock<SomeType>>, 
+      field2: Arc<Mutex<OtherType>>,
+      
+      // Bad - will create separate locks for each clone
+      bad_field: RwLock<SomeType>, 
+  }
+  ```
+- Implement Clone for types that might be shared across async tasks
+- For Clone implementations with callbacks, always use Arc::clone() to share the same callback instances:
+  ```rust
+  impl Clone for MyType {
+      fn clone(&self) -> Self {
+          Self {
+              field1: Arc::clone(&self.field1),
+              field2: Arc::clone(&self.field2),
+              // ... other fields
+          }
+      }
+  }
+  ```
+- Document the Clone behavior in comments to prevent future regressions
+
+### Event System Best Practices
+- Prefer reactive event-driven patterns over direct method calls for better decoupling
+- Use the EventBus for all inter-component communication
+- Create strongly-typed event definitions with clear documentation
+- Register callbacks at component initialization time
+- Use explicit event types rather than generic strings when possible
+- Implement diagnostic logging for event propagation in debug/development mode
+- Add event tracing for easier debugging of reactive chains
+- Ensure all callbacks are properly maintained across clone boundaries
+- Avoid duplicating event handlers - register them once and ensure proper sharing
+- When a reactive path isn't working, trace the entire event chain to find the break
 
 ### Twitch Integration
 - NEVER use `UserToken::from_existing_unchecked()`. Always use `UserToken::from_existing()` instead which performs proper validation.
