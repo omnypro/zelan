@@ -891,8 +891,10 @@ impl StreamService {
         // Store sender for later shutdown
         self.shutdown_sender = Some(shutdown_sender);
 
-        // Pass the WebSocket config
+        // Clone all necessary values before the async move block
         let ws_config = self.ws_config.clone();
+        let callback_manager = self.callback_manager.clone();
+        
         // Get the port for the span
         let ws_port = ws_config.port;
 
@@ -964,7 +966,7 @@ impl StreamService {
                                     let event_bus_clone = event_bus.clone();
                                     let ws_config_clone = ws_config.clone();
                                     let counter_clone = Arc::clone(&connection_count);
-                                    let callback_manager_clone = Arc::clone(&self.callback_manager);
+                                    let callback_manager_clone = callback_manager.clone();
                                     
                                     tauri::async_runtime::spawn(
                                         async move {

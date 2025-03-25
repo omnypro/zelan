@@ -122,3 +122,54 @@ The system uses a few key Rust patterns to ensure thread safety and proper shari
 2. Use descriptive group names for easier debugging
 3. Handle errors from trigger() properly in your code
 4. Consider using CallbackManager for applications with many different event types
+5. Monitor callback statistics via WebSocket API and HTTP endpoints
+
+## Monitoring
+
+The callback system provides monitoring endpoints to check the health and activity of registered callbacks:
+
+### WebSocket API
+
+Use the `callback.stats` command:
+
+```json
+{
+  "command": "callback.stats"
+}
+```
+
+The response includes counts of callbacks registered for each system:
+
+```json
+{
+  "success": true,
+  "command": "callback.stats",
+  "data": {
+    "stats": {
+      "twitch_auth": 2,
+      "obs_events": 3,
+      "test_events": 1
+    },
+    "timestamp": "2025-03-24T12:34:56.789Z",
+    "description": "Number of callbacks registered per system"
+  }
+}
+```
+
+### HTTP API
+
+Access callback statistics via the HTTP API endpoint:
+
+```
+GET /callbacks
+```
+
+This returns a JSON object with counts for each registry:
+
+```json
+{
+  "twitch_auth": 2,
+  "obs_events": 3,
+  "test_events": 1
+}
+```
