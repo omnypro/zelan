@@ -1,6 +1,12 @@
 // src/adapters/obs.rs
-use crate::{EventBus, ServiceAdapter, StreamEvent};
-use anyhow::{anyhow, Result};
+use crate::{
+    adapters::{
+        base::{AdapterConfig, BaseAdapter},
+        common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper},
+    },
+    EventBus, ServiceAdapter, StreamEvent,
+};
+use anyhow::Result;
 use async_trait::async_trait;
 use futures_util::{pin_mut, StreamExt};
 use obws::{client::ConnectConfig, requests::EventSubscription, Client};
@@ -20,7 +26,7 @@ const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: u16 = 4455;
 const DEFAULT_PASSWORD: &str = "";
 const RECONNECT_DELAY_MS: u64 = 5000;
-const SHUTDOWN_CHANNEL_SIZE: usize = 1;
+// SHUTDOWN_CHANNEL_SIZE not needed anymore since we use BaseAdapter
 
 /// Configuration for the OBS adapter
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -49,43 +55,104 @@ impl Default for ObsConfig {
     }
 }
 
+impl AdapterConfig for ObsConfig {
+    fn to_json(&self) -> serde_json::Value {
+        json!({
+            "host": self.host,
+            "port": self.port,
+            "password": self.password,
+            "auto_connect": self.auto_connect,
+            "include_scene_details": self.include_scene_details,
+        })
+    }
+
+    fn from_json(json: &serde_json::Value) -> Result<Self> {
+        let mut config = ObsConfig::default();
+        
+        // Extract host if provided
+        if let Some(host) = json.get("host").and_then(|v| v.as_str()) {
+            config.host = host.to_string();
+        }
+        
+        // Extract port if provided
+        if let Some(port) = json.get("port").and_then(|v| v.as_u64()) {
+            config.port = port as u16;
+        }
+        
+        // Extract password if provided
+        if let Some(password) = json.get("password").and_then(|v| v.as_str()) {
+            config.password = password.to_string();
+        }
+        
+        // Extract auto_connect if provided
+        if let Some(auto_connect) = json.get("auto_connect").and_then(|v| v.as_bool()) {
+            config.auto_connect = auto_connect;
+        }
+        
+        // Extract include_scene_details if provided
+        if let Some(include_scene_details) = json.get("include_scene_details").and_then(|v| v.as_bool()) {
+            config.include_scene_details = include_scene_details;
+        }
+        
+        Ok(config)
+    }
+    
+    fn adapter_type() -> &'static str {
+        "obs"
+    }
+    
+    fn validate(&self) -> Result<()> {
+        // Ensure port is in a reasonable range
+        if self.port == 0 {
+            return Err(AdapterError::config("Port cannot be 0").into());
+        }
+        
+        // Host cannot be empty
+        if self.host.is_empty() {
+            return Err(AdapterError::config("Host cannot be empty").into());
+        }
+        
+        Ok(())
+    }
+}
+
 /// OBS Studio adapter for connecting to OBS via its WebSocket API
 pub struct ObsAdapter {
-    name: String,
-    event_bus: Arc<EventBus>,
-    connected: AtomicBool,
+    /// Base adapter implementation
+    base: BaseAdapter,
+    /// OBS WebSocket client
     client: Arc<Mutex<Option<Arc<Client>>>>,
+    /// Configuration specific to the OBS adapter
     config: Arc<RwLock<ObsConfig>>,
-    event_handler: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
-    shutdown_signal: Mutex<Option<mpsc::Sender<()>>>,
     /// Callback registry for OBS events
     callbacks: Arc<ObsCallbackRegistry>,
 }
 
 impl ObsAdapter {
+    #[instrument(skip(event_bus), level = "debug")]
     pub fn new(event_bus: Arc<EventBus>) -> Self {
+        info!("Creating new OBS adapter");
         Self {
-            name: "obs".to_string(),
-            event_bus,
-            connected: AtomicBool::new(false),
+            base: BaseAdapter::new("obs", event_bus),
             client: Arc::new(Mutex::new(None)),
             config: Arc::new(RwLock::new(ObsConfig::default())),
-            event_handler: Mutex::new(None),
-            shutdown_signal: Mutex::new(None),
             callbacks: Arc::new(ObsCallbackRegistry::new()),
         }
     }
 
     /// Creates a new OBS adapter with the given configuration
+    #[instrument(skip(event_bus), level = "debug")]
     pub fn with_config(event_bus: Arc<EventBus>, config: ObsConfig) -> Self {
+        info!(
+            host = %config.host,
+            port = config.port,
+            auto_connect = config.auto_connect,
+            "Creating OBS adapter with custom config"
+        );
         Self {
-            name: "obs".to_string(),
-            event_bus,
-            connected: AtomicBool::new(false),
+            base: BaseAdapter::new("obs", event_bus),
             client: Arc::new(Mutex::new(None)),
             config: Arc::new(RwLock::new(config)),
-            event_handler: Mutex::new(None),
-            shutdown_signal: Mutex::new(None),
             callbacks: Arc::new(ObsCallbackRegistry::new()),
         }
     }
@@ -95,7 +162,27 @@ impl ObsAdapter {
     where
         F: Fn(ObsEvent) -> Result<()> + Send + Sync + 'static,
     {
+        // Record the callback registration in trace
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "register_obs_callback",
+            Some(json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
         let id = self.callbacks.register(callback).await;
+        
+        // Record successful registration in trace
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "register_obs_callback_success",
+            Some(json!({
+                "callback_id": id.to_string(),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
         info!(callback_id = %id, "Registered OBS event callback");
         Ok(id)
     }
@@ -107,8 +194,89 @@ impl ObsAdapter {
     
     /// Trigger an OBS event (useful for testing)
     pub async fn trigger_event(&self, event: ObsEvent) -> Result<()> {
-        self.callbacks.trigger(event).await?;
-        Ok(())
+        // Get event type before we move the event
+        let event_type = event.event_type();
+        
+        // Record the event trigger in trace
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "trigger_event",
+            Some(json!({
+                "event_type": event_type,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
+        // Set up retry options for triggering
+        let trigger_retry_options = RetryOptions::new(
+            2, // Max attempts
+            BackoffStrategy::Exponential {
+                base_delay: Duration::from_millis(10),
+                max_delay: Duration::from_millis(100),
+            },
+            true, // Add jitter
+        );
+        
+        // Clone the event for use in closure
+        let event_clone = event.clone();
+        
+        // Use retry for triggering event
+        let result = crate::adapters::common::with_retry(
+            "trigger_obs_event",
+            trigger_retry_options,
+            move |attempt| {
+                let event_for_attempt = event_clone.clone();
+                let callbacks = self.callbacks.clone();
+                async move {
+                    if attempt > 1 {
+                        debug!(attempt, "Retrying OBS event trigger");
+                    }
+                    match callbacks.trigger(event_for_attempt).await {
+                        Ok(count) => Ok(count),
+                        Err(e) => Err(AdapterError::from_anyhow_error(
+                            "event",
+                            format!("Failed to trigger OBS event: {}", e),
+                            e,
+                        ))
+                    }
+                }
+            }
+        ).await;
+        
+        match result {
+            Ok(count) => {
+                debug!(callbacks = count, "Triggered OBS event successfully");
+                
+                // Record successful event trigger in trace
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "trigger_event_success",
+                    Some(json!({
+                        "event_type": event_type,
+                        "callbacks_triggered": count,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                Ok(())
+            },
+            Err(e) => {
+                error!(error = %e, "Failed to trigger OBS event");
+                
+                // Record event trigger failure in trace
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "trigger_event_failure",
+                    Some(json!({
+                        "event_type": event_type,
+                        "error": e.to_string(),
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                Err(e.into())
+            }
+        }
     }
 
     /// Handles incoming OBS events and converts them to StreamEvents
@@ -124,12 +292,35 @@ impl ObsAdapter {
         mut shutdown_rx: mpsc::Receiver<()>,
         callbacks: Arc<ObsCallbackRegistry>,
     ) -> Result<()> {
+        // Record start of event handling in trace
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "handle_events_start",
+            Some(json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+    
         // Set up OBS event listener
         let events = match client.events() {
             Ok(events) => events,
             Err(e) => {
                 error!(error = %e, "Failed to create OBS event stream");
-                return Err(anyhow!("Failed to create OBS event stream: {}", e));
+                
+                // Record error in trace
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "event_stream_creation_error",
+                    Some(json!({
+                        "error": e.to_string(),
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                return Err(AdapterError::connection_with_source(
+                    format!("Failed to create OBS event stream: {}", e),
+                    e
+                ).into());
             }
         };
 
@@ -143,6 +334,17 @@ impl ObsAdapter {
                 // Check for shutdown signal
                 _ = shutdown_rx.recv() => {
                     info!("Received shutdown signal for OBS event handler");
+                    
+                    // Record shutdown in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "event_handler_shutdown",
+                        Some(json!({
+                            "reason": "shutdown_signal",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
                     break;
                 }
 
@@ -150,6 +352,17 @@ impl ObsAdapter {
                 _ = sleep(Duration::from_secs(5)) => {
                     if !connected.load(Ordering::SeqCst) {
                         info!("Connection flag set to false, stopping OBS event handler");
+                        
+                        // Record disconnection in trace
+                        TraceHelper::record_adapter_operation(
+                            "obs",
+                            "event_handler_shutdown",
+                            Some(json!({
+                                "reason": "disconnected",
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
                         break;
                     }
                     debug!("Connection check passed, OBS event handler still active");
@@ -173,6 +386,16 @@ impl ObsAdapter {
                         obws::events::Event::CurrentProgramSceneChanged { id } => {
                             let scene_name = id.name.clone();
                             debug!(scene = %scene_name, "OBS scene changed");
+                            
+                            // Record scene change in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "scene_changed",
+                                Some(json!({
+                                    "scene_name": scene_name,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
 
                             let mut payload = json!({
                                 "scene_name": scene_name,
@@ -182,44 +405,150 @@ impl ObsAdapter {
                             // If configured to include scene details, gather them
                             if config.include_scene_details {
                                 debug!("Fetching additional scene details");
-                                match client.scenes().list().await {
-                                    Ok(scene_list) => {
-                                        // Find the current scene in the list
-                                        if let Some(scene) =
-                                            scene_list.scenes.iter().find(|s| s.id.name == id.name)
-                                        {
-                                            // Add additional scene information
-                                            payload["scene_index"] = json!(scene.index);
-                                            debug!(
-                                                scene_index = scene.index,
-                                                "Added scene details"
-                                            );
+                                
+                                // Set up retry options for fetching scene details
+                                let scene_details_retry = RetryOptions::new(
+                                    2, // Max attempts
+                                    BackoffStrategy::Exponential {
+                                        base_delay: Duration::from_millis(10),
+                                        max_delay: Duration::from_millis(100),
+                                    },
+                                    true, // Add jitter
+                                );
+                                
+                                // Get a clone of the client for the closure
+                                let client_clone = client.clone();
+                                
+                                // Use retry for fetching scene details
+                                let scene_details_result = crate::adapters::common::with_retry(
+                                    "fetch_scene_details",
+                                    scene_details_retry,
+                                    move |attempt| {
+                                        let client_for_attempt = client_clone.clone();
+                                        let scene_name_for_attempt = id.name.clone();
+                                        async move {
+                                            if attempt > 1 {
+                                                debug!(attempt, "Retrying scene details fetch");
+                                            }
+                                            match client_for_attempt.scenes().list().await {
+                                                Ok(scene_list) => {
+                                                    if let Some(scene) = scene_list.scenes.iter()
+                                                        .find(|s| s.id.name == scene_name_for_attempt)
+                                                    {
+                                                        Ok(Some(scene.index))
+                                                    } else {
+                                                        Ok(None)
+                                                    }
+                                                },
+                                                Err(e) => Err(AdapterError::from_anyhow_error(
+                                                    "api",
+                                                    format!("Failed to fetch scene details: {}", e),
+                                                    anyhow::anyhow!("{}", e)
+                                                ))
+                                            }
                                         }
                                     }
+                                ).await;
+                                
+                                // Process the result
+                                match scene_details_result {
+                                    Ok(Some(scene_index)) => {
+                                        payload["scene_index"] = json!(scene_index);
+                                        debug!(scene_index, "Added scene details");
+                                    },
+                                    Ok(None) => {
+                                        debug!("Scene not found in scene list");
+                                    },
                                     Err(e) => {
-                                        warn!(error = %e, "Failed to fetch scene details");
+                                        warn!(error = %e, "Failed to fetch scene details after retries");
                                     }
                                 }
                             }
 
-                            // Create and publish the event
-                            let stream_event = StreamEvent::new("obs", "scene.changed", payload.clone());
-                            if let Err(e) = event_bus.publish(stream_event).await {
-                                error!(error = %e, "Failed to publish OBS scene change event");
-                            } else {
-                                debug!(scene = %scene_name, "Published scene change event");
+                            // Set up retry options for publishing events
+                            let publish_retry = RetryOptions::new(
+                                2, // Max attempts
+                                BackoffStrategy::Exponential {
+                                    base_delay: Duration::from_millis(10),
+                                    max_delay: Duration::from_millis(100),
+                                },
+                                true, // Add jitter
+                            );
+                            
+                            // Use retry for publishing event
+                            let event_bus_clone = event_bus.clone();
+                            let payload_clone = payload.clone();
+                            let publish_result = crate::adapters::common::with_retry(
+                                "publish_scene_change",
+                                publish_retry,
+                                move |attempt| {
+                                    let event_bus_for_attempt = event_bus_clone.clone();
+                                    let payload_for_attempt = payload_clone.clone();
+                                    async move {
+                                        if attempt > 1 {
+                                            debug!(attempt, "Retrying scene change event publication");
+                                        }
+                                        let stream_event = StreamEvent::new("obs", "scene.changed", payload_for_attempt);
+                                        match event_bus_for_attempt.publish(stream_event).await {
+                                            Ok(receivers) => Ok(receivers),
+                                            Err(e) => Err(AdapterError::from_anyhow_error(
+                                                "event",
+                                                format!("Failed to publish scene change event: {}", e),
+                                                anyhow::anyhow!("{}", e)
+                                            ))
+                                        }
+                                    }
+                                }
+                            ).await;
+                            
+                            // Process publish result
+                            match publish_result {
+                                Ok(receivers) => {
+                                    debug!(scene = %scene_name, receivers, "Published scene change event");
+                                },
+                                Err(e) => {
+                                    error!(error = %e, "Failed to publish OBS scene change event");
+                                }
                             }
                             
-                            // Also trigger callbacks using the callback registry
+                            // Also trigger callbacks with retry
                             let callback_event = ObsEvent::SceneChanged { 
                                 scene_name: scene_name.clone(),
                                 data: payload,
                             };
                             
-                            if let Err(e) = callbacks.trigger(callback_event).await {
-                                error!(error = %e, "Failed to trigger OBS scene change callbacks");
-                            } else {
-                                debug!(scene = %scene_name, "Triggered scene change callbacks");
+                            let callbacks_clone = callbacks.clone();
+                            let callback_event_clone = callback_event.clone();
+                            let trigger_result = crate::adapters::common::with_retry(
+                                "trigger_scene_change_callbacks",
+                                publish_retry,
+                                move |attempt| {
+                                    let callbacks_for_attempt = callbacks_clone.clone();
+                                    let event_for_attempt = callback_event_clone.clone();
+                                    async move {
+                                        if attempt > 1 {
+                                            debug!(attempt, "Retrying scene change callback trigger");
+                                        }
+                                        match callbacks_for_attempt.trigger(event_for_attempt).await {
+                                            Ok(count) => Ok(count),
+                                            Err(e) => Err(AdapterError::from_anyhow_error(
+                                                "event",
+                                                format!("Failed to trigger scene change callbacks: {}", e),
+                                                anyhow::anyhow!("{}", e)
+                                            ))
+                                        }
+                                    }
+                                }
+                            ).await;
+                            
+                            // Process trigger result
+                            match trigger_result {
+                                Ok(count) => {
+                                    debug!(scene = %scene_name, callbacks = count, "Triggered scene change callbacks");
+                                },
+                                Err(e) => {
+                                    error!(error = %e, "Failed to trigger OBS scene change callbacks");
+                                }
                             }
                         }
                         obws::events::Event::SceneItemEnableStateChanged {
@@ -504,8 +833,18 @@ impl ObsAdapter {
 impl ServiceAdapter for ObsAdapter {
     #[instrument(skip(self), fields(adapter = "obs"), level = "debug")]
     async fn connect(&self) -> Result<()> {
+        // Record the connect operation in trace
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "connect",
+            Some(json!({
+                "already_connected": self.base.is_connected(),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+    
         // Check if already connected
-        if self.connected.load(Ordering::SeqCst) {
+        if self.base.is_connected() {
             info!("OBS adapter is already connected");
             return Ok(());
         }
@@ -520,62 +859,129 @@ impl ServiceAdapter for ObsAdapter {
             "Connecting to OBS WebSocket"
         );
 
-        // Build the connection options - using password only if provided
-        let connect_opts = ConnectConfig {
-            host: config.host.clone(),
-            port: config.port,
-            password: if config.password.is_empty() {
-                debug!("No password provided for OBS connection");
-                None
-            } else {
-                debug!("Using password for OBS connection");
-                Some(config.password.clone())
+        // Set up retry options for OBS connection
+        let connect_retry_options = RetryOptions::new(
+            3, // Max attempts
+            BackoffStrategy::Exponential {
+                base_delay: Duration::from_millis(500),
+                max_delay: Duration::from_secs(5),
             },
-            event_subscriptions: Some(EventSubscription::ALL),
-            broadcast_capacity: 128,
-            connect_timeout: Duration::from_secs(10),
-            dangerous: None,
-        };
-
-        // Log the actual connection parameters to confirm they're being used
+            true, // Add jitter
+        );
+        
+        // Log the connection parameters
         debug!(
-            host = %connect_opts.host,
-            port = connect_opts.port,
-            "Using OBS connection parameters"
+            host = %config.host,
+            port = config.port,
+            password_provided = !config.password.is_empty(),
+            "Preparing OBS connection parameters"
         );
 
-        // Attempt to connect
-        match Client::connect_with_config(connect_opts).await {
-            Ok(client) => {
-                // Create Arc-wrapped client
-                let client = Arc::new(client);
+        // Use retry for connecting to OBS - we need to recreate the connect_opts in the closure
+        // because ConnectConfig doesn't implement Clone
+        let config_clone = config.clone();
+        let connect_result = crate::adapters::common::with_retry(
+            "connect_to_obs",
+            connect_retry_options,
+            move |attempt| {
+                // Recreate connection options for each attempt since it doesn't implement Clone
+                let config_for_attempt = config_clone.clone();
+                async move {
+                    if attempt > 1 {
+                        debug!(attempt, "Retrying OBS connection");
+                    }
+                    
+                    // Recreate the connection options for each attempt
+                    let connect_opts = ConnectConfig {
+                        host: config_for_attempt.host.clone(),
+                        port: config_for_attempt.port,
+                        password: if config_for_attempt.password.is_empty() {
+                            None
+                        } else {
+                            Some(config_for_attempt.password.clone())
+                        },
+                        event_subscriptions: Some(EventSubscription::ALL),
+                        broadcast_capacity: 128,
+                        connect_timeout: Duration::from_secs(10),
+                        dangerous: None,
+                    };
+                    
+                    match Client::connect_with_config(connect_opts).await {
+                        Ok(client) => Ok(Arc::new(client)),
+                        Err(e) => Err(AdapterError::connection_with_source(
+                            format!("Failed to connect to OBS WebSocket: {}", e),
+                            e
+                        ))
+                    }
+                }
+            }
+        ).await;
 
+        // Process connection result
+        match connect_result {
+            Ok(client) => {
                 // Store the client
                 *self.client.lock().await = Some(Arc::clone(&client));
 
-                // Mark as connected
-                self.connected.store(true, Ordering::SeqCst);
+                // Mark as connected using BaseAdapter
+                self.base.set_connected(true);
 
                 info!("Connected to OBS WebSocket server");
+                
+                // Record successful connection in trace
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "connect_success",
+                    Some(json!({
+                        "host": config.host,
+                        "port": config.port,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
 
-                // Publish initial state
-                match Self::publish_initial_state(&client, &self.event_bus).await {
-                    Ok(_) => debug!("Published initial OBS state"),
-                    Err(e) => error!(error = %e, "Failed to publish initial OBS state"),
+                // Publish initial state with retry
+                let client_clone = Arc::clone(&client);
+                let event_bus_clone = Arc::clone(&self.base.event_bus());
+                let initial_state_result = crate::adapters::common::with_retry(
+                    "publish_initial_state",
+                    RetryOptions::default(),
+                    move |attempt| {
+                        let client_for_attempt = client_clone.clone();
+                        let event_bus_for_attempt = event_bus_clone.clone();
+                        async move {
+                            if attempt > 1 {
+                                debug!(attempt, "Retrying initial state publication");
+                            }
+                            match Self::publish_initial_state(&client_for_attempt, &event_bus_for_attempt).await {
+                                Ok(_) => Ok(()),
+                                Err(e) => Err(AdapterError::from_anyhow_error(
+                                    "internal",
+                                    format!("Failed to publish initial OBS state: {}", e),
+                                    anyhow::anyhow!("{}", e)
+                                ))
+                            }
+                        }
+                    }
+                ).await;
+                
+                // Process initial state result
+                if let Err(e) = initial_state_result {
+                    error!(error = %e, "Failed to publish initial OBS state after retries");
+                } else {
+                    debug!("Published initial OBS state");
                 }
 
-                // Create channel for shutdown signaling
-                let (shutdown_tx, shutdown_rx) = mpsc::channel(SHUTDOWN_CHANNEL_SIZE);
-                *self.shutdown_signal.lock().await = Some(shutdown_tx);
+                // Create channel for shutdown signaling using BaseAdapter
+                let (_, shutdown_rx) = self.base.create_shutdown_channel().await;
 
-                // Create a separate Arc for the connected flag
-                let connected_flag = Arc::new(AtomicBool::new(true));
-
-                // Start event handler with proper Arc references
+                // Start event handler
                 let client_clone = Arc::clone(&client);
-                let event_bus_clone = Arc::clone(&self.event_bus);
+                let event_bus_clone = Arc::clone(&self.base.event_bus());
                 let config_clone = config.clone();
                 let callbacks_clone = Arc::clone(&self.callbacks);
+                
+                // Create a connected flag for the event handler
+                let connected_flag = Arc::new(AtomicBool::new(true));
 
                 let handle = tauri::async_runtime::spawn(
                     async move {
@@ -595,130 +1001,297 @@ impl ServiceAdapter for ObsAdapter {
                     .in_current_span(),
                 );
 
-                // Store the event handler
-                *self.event_handler.lock().await = Some(handle);
+                // Store the event handler using BaseAdapter
+                self.base.set_event_handler(handle).await;
 
-                // Publish connection success event
+                // Set up retry for publishing connection event
+                let event_bus_clone = Arc::clone(&self.base.event_bus());
                 let payload = json!({
                     "host": config.host,
                     "port": config.port,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 });
-
-                let stream_event = StreamEvent::new("obs", "connection.established", payload.clone());
-                if let Err(e) = self.event_bus.publish(stream_event).await {
-                    error!(error = %e, "Failed to publish OBS connection event");
-                } else {
-                    debug!("Published OBS connection event");
+                
+                let payload_clone = payload.clone();
+                let publish_result = crate::adapters::common::with_retry(
+                    "publish_connection_established",
+                    RetryOptions::default(),
+                    move |attempt| {
+                        let event_bus_for_attempt = event_bus_clone.clone();
+                        let payload_for_attempt = payload_clone.clone();
+                        async move {
+                            if attempt > 1 {
+                                debug!(attempt, "Retrying connection event publication");
+                            }
+                            let stream_event = StreamEvent::new("obs", "connection.established", payload_for_attempt);
+                            match event_bus_for_attempt.publish(stream_event).await {
+                                Ok(receivers) => Ok(receivers),
+                                Err(e) => Err(AdapterError::from_anyhow_error(
+                                    "event",
+                                    format!("Failed to publish connection event: {}", e),
+                                    anyhow::anyhow!("{}", e)
+                                ))
+                            }
+                        }
+                    }
+                ).await;
+                
+                // Process publish result
+                match publish_result {
+                    Ok(receivers) => {
+                        debug!(receivers, "Published OBS connection event");
+                    },
+                    Err(e) => {
+                        error!(error = %e, "Failed to publish OBS connection event after retries");
+                    }
                 }
                 
-                // Trigger connection callbacks
+                // Set up retry for triggering connection callbacks
+                let callbacks_clone = self.callbacks.clone();
                 let callback_event = ObsEvent::ConnectionChanged {
                     connected: true,
                     data: payload,
                 };
                 
-                if let Err(e) = self.callbacks.trigger(callback_event).await {
-                    error!(error = %e, "Failed to trigger OBS connection callbacks");
-                } else {
-                    debug!("Triggered OBS connection callbacks");
+                let callback_event_clone = callback_event.clone();
+                let trigger_result = crate::adapters::common::with_retry(
+                    "trigger_connection_callbacks",
+                    RetryOptions::default(),
+                    move |attempt| {
+                        let callbacks_for_attempt = callbacks_clone.clone();
+                        let event_for_attempt = callback_event_clone.clone();
+                        async move {
+                            if attempt > 1 {
+                                debug!(attempt, "Retrying connection callback trigger");
+                            }
+                            match callbacks_for_attempt.trigger(event_for_attempt).await {
+                                Ok(count) => Ok(count),
+                                Err(e) => Err(AdapterError::from_anyhow_error(
+                                    "event",
+                                    format!("Failed to trigger connection callbacks: {}", e),
+                                    anyhow::anyhow!("{}", e)
+                                ))
+                            }
+                        }
+                    }
+                ).await;
+                
+                // Process trigger result
+                match trigger_result {
+                    Ok(count) => {
+                        debug!(callbacks = count, "Triggered OBS connection callbacks");
+                    },
+                    Err(e) => {
+                        error!(error = %e, "Failed to trigger OBS connection callbacks after retries");
+                    }
                 }
 
                 Ok(())
             }
             Err(e) => {
-                let error_msg = format!("Failed to connect to OBS WebSocket: {}", e);
                 error!(
                     error = %e,
                     host = %config.host,
                     port = config.port,
-                    "Failed to connect to OBS WebSocket"
+                    "Failed to connect to OBS WebSocket after retries"
                 );
+                
+                // Record connection failure in trace
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "connect_failure",
+                    Some(json!({
+                        "host": config.host,
+                        "port": config.port,
+                        "error": e.to_string(),
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
 
-                // Publish connection failed event
-                let payload = json!({
-                    "host": config.host,
-                    "port": config.port,
-                    "error": error_msg.clone(),
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                });
-
-                let stream_event = StreamEvent::new("obs", "connection.failed", payload);
-                if let Err(publish_err) = self.event_bus.publish(stream_event).await {
+                // Set up retry for publishing failure event
+                let event_bus_clone = Arc::clone(&self.base.event_bus());
+                let error_clone = e.to_string();
+                let config_clone = config.clone();
+                
+                let publish_result = crate::adapters::common::with_retry(
+                    "publish_connection_failed",
+                    RetryOptions::default(),
+                    move |attempt| {
+                        let event_bus_for_attempt = event_bus_clone.clone();
+                        let error_for_attempt = error_clone.clone();
+                        let config_for_attempt = config_clone.clone();
+                        async move {
+                            if attempt > 1 {
+                                debug!(attempt, "Retrying connection failure event publication");
+                            }
+                            let payload = json!({
+                                "host": config_for_attempt.host,
+                                "port": config_for_attempt.port,
+                                "error": error_for_attempt,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            });
+                            
+                            let stream_event = StreamEvent::new("obs", "connection.failed", payload);
+                            match event_bus_for_attempt.publish(stream_event).await {
+                                Ok(receivers) => Ok(receivers),
+                                Err(e) => Err(AdapterError::from_anyhow_error(
+                                    "event",
+                                    format!("Failed to publish connection failure event: {}", e),
+                                    anyhow::anyhow!("{}", e)
+                                ))
+                            }
+                        }
+                    }
+                ).await;
+                
+                if let Err(publish_err) = publish_result {
                     error!(
                         error = %publish_err,
-                        "Failed to publish OBS connection failure event"
+                        "Failed to publish OBS connection failure event after retries"
                     );
                 } else {
                     debug!("Published OBS connection failure event");
                 }
 
-                Err(anyhow!(error_msg))
+                Err(e.into())
             }
         }
     }
 
     #[instrument(skip(self), fields(adapter = "obs"), level = "debug")]
     async fn disconnect(&self) -> Result<()> {
+        // Record the disconnect operation in trace
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "disconnect",
+            Some(json!({
+                "currently_connected": self.base.is_connected(),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
         // Only disconnect if currently connected
-        if !self.connected.load(Ordering::SeqCst) {
+        if !self.base.is_connected() {
             debug!("OBS adapter already disconnected");
             return Ok(());
         }
 
         info!("Disconnecting OBS adapter");
 
-        // Set disconnected state to stop event handling
-        self.connected.store(false, Ordering::SeqCst);
+        // Set disconnected state using BaseAdapter
+        self.base.set_connected(false);
 
-        // Send shutdown signal if exists
-        if let Some(shutdown_sender) = self.shutdown_signal.lock().await.take() {
-            debug!("Sending shutdown signal to OBS event handler");
-            if let Err(e) = shutdown_sender.send(()).await {
-                warn!(error = %e, "Failed to send shutdown signal to OBS event handler");
-            }
-            // Small delay to allow shutdown signal to be processed
-            sleep(Duration::from_millis(100)).await;
-        } else {
-            debug!("No shutdown signal channel available");
-        }
-
-        // Cancel the event handler task if it's still running
-        if let Some(handle) = self.event_handler.lock().await.take() {
-            // Simplest solution - just abort the task
-            debug!("Aborting OBS event handler task");
-            handle.abort();
-        } else {
-            debug!("No event handler task to abort");
+        // Stop the event handler (send shutdown signal and abort the task)
+        match self.base.stop_event_handler().await {
+            Ok(_) => debug!("Successfully stopped OBS event handler"),
+            Err(e) => warn!(error = %e, "Issues while stopping OBS event handler"),
         }
 
         // Clear the client
         *self.client.lock().await = None;
         debug!("Cleared OBS client reference");
 
-        // Publish disconnection event
-        let payload = json!({
-            "message": "Disconnected from OBS WebSocket",
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        });
-
-        let stream_event = StreamEvent::new("obs", "connection.closed", payload);
-        if let Err(e) = self.event_bus.publish(stream_event).await {
-            error!(error = %e, "Failed to publish OBS disconnection event");
-        } else {
-            debug!("Published OBS disconnection event");
+        // Set up retry for publishing disconnection event
+        let event_bus_clone = Arc::clone(&self.base.event_bus());
+        let publish_result = crate::adapters::common::with_retry(
+            "publish_disconnection_event",
+            RetryOptions::default(),
+            move |attempt| {
+                let event_bus_for_attempt = event_bus_clone.clone();
+                async move {
+                    if attempt > 1 {
+                        debug!(attempt, "Retrying disconnection event publication");
+                    }
+                    let payload = json!({
+                        "message": "Disconnected from OBS WebSocket",
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    });
+                    
+                    let stream_event = StreamEvent::new("obs", "connection.closed", payload);
+                    match event_bus_for_attempt.publish(stream_event).await {
+                        Ok(receivers) => Ok(receivers),
+                        Err(e) => Err(AdapterError::from_anyhow_error(
+                            "event",
+                            format!("Failed to publish disconnection event: {}", e),
+                            anyhow::anyhow!("{}", e)
+                        ))
+                    }
+                }
+            }
+        ).await;
+        
+        // Process publish result
+        match publish_result {
+            Ok(receivers) => {
+                debug!(receivers, "Published OBS disconnection event");
+            },
+            Err(e) => {
+                error!(error = %e, "Failed to publish OBS disconnection event after retries");
+            }
         }
+        
+        // Set up retry for triggering disconnection callbacks
+        let callbacks_clone = self.callbacks.clone();
+        let callback_event = ObsEvent::ConnectionChanged {
+            connected: false,
+            data: json!({
+                "message": "Disconnected from OBS WebSocket",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }),
+        };
+        
+        let callback_event_clone = callback_event.clone();
+        let trigger_result = crate::adapters::common::with_retry(
+            "trigger_disconnection_callbacks",
+            RetryOptions::default(),
+            move |attempt| {
+                let callbacks_for_attempt = callbacks_clone.clone();
+                let event_for_attempt = callback_event_clone.clone();
+                async move {
+                    if attempt > 1 {
+                        debug!(attempt, "Retrying disconnection callback trigger");
+                    }
+                    match callbacks_for_attempt.trigger(event_for_attempt).await {
+                        Ok(count) => Ok(count),
+                        Err(e) => Err(AdapterError::from_anyhow_error(
+                            "event",
+                            format!("Failed to trigger disconnection callbacks: {}", e),
+                            anyhow::anyhow!("{}", e)
+                        ))
+                    }
+                }
+            }
+        ).await;
+        
+        // Process trigger result
+        match trigger_result {
+            Ok(count) => {
+                debug!(callbacks = count, "Triggered OBS disconnection callbacks");
+            },
+            Err(e) => {
+                error!(error = %e, "Failed to trigger OBS disconnection callbacks after retries");
+            }
+        }
+        
+        // Record successful disconnection in trace
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "disconnect_success",
+            Some(json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
 
         info!("Disconnected from OBS WebSocket");
         Ok(())
     }
 
     fn is_connected(&self) -> bool {
-        self.connected.load(Ordering::SeqCst)
+        self.base.is_connected()
     }
 
     fn get_name(&self) -> &str {
-        &self.name
+        self.base.name()
     }
 
     #[instrument(skip(self, config), fields(adapter = "obs"), level = "debug")]
@@ -794,7 +1367,7 @@ impl ServiceAdapter for ObsAdapter {
         debug!("Updated OBS adapter configuration");
 
         // If connection settings changed and we're connected, disconnect and reconnect
-        if connection_settings_changed && self.connected.load(Ordering::SeqCst) {
+        if connection_settings_changed && self.base.is_connected() {
             info!(
                 host = %new_config.host,
                 port = new_config.port,
@@ -829,36 +1402,27 @@ impl ServiceAdapter for ObsAdapter {
 
 impl Clone for ObsAdapter {
     fn clone(&self) -> Self {
-        // IMPORTANT: We must ensure shared state is properly maintained across clones,
-        // particularly for callback registration and stateful objects.
-        //
-        // This is a proper implementation of Clone that ensures callback integrity.
+        // IMPORTANT: This is a proper implementation of Clone that ensures callback integrity.
         // When an adapter is cloned, it's essential that all shared state wrapped in
         // Arc is properly cloned with Arc::clone to maintain the same underlying instances.
         //
         // Common mistakes fixed here:
         // 1. Creating new RwLock/Mutex instances instead of sharing existing ones with Arc::clone
-        // 2. Using blocking_read/write which can cause deadlocks in async contexts
-        // 3. Not properly sharing callback registries between clones
+        // 2. Not properly sharing callback registries between clones
+        // 3. Creating multiple copies of event buses, configs, or other shared state
         //
-        // The correct pattern ensures:
-        // 1. All shared state is wrapped in Arc and the same instances are used across clones
-        // 2. Callbacks and event handlers remain registered and functional
-        // 3. Configuration changes are immediately visible to all clones
+        // The correct pattern is to use Arc::clone for ALL fields that contain
+        // state that should be shared between clones:
+        // 1. BaseAdapter contains the event bus and connection state - use its clone implementation
+        // 2. The client should be shared so all instances have the same connection
+        // 3. The config should be shared so configuration changes affect all clones
+        // 4. The callbacks registry must be shared so callbacks are maintained
         
         Self {
-            name: self.name.clone(),
-            event_bus: Arc::clone(&self.event_bus),
-            connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
-            // Share the client Mutex to ensure all clones observe the same client state
-            client: Arc::clone(&self.client),
-            // Share the same config RwLock to maintain configuration consistency
-            config: Arc::clone(&self.config),
-            // The event handler and shutdown signal are task-specific and shouldn't be shared
-            event_handler: Mutex::new(None),
-            shutdown_signal: Mutex::new(None),
-            // Share the callback registry to ensure callbacks are maintained across clones
-            callbacks: Arc::clone(&self.callbacks),
+            base: self.base.clone(), // Use BaseAdapter's clone implementation
+            client: Arc::clone(&self.client), // Share the same client
+            config: Arc::clone(&self.config), // Share the same config
+            callbacks: Arc::clone(&self.callbacks), // Share the same callback registry
         }
     }
 }

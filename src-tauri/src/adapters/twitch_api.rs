@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use twitch_api::helix::{channels::ChannelInformation, streams::Stream};
 use twitch_oauth2::{ClientId, UserToken};
 

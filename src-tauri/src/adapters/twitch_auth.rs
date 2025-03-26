@@ -402,7 +402,7 @@ impl TwitchAuthManager {
                 async move {
                     // Use the inner clones for the async block
                     let inner_self_clone = self_clone_inner.clone();
-                    let inner_token_clone = token_clone_inner.clone();
+                    let _inner_token_clone = token_clone_inner.clone();
                 
                 debug!(
                     attempt = attempt,
@@ -1090,9 +1090,10 @@ mod tests {
             "Expected error for invalid token without refresh"
         );
         let err = result.err().unwrap();
+        // The error message now indicates the token validation failure with our standardized format
         assert!(
-            err.to_string().contains("Need to re-authenticate"),
-            "Error message should indicate need to re-authenticate, got: {}",
+            err.to_string().contains("Token validation failed"),
+            "Error message should indicate token validation failure, got: {}",
             err
         );
 
