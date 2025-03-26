@@ -2,9 +2,8 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::async_runtime::RwLock;
-use tokio::time::timeout;
 use thiserror::Error;
+use tokio::sync::RwLock;
 use tracing::{debug, error, trace, warn};
 
 /// Errors that can occur during SharedState operations
@@ -19,24 +18,6 @@ pub enum LockError {
         context: String,
     },
 
-    /// Error during read lock operation
-    #[error("Failed to acquire read lock: {message}")]
-    ReadFailed {
-        /// Error message
-        message: String,
-        /// Additional context
-        context: Option<String>,
-    },
-
-    /// Error during write lock operation
-    #[error("Failed to acquire write lock: {message}")]
-    WriteFailed {
-        /// Error message
-        message: String,
-        /// Additional context
-        context: Option<String>,
-    },
-
     /// Attempted to access a value that wasn't initialized
     #[error("Cannot access uninitialized value")]
     Uninitialized,
@@ -48,96 +29,10 @@ pub enum LockError {
         message: String,
         /// Additional context
         context: Option<String>,
-        /// Whether this error is critical
-        critical: bool,
     },
 }
 
-impl LockError {
-    /// Create a new timeout error
-    pub fn timeout(duration: Duration, context: impl Into<String>) -> Self {
-        LockError::Timeout {
-            duration,
-            context: context.into(),
-        }
-    }
-
-    /// Create a new read failed error
-    pub fn read_failed(message: impl Into<String>) -> Self {
-        LockError::ReadFailed {
-            message: message.into(),
-            context: None,
-        }
-    }
-
-    /// Create a new read failed error with context
-    pub fn read_failed_with_context(message: impl Into<String>, context: impl Into<String>) -> Self {
-        LockError::ReadFailed {
-            message: message.into(),
-            context: Some(context.into()),
-        }
-    }
-
-    /// Create a new write failed error
-    pub fn write_failed(message: impl Into<String>) -> Self {
-        LockError::WriteFailed {
-            message: message.into(),
-            context: None,
-        }
-    }
-
-    /// Create a new write failed error with context
-    pub fn write_failed_with_context(message: impl Into<String>, context: impl Into<String>) -> Self {
-        LockError::WriteFailed {
-            message: message.into(),
-            context: Some(context.into()),
-        }
-    }
-
-    /// Create a new operation failed error
-    pub fn operation_failed(message: impl Into<String>) -> Self {
-        LockError::OperationFailed {
-            message: message.into(),
-            context: None,
-            critical: false,
-        }
-    }
-
-    /// Create a new operation failed error with context
-    pub fn operation_failed_with_context(message: impl Into<String>, context: impl Into<String>) -> Self {
-        LockError::OperationFailed {
-            message: message.into(),
-            context: Some(context.into()),
-            critical: false,
-        }
-    }
-
-    /// Create a new critical operation failed error
-    pub fn critical_operation_failed(message: impl Into<String>) -> Self {
-        LockError::OperationFailed {
-            message: message.into(),
-            context: None,
-            critical: true,
-        }
-    }
-
-    /// Returns true if this is a timeout error
-    pub fn is_timeout(&self) -> bool {
-        matches!(self, LockError::Timeout { .. })
-    }
-
-    /// Returns true if this is a critical error
-    pub fn is_critical(&self) -> bool {
-        match self {
-            LockError::OperationFailed { critical, .. } => *critical,
-            LockError::Uninitialized => true, // Uninitialized is always critical
-            _ => false,
-        }
-    }
-}
-
-/// A thread-safe wrapper around shared state with improved error handling
-/// and timeout capabilities for read/write operations
+/// A thread-safe wrapper around shared state
 #[derive(Clone)]
 pub struct SharedState<T>
 where
@@ -147,8 +42,6 @@ where
     inner: Arc<RwLock<T>>,
     /// Debug name for this shared state (used in logging)
     name: String,
-    /// Default timeout for operations
-    default_timeout: Duration,
 }
 
 impl<T> SharedState<T>
@@ -157,28 +50,17 @@ where
 {
     /// Create a new SharedState with the given initial value
     pub fn new(value: T) -> Self {
-        Self::with_name_and_timeout(value, "unnamed", Duration::from_secs(30))
+        Self::with_name(value, "unnamed")
     }
     
     /// Create a new SharedState with the given name
     pub fn with_name(value: T, name: impl Into<String>) -> Self {
-        Self::with_name_and_timeout(value, name, Duration::from_secs(30))
-    }
-    
-    /// Create a new SharedState with the given timeout
-    pub fn with_timeout(value: T, timeout_duration: Duration) -> Self {
-        Self::with_name_and_timeout(value, "unnamed", timeout_duration)
-    }
-    
-    /// Create a new SharedState with the given name and timeout
-    pub fn with_name_and_timeout(value: T, name: impl Into<String>, default_timeout: Duration) -> Self {
         let name = name.into();
         debug!(name = %name, "Creating new SharedState");
         
         Self {
             inner: Arc::new(RwLock::new(value)),
             name,
-            default_timeout,
         }
     }
     
@@ -187,128 +69,32 @@ where
         &self.name
     }
     
-    /// Get the default timeout for operations
-    pub fn default_timeout(&self) -> Duration {
-        self.default_timeout
-    }
-    
-    /// Set the default timeout for operations
-    pub fn set_default_timeout(&mut self, timeout: Duration) {
-        self.default_timeout = timeout;
-    }
-    
-    /// Get read access to the inner value with the default timeout
-    pub async fn read(&self) -> Result<T, LockError>
-    where
-        T: Clone,
-    {
-        self.read_with_timeout(self.default_timeout).await
-    }
-    
-    /// Get read access to the inner value with a specific timeout
-    pub async fn read_with_timeout(&self, timeout_duration: Duration) -> Result<T, LockError>
-    where
-        T: Clone,
-    {
-        trace!(name = %self.name, timeout_ms = ?timeout_duration.as_millis(), "Acquiring read lock");
-        
-        match timeout(timeout_duration, self.inner.read()).await {
-            Ok(guard) => {
-                trace!(name = %self.name, "Read lock acquired");
-                let value = guard.clone();
-                Ok(value)
-            },
-            Err(_) => {
-                error!(name = %self.name, timeout_ms = ?timeout_duration.as_millis(), "Timeout acquiring read lock");
-                Err(LockError::timeout(timeout_duration, format!("read lock on {}", self.name)))
-            }
-        }
-    }
-    
     /// Read the value, apply a function to produce a result, and return the result
-    pub async fn with_read<F, R>(&self, f: F) -> Result<R, LockError>
+    pub async fn read<F, R>(&self, f: F) -> Result<R, LockError>
     where
         F: FnOnce(&T) -> R,
+        R: Send + 'static,
     {
-        self.with_read_timeout(self.default_timeout, f).await
-    }
-    
-    /// Read the value with a specific timeout, apply a function to produce a result, and return the result
-    pub async fn with_read_timeout<F, R>(&self, timeout_duration: Duration, f: F) -> Result<R, LockError>
-    where
-        F: FnOnce(&T) -> R,
-    {
-        trace!(name = %self.name, timeout_ms = ?timeout_duration.as_millis(), "Acquiring read lock for function");
+        trace!(name = %self.name, "Acquiring read lock for function");
         
-        match timeout(timeout_duration, self.inner.read()).await {
-            Ok(guard) => {
-                trace!(name = %self.name, "Read lock acquired for function");
-                let result = f(&guard);
-                Ok(result)
-            },
-            Err(_) => {
-                error!(name = %self.name, timeout_ms = ?timeout_duration.as_millis(), "Timeout acquiring read lock for function");
-                Err(LockError::timeout(timeout_duration, format!("read lock on {}", self.name)))
-            }
-        }
+        let guard = self.inner.read().await;
+        trace!(name = %self.name, "Read lock acquired for function");
+        let result = f(&guard);
+        Ok(result)
     }
     
     /// Write to the value, apply a function to it, and return a result
-    pub async fn with_write<F, R>(&self, f: F) -> Result<R, LockError>
+    pub async fn write<F, R>(&self, f: F) -> Result<R, LockError>
     where
         F: FnOnce(&mut T) -> R,
+        R: Send + 'static,
     {
-        self.with_write_timeout(self.default_timeout, f).await
-    }
-    
-    /// Write to the value with a specific timeout, apply a function to it, and return a result
-    pub async fn with_write_timeout<F, R>(&self, timeout_duration: Duration, f: F) -> Result<R, LockError>
-    where
-        F: FnOnce(&mut T) -> R,
-    {
-        trace!(name = %self.name, timeout_ms = ?timeout_duration.as_millis(), "Acquiring write lock for function");
+        trace!(name = %self.name, "Acquiring write lock for function");
         
-        match timeout(timeout_duration, self.inner.write()).await {
-            Ok(mut guard) => {
-                trace!(name = %self.name, "Write lock acquired for function");
-                let result = f(&mut guard);
-                Ok(result)
-            },
-            Err(_) => {
-                error!(name = %self.name, timeout_ms = ?timeout_duration.as_millis(), "Timeout acquiring write lock for function");
-                Err(LockError::timeout(timeout_duration, format!("write lock on {}", self.name)))
-            }
-        }
-    }
-    
-    /// Read the value, apply a function that might return an error
-    pub async fn try_with_read<F, R, E>(&self, f: F) -> Result<R, LockError>
-    where
-        F: FnOnce(&T) -> Result<R, E>,
-        E: fmt::Display,
-    {
-        match self.with_read(|value| f(value)).await? {
-            Ok(result) => Ok(result),
-            Err(e) => {
-                warn!(name = %self.name, error = %e, "Operation failed during read access");
-                Err(LockError::operation_failed(e.to_string()))
-            }
-        }
-    }
-    
-    /// Write to the value, apply a function that might return an error
-    pub async fn try_with_write<F, R, E>(&self, f: F) -> Result<R, LockError>
-    where
-        F: FnOnce(&mut T) -> Result<R, E>,
-        E: fmt::Display,
-    {
-        match self.with_write(|value| f(value)).await? {
-            Ok(result) => Ok(result),
-            Err(e) => {
-                warn!(name = %self.name, error = %e, "Operation failed during write access");
-                Err(LockError::operation_failed(e.to_string()))
-            }
-        }
+        let mut guard = self.inner.write().await;
+        trace!(name = %self.name, "Write lock acquired for function");
+        let result = f(&mut guard);
+        Ok(result)
     }
     
     /// Get a clone of the inner value
@@ -316,12 +102,12 @@ where
     where
         T: Clone,
     {
-        self.read().await
+        self.read(|value| value.clone()).await
     }
     
     /// Set the inner value
     pub async fn set(&self, value: T) -> Result<(), LockError> {
-        self.with_write(|inner| *inner = value).await
+        self.write(|inner| *inner = value).await
     }
     
     /// Update the inner value using a function
@@ -329,20 +115,7 @@ where
     where
         F: FnOnce(&mut T),
     {
-        self.with_write(|inner| f(inner)).await
-    }
-    
-    /// Takes the inner value, replacing it with a default value
-    pub async fn take(&self) -> Result<T, LockError>
-    where
-        T: Default,
-    {
-        self.with_write(|inner| std::mem::take(inner)).await
-    }
-    
-    /// Replace the inner value, returning the old value
-    pub async fn replace(&self, value: T) -> Result<T, LockError> {
-        self.with_write(|inner| std::mem::replace(inner, value)).await
+        self.write(|inner| f(inner)).await
     }
 }
 
@@ -354,7 +127,6 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SharedState")
             .field("name", &self.name)
-            .field("default_timeout", &format!("{:?}", self.default_timeout))
             .field("inner", &format!("Arc<RwLock<{}>>", std::any::type_name::<T>()))
             .finish()
     }
@@ -404,7 +176,7 @@ where
     
     /// Check if the state is initialized
     pub async fn is_initialized(&self) -> Result<bool, LockError> {
-        self.inner.with_read(|opt| opt.is_some()).await
+        self.inner.read(|opt| opt.is_some()).await
     }
     
     /// Read the value, apply a function to produce a result, and return the result
@@ -412,8 +184,9 @@ where
     pub async fn with_read<F, R>(&self, f: F) -> Result<R, LockError>
     where
         F: FnOnce(&T) -> R,
+        R: Send + 'static,
     {
-        self.inner.with_read(|opt| {
+        self.inner.read(|opt| {
             match opt {
                 Some(value) => Ok(f(value)),
                 None => Err(LockError::Uninitialized),
@@ -426,8 +199,9 @@ where
     pub async fn with_write<F, R>(&self, f: F) -> Result<R, LockError>
     where
         F: FnOnce(&mut T) -> R,
+        R: Send + 'static,
     {
-        self.inner.with_write(|opt| {
+        self.inner.write(|opt| {
             match opt {
                 Some(value) => Ok(f(value)),
                 None => Err(LockError::Uninitialized),
@@ -437,14 +211,14 @@ where
     
     /// Initialize the state with a value
     pub async fn initialize(&self, value: T) -> Result<(), LockError> {
-        self.inner.with_write(|opt| {
+        self.inner.write(|opt| {
             *opt = Some(value);
         }).await
     }
     
     /// Initialize the state with a value if it's not already initialized
     pub async fn initialize_if_empty(&self, value: T) -> Result<bool, LockError> {
-        self.inner.with_write(|opt| {
+        self.inner.write(|opt| {
             if opt.is_none() {
                 *opt = Some(value);
                 true
@@ -465,7 +239,7 @@ where
     
     /// Clear the state
     pub async fn clear(&self) -> Result<(), LockError> {
-        self.inner.with_write(|opt| {
+        self.inner.write(|opt| {
             *opt = None;
         }).await
     }
@@ -473,7 +247,7 @@ where
     /// Take the value, leaving the state uninitialized
     /// Returns an error if the state is not initialized
     pub async fn take(&self) -> Result<T, LockError> {
-        self.inner.with_write(|opt| {
+        self.inner.write(|opt| {
             opt.take().ok_or(LockError::Uninitialized)
         }).await?
     }
@@ -525,7 +299,7 @@ where
     
     /// Check if the value is stale and needs to be refreshed
     pub async fn is_stale(&self) -> Result<bool, LockError> {
-        self.last_refreshed.with_read(|last| {
+        self.last_refreshed.read(|last| {
             match last {
                 Some(instant) => instant.elapsed() > self.max_age,
                 None => true, // If never refreshed, it's stale
@@ -539,7 +313,7 @@ where
         
         // Update the value and last_refreshed timestamp
         self.inner.set(new_value).await?;
-        let _ = self.last_refreshed.set(Some(std::time::Instant::now())).await;
+        self.last_refreshed.set(Some(std::time::Instant::now())).await?;
         
         Ok(())
     }
@@ -568,9 +342,10 @@ where
     pub async fn with_read<F, R>(&self, f: F) -> Result<R, LockError>
     where
         F: FnOnce(&T) -> R,
+        R: Send + 'static,
     {
         self.ensure_fresh().await?;
-        self.inner.with_read(f).await
+        self.inner.read(f).await
     }
     
     /// Get the maximum age before the value should be refreshed
@@ -605,26 +380,24 @@ where
     }
 }
 
-// Unit tests for SharedState
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
     
     #[tokio::test]
     async fn test_shared_state_basic() {
         let state = SharedState::new(42);
         
         // Read
-        let value = state.with_read(|v| *v).await.unwrap();
+        let value = state.read(|v| *v).await.unwrap();
         assert_eq!(value, 42);
         
         // Write
-        state.with_write(|v| *v = 99).await.unwrap();
+        state.write(|v| *v = 99).await.unwrap();
         
         // Read again
-        let value = state.with_read(|v| *v).await.unwrap();
+        let value = state.read(|v| *v).await.unwrap();
         assert_eq!(value, 99);
     }
     

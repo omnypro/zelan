@@ -6,7 +6,7 @@ use dashmap::{DashMap, DashSet};
 use thiserror::Error;
 use tracing::{debug, error, trace, warn};
 
-/// Errors that can occur during ConcurrentMap operations
+/// Errors that can occur during map operations
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum MapError {
     /// Key not found in the map
@@ -54,8 +54,8 @@ impl MapError {
     }
 }
 
-/// A thread-safe, concurrent key-value store with efficient read/write operations
-/// Backed by DashMap for high-performance concurrent access
+/// A thread-safe, concurrent key-value store
+/// This is a thin wrapper around DashMap
 #[derive(Clone)]
 pub struct ConcurrentMap<K, V> 
 where
@@ -183,30 +183,6 @@ where
         }
     }
     
-    /// Try to modify a value in the map with a function that might fail
-    pub fn try_modify<F, R, E>(&self, key: &K, f: F) -> Result<R, MapError>
-    where
-        F: FnOnce(&mut V) -> Result<R, E>,
-        E: fmt::Display,
-    {
-        match self.inner.get_mut(key) {
-            Some(mut entry) => {
-                trace!(name = %self.name, ?key, "Trying to modify value in map");
-                match f(&mut entry) {
-                    Ok(result) => Ok(result),
-                    Err(e) => {
-                        warn!(name = %self.name, ?key, error = %e, "Operation failed during modification");
-                        Err(MapError::operation_failed(e.to_string()))
-                    }
-                }
-            }
-            None => {
-                warn!(name = %self.name, ?key, "Key not found for modification");
-                Err(MapError::KeyNotFound)
-            }
-        }
-    }
-    
     /// Apply a function to all key-value pairs in the map
     pub fn for_each<F>(&self, mut f: F)
     where
@@ -251,10 +227,15 @@ where
         trace!(name = %self.name, "Getting all key-value pairs");
         self.inner.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
     }
+    
+    /// Get access to the inner DashMap for advanced operations
+    pub fn inner(&self) -> &Arc<DashMap<K, V>> {
+        &self.inner
+    }
 }
 
-/// A thread-safe, concurrent set implementation based on DashSet
-/// Provides high-performance concurrent operations on sets of values
+/// A thread-safe, concurrent set implementation
+/// This is a thin wrapper around DashSet
 #[derive(Clone)]
 pub struct ConcurrentSet<T>
 where
@@ -349,6 +330,11 @@ where
         trace!(name = %self.name, "Applying function to all values");
         self.inner.iter().for_each(|value| f(&*value));
     }
+    
+    /// Get access to the inner DashSet for advanced operations
+    pub fn inner(&self) -> &Arc<DashSet<T>> {
+        &self.inner
+    }
 }
 
 // Unit tests for ConcurrentMap and ConcurrentSet
@@ -399,6 +385,17 @@ mod tests {
         
         // Get after modification
         assert_eq!(map.get_cloned(&"key".to_string()), Some(15));
+    }
+    
+    #[tokio::test]
+    async fn test_concurrent_map_direct_access() {
+        let map = ConcurrentMap::<String, i32>::new();
+        
+        // Access directly through inner
+        map.inner().insert("direct".to_string(), 42);
+        
+        // Should be accessible through the wrapper methods
+        assert_eq!(map.get_cloned(&"direct".to_string()), Some(42));
     }
     
     #[tokio::test]

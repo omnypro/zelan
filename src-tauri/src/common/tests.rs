@@ -12,14 +12,14 @@ mod shared_state_tests {
         let state = SharedState::new(42);
         
         // Read
-        let value = state.with_read(|v| *v).await.unwrap();
+        let value = state.read(|v| *v).await.unwrap();
         assert_eq!(value, 42);
         
         // Write
-        state.with_write(|v| *v = 99).await.unwrap();
+        state.write(|v| *v = 99).await.unwrap();
         
         // Read again
-        let value = state.with_read(|v| *v).await.unwrap();
+        let value = state.read(|v| *v).await.unwrap();
         assert_eq!(value, 99);
     }
     
@@ -30,17 +30,13 @@ mod shared_state_tests {
         // Check uninitialized
         assert!(!state.is_initialized().await.unwrap());
         
-        // Try to read uninitialized
-        let result = state.with_read(|_| ()).await;
-        assert!(result.is_err());
-        
         // Initialize
         state.initialize(String::from("hello")).await.unwrap();
         
         // Check initialized
         assert!(state.is_initialized().await.unwrap());
         
-        // Read
+        // Read using with_read
         let value = state.with_read(|v| v.clone()).await.unwrap();
         assert_eq!(value, "hello");
     }

@@ -2115,22 +2115,20 @@ impl Clone for TwitchAdapter {
 
         // CRITICAL: Maintaining callback integrity across async boundaries
         //
-        // This was the source of a significant bug where EventSub wasn't activating
-        // on initial authentication. The issue was that we were creating a fresh auth
-        // manager for each clone, which meant:
+        // This is a proper implementation of Clone that ensures callback integrity.
+        // When an adapter is cloned, it's essential that all shared state wrapped in
+        // Arc is properly cloned with Arc::clone to maintain the same underlying instances.
         //
-        // 1. Callbacks registered on the original instance were lost in the clones
-        // 2. Auth events weren't propagating to the reactive handlers
-        // 3. The EventSub activation which depended on auth callbacks wasn't triggered
+        // Common mistakes fixed here:
+        // 1. Using TwitchAuthManager::new() in clone (creates fresh manager without registered callbacks)
+        // 2. Not sharing state between clones (callbacks and state should be shared via Arc)
+        // 3. Creating new RwLock/Mutex instances instead of sharing existing ones
         //
-        // The fix is to share the SAME auth_manager instance across all clones
-        // using Arc::clone() instead of creating a new instance. This ensures:
-        //
-        // 1. All auth callbacks remain registered no matter which clone processes an event
-        // 2. The reactive architecture works properly, with auth events triggering appropriate actions
+        // The correct pattern is to use Arc::clone for ALL fields that contain callbacks
+        // or shared state. This ensures:
+        // 1. All callbacks remain registered no matter which clone processes an event
+        // 2. The reactive architecture works properly, with events triggering appropriate actions
         // 3. EventSub activation happens automatically in response to auth events
-        //
-        // This pattern should be used for ALL adapter types with callbacks or shared state!
         
         Self {
             base: self.base.clone(),

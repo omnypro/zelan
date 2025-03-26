@@ -211,7 +211,7 @@ impl<T: Clone + Send + Sync + 'static> EventTypeRegistry<T> {
     
     /// Get the number of subscribers
     pub async fn subscriber_count(&self) -> Result<usize, EventRegistryError> {
-        let count = self.callbacks.with_read(|callbacks| callbacks.len()).await?;
+        let count = self.callbacks.read(|callbacks| callbacks.len()).await?;
         Ok(count)
     }
 }
@@ -221,7 +221,7 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
         let event_ref = &event as &dyn EventBase;
         
         // Get all callbacks
-        let callbacks = self.callbacks.with_read(|callbacks| {
+        let callbacks = self.callbacks.read(|callbacks| {
             callbacks.iter().map(|(id, callback)| (*id, Arc::clone(callback))).collect::<Vec<_>>()
         }).await?;
         
@@ -285,7 +285,7 @@ impl<T: Clone + Send + Sync + 'static> EventSubscriber<T> for EventTypeRegistry<
         let callback = Arc::new(Callback::new(callback));
         
         // Register the callback
-        match self.callbacks.with_write(|callbacks| {
+        match self.callbacks.write(|callbacks| {
             callbacks.insert(id, callback);
         }).await {
             Ok(()) => {
@@ -308,7 +308,7 @@ impl<T: Clone + Send + Sync + 'static> EventSubscriber<T> for EventTypeRegistry<
     }
     
     async fn unsubscribe(&self, id: SubscriptionId) -> bool {
-        match self.callbacks.with_write(|callbacks| {
+        match self.callbacks.write(|callbacks| {
             callbacks.remove(&id).is_some()
         }).await {
             Ok(removed) => {
@@ -381,7 +381,7 @@ impl EventRegistry {
         let type_id = TypeId::of::<T>();
         let type_name = std::any::type_name::<T>();
         
-        let result = self.registries.with_write(|registries| {
+        let result = self.registries.write(|registries| {
             // Check if registry exists
             if let Some(registry) = registries.get(&type_id) {
                 // Try to downcast
@@ -421,7 +421,7 @@ impl EventRegistry {
     
     /// Get registry statistics
     pub async fn stats(&self) -> Result<HashMap<String, usize>, EventRegistryError> {
-        self.registries.with_read(|registries| {
+        self.registries.read(|registries| {
             // Collect stats about each registry
             let mut stats = HashMap::new();
             

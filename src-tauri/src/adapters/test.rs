@@ -129,6 +129,17 @@ impl TestAdapter {
     pub fn config_from_json(config_json: &Value) -> Result<TestConfig> {
         TestConfig::from_json(config_json)
     }
+    
+    /// Get the current configuration
+    pub async fn get_config(&self) -> TestConfig {
+        self.config.read().await.clone()
+    }
+    
+    /// Trigger a test event (useful for testing)
+    pub async fn trigger_event(&self, event: TestEvent) -> Result<()> {
+        self.callbacks.trigger(event).await?;
+        Ok(())
+    }
 
     /// Generate test events at a regular interval
     #[instrument(skip(self, shutdown_rx), level = "debug")]
@@ -379,8 +390,21 @@ impl ServiceAdapter for TestAdapter {
     async fn configure(&self, config: serde_json::Value) -> Result<()> {
         info!("Configuring test adapter");
 
-        // Parse the config using our AdapterConfig trait implementation
-        let new_config = TestConfig::from_json(&config)?;
+        // Get the current configuration
+        let current = self.config.read().await.clone();
+        
+        // Create a new config that starts with current values
+        let mut new_config = current.clone();
+        
+        // Update only the fields that are provided in the input config
+        if let Some(interval_ms) = config.get("interval_ms").and_then(|v| v.as_u64()) {
+            // Ensure interval is reasonable (minimum 100ms, maximum 60000ms)
+            new_config.interval_ms = interval_ms.clamp(100, 60000);
+        }
+        
+        if let Some(generate_special) = config.get("generate_special_events").and_then(|v| v.as_bool()) {
+            new_config.generate_special_events = generate_special;
+        }
 
         // Validate the new configuration
         new_config.validate()?;
@@ -404,13 +428,20 @@ impl Clone for TestAdapter {
         // Create a new instance with the same event bus
         let _event_bus = self.base.event_bus();
         
-        // IMPORTANT: Don't create a new config with hardcoded values - this would
-        // break reactive configuration changes. Instead, share the same config lock.
-        // This ensures all clones observe the same configuration state and callbacks
-        // are maintained across clone boundaries.
+        // IMPORTANT: This is a proper implementation of Clone that ensures callback integrity.
+        // When an adapter is cloned, it's essential that all shared state wrapped in
+        // Arc is properly cloned with Arc::clone to maintain the same underlying instances.
         //
-        // Previously, this was creating a new RwLock with hardcoded config values,
-        // which broke reactive patterns as config changes didn't propagate to clones.
+        // Common mistakes fixed here:
+        // 1. Creating a new configuration instead of sharing existing one
+        // 2. Not sharing callback registry between clones
+        // 3. Creating new RwLock instances instead of sharing existing ones
+        //
+        // The correct pattern is to use Arc::clone for ALL fields that contain
+        // state that should be shared between clones:
+        // 1. The config field must be shared so configuration changes affect all clones
+        // 2. The callbacks registry must be shared so all callbacks are maintained
+        // 3. Any other state containers should be properly shared with Arc::clone
         
         Self {
             base: self.base.clone(), // Use BaseAdapter's clone implementation

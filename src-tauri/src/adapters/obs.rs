@@ -99,6 +99,17 @@ impl ObsAdapter {
         info!(callback_id = %id, "Registered OBS event callback");
         Ok(id)
     }
+    
+    /// Get the current configuration (useful for testing)
+    pub async fn get_config(&self) -> ObsConfig {
+        self.config.read().await.clone()
+    }
+    
+    /// Trigger an OBS event (useful for testing)
+    pub async fn trigger_event(&self, event: ObsEvent) -> Result<()> {
+        self.callbacks.trigger(event).await?;
+        Ok(())
+    }
 
     /// Handles incoming OBS events and converts them to StreamEvents
     #[instrument(
@@ -821,12 +832,16 @@ impl Clone for ObsAdapter {
         // IMPORTANT: We must ensure shared state is properly maintained across clones,
         // particularly for callback registration and stateful objects.
         //
-        // Previously, this implementation was problematic because:
-        // 1. It was creating new RwLock instances instead of sharing existing ones
-        // 2. It was using blocking_read which can cause deadlocks in async contexts
-        // 3. State changes in one clone weren't visible in others
+        // This is a proper implementation of Clone that ensures callback integrity.
+        // When an adapter is cloned, it's essential that all shared state wrapped in
+        // Arc is properly cloned with Arc::clone to maintain the same underlying instances.
         //
-        // The corrected pattern ensures:
+        // Common mistakes fixed here:
+        // 1. Creating new RwLock/Mutex instances instead of sharing existing ones with Arc::clone
+        // 2. Using blocking_read/write which can cause deadlocks in async contexts
+        // 3. Not properly sharing callback registries between clones
+        //
+        // The correct pattern ensures:
         // 1. All shared state is wrapped in Arc and the same instances are used across clones
         // 2. Callbacks and event handlers remain registered and functional
         // 3. Configuration changes are immediately visible to all clones
