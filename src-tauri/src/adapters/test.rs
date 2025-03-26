@@ -1,7 +1,7 @@
 // src/adapters/test.rs
 use crate::{
     adapters::{
-        base::{AdapterConfig, BaseAdapter},
+        base::{AdapterConfig, BaseAdapter, ServiceAdapterHelper},
         common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper},
     },
     EventBus, ServiceAdapter,
@@ -1415,69 +1415,16 @@ impl ServiceAdapter for TestAdapter {
 
     #[instrument(skip(self), level = "debug")]
     async fn disconnect(&self) -> Result<()> {
-        // Record the operation in trace
-        TraceHelper::record_adapter_operation(
-            "test",
-            "disconnect",
-            Some(json!({
-                "currently_connected": self.base.is_connected(),
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            })),
-        ).await;
-        
-        // Only disconnect if connected
-        if !self.base.is_connected() {
-            debug!("Test adapter is already disconnected");
-            return Ok(());
-        }
-
-        info!("Disconnecting test adapter");
-
-        // Set disconnected state to stop event generation
-        self.base.set_connected(false);
-
-        // Stop the event handler (send shutdown signal and abort the task)
-        match self.base.stop_event_handler().await {
-            Ok(_) => {
-                // Record successful disconnection in trace
-                TraceHelper::record_adapter_operation(
-                    "test",
-                    "disconnect_success",
-                    Some(json!({
-                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                    })),
-                ).await;
-                
-                info!("Test adapter disconnected");
-                Ok(())
-            },
-            Err(e) => {
-                // Record error in trace
-                TraceHelper::record_adapter_operation(
-                    "test",
-                    "disconnect_error",
-                    Some(json!({
-                        "error": e.to_string(),
-                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                    })),
-                ).await;
-                
-                error!(error = %e, "Failed to stop test event generator");
-                Err(AdapterError::from_anyhow_error(
-                    "internal",
-                    "Failed to stop event generator",
-                    e
-                ).into())
-            }
-        }
+        // Use the default implementation from ServiceAdapterHelper
+        self.disconnect_default().await
     }
 
     fn is_connected(&self) -> bool {
-        self.base.is_connected()
+        self.is_connected_default()
     }
 
     fn get_name(&self) -> &str {
-        self.base.name()
+        self.get_name_default()
     }
 
     #[instrument(skip(self, config), level = "debug")]
@@ -1589,5 +1536,12 @@ impl Clone for TestAdapter {
             config: Arc::clone(&self.config), // Share the same config instance
             callbacks: Arc::clone(&self.callbacks), // Share the same callback registry
         }
+    }
+}
+
+#[async_trait]
+impl ServiceAdapterHelper for TestAdapter {
+    fn base(&self) -> &BaseAdapter {
+        &self.base
     }
 }
