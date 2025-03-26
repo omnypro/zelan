@@ -1,6 +1,6 @@
 use crate::{
     adapters::base::{AdapterConfig, BaseAdapter},
-    adapters::common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper, with_retry},
+    adapters::common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper, execute_with_retry},
     adapters::twitch_eventsub::EventSubClient,
     auth::token_manager::{TokenData, TokenManager},
     recovery::{AdapterRecovery, RecoveryManager},
@@ -457,8 +457,8 @@ impl TwitchAdapter {
             true, // Add jitter
         );
         
-        // Use with_retry for client creation
-        let result = with_retry("init_eventsub_client", retry_options, |attempt| {
+        // Use execute_with_retry for client creation
+        let result = execute_with_retry("init_eventsub_client", retry_options, |attempt| {
             let event_bus_clone = event_bus.clone();
             // No need for self_clone here since it's not used
             
@@ -578,8 +578,8 @@ impl TwitchAdapter {
                 true, // Add jitter
             );
             
-            // Use with_retry to attempt token retrieval with built-in restoration fallback
-            let token_result = with_retry("get_token_for_eventsub", retry_options, |attempt| {
+            // Use execute_with_retry to attempt token retrieval with built-in restoration fallback
+            let token_result = execute_with_retry("get_token_for_eventsub", retry_options, |attempt| {
                 let self_inner = self_clone.clone();
                 
                 async move {
@@ -738,7 +738,7 @@ impl TwitchAdapter {
                     );
                     
                     // First try to refresh using auth manager with retry pattern
-                    let refresh_result = with_retry("token_refresh", retry_options, |attempt| {
+                    let refresh_result = execute_with_retry("token_refresh", retry_options, |attempt| {
                         let auth_mgr = auth_manager_clone.clone();
                         
                         async move {
@@ -808,7 +808,7 @@ impl TwitchAdapter {
                     };
                     
                     // Regardless of refresh result, get the current token with retry pattern
-                    let token_result = with_retry("get_token_after_refresh", retry_options, |attempt| {
+                    let token_result = execute_with_retry("get_token_after_refresh", retry_options, |attempt| {
                         let auth_mgr = auth_manager_clone.clone();
                         
                         async move {
@@ -856,8 +856,8 @@ impl TwitchAdapter {
                                 
                                 // Store in token manager with retry pattern
                                 if let Some(tm) = &token_manager_clone {
-                                    // Use with_retry for token storage
-                                    let store_result = with_retry("store_refreshed_tokens", retry_options, |attempt| {
+                                    // Use execute_with_retry for token storage
+                                    let store_result = execute_with_retry("store_refreshed_tokens", retry_options, |attempt| {
                                         let tm_clone = tm.clone();
                                         let token_data_clone = token_data.clone();
                                         
@@ -1007,8 +1007,8 @@ impl TwitchAdapter {
                 })),
             ).await;
             
-            // Use with_retry to gracefully handle network errors during shutdown
-            with_retry("stop_eventsub_client", retry_options, |attempt| {
+            // Use execute_with_retry to gracefully handle network errors during shutdown
+            execute_with_retry("stop_eventsub_client", retry_options, |attempt| {
                 let client_clone = client.clone();
                 
                 async move {
@@ -2559,7 +2559,7 @@ impl ServiceAdapter for TwitchAdapter {
             true, // Add jitter
         );
         
-        let tokens_loaded = with_retry("load_tokens_from_manager", retry_options, |attempt| {
+        let tokens_loaded = execute_with_retry("load_tokens_from_manager", retry_options, |attempt| {
             let self_clone = self.clone();
             
             async move {
@@ -2618,7 +2618,7 @@ impl ServiceAdapter for TwitchAdapter {
                     token_data.track_refresh_token_created();
                     
                     // Store in TokenManager with retry pattern
-                    let store_result = with_retry("store_tokens_migration", retry_options, |attempt| {
+                    let store_result = execute_with_retry("store_tokens_migration", retry_options, |attempt| {
                         let tm_clone = tm.clone();
                         let token_data_clone = token_data.clone();
                         
@@ -2668,7 +2668,7 @@ impl ServiceAdapter for TwitchAdapter {
                 drop(config);
 
                 // Restore token auth state with retry pattern
-                let restore_result = with_retry("restore_token_auth_state", retry_options, |attempt| {
+                let restore_result = execute_with_retry("restore_token_auth_state", retry_options, |attempt| {
                     let self_clone = self.clone();
                     
                     async move {
@@ -2707,7 +2707,7 @@ impl ServiceAdapter for TwitchAdapter {
                                 drop(auth_manager);
                                 
                                 // Update TokenManager with expiry information
-                                let update_result = with_retry("update_tokens_expiry", retry_options, |attempt| {
+                                let update_result = execute_with_retry("update_tokens_expiry", retry_options, |attempt| {
                                     let tm_clone = tm.clone();
                                     let expires_clone = expires_in;
                                     
@@ -2986,8 +2986,8 @@ impl ServiceAdapter for TwitchAdapter {
         }
 
         // Stop the event handler (this will stop the polling task if running)
-        // Use with_retry for stopping event handler
-        let stop_result = with_retry("stop_event_handler", retry_options, |attempt| {
+        // Use execute_with_retry for stopping event handler
+        let stop_result = execute_with_retry("stop_event_handler", retry_options, |attempt| {
             let self_clone = self.clone();
             
             async move {
@@ -3057,72 +3057,228 @@ impl ServiceAdapter for TwitchAdapter {
 
     #[instrument(skip(self, config), level = "debug")]
     async fn configure(&self, config: serde_json::Value) -> Result<()> {
+        // Record operation start in trace system
+        TraceHelper::record_adapter_operation(
+            "twitch",
+            "configure_start",
+            None,
+        ).await;
+        
         info!("Configuring Twitch adapter");
 
-        // Parse the config
-        let new_config = TwitchConfig::from_json(&config)?;
+        // We're not using retry_options here anymore, but keeping this comment for reference
+        // of how we would configure retries if needed in the future
 
-        // Validate the new configuration
-        new_config.validate()?;
+        // Parse the config with error handling
+        let new_config = match TwitchConfig::from_json(&config) {
+            Ok(cfg) => {
+                // Record successful config parsing
+                TraceHelper::record_adapter_operation(
+                    "twitch",
+                    "config_parsed",
+                    None,
+                ).await;
+                
+                cfg
+            },
+            Err(e) => {
+                error!("Failed to parse Twitch configuration: {}", e);
+                
+                // Record config parse failure
+                TraceHelper::record_adapter_operation(
+                    "twitch",
+                    "config_parse_failed",
+                    Some(serde_json::json!({
+                        "error": e.to_string(),
+                    })),
+                ).await;
+                
+                return Err(anyhow!("Failed to parse Twitch configuration: {}", e));
+            }
+        };
+
+        // Validate the new configuration with error handling
+        if let Err(e) = new_config.validate() {
+            error!("Invalid Twitch configuration: {}", e);
+            
+            // Record config validation failure
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "config_validation_failed",
+                Some(serde_json::json!({
+                    "error": e.to_string(),
+                })),
+            ).await;
+            
+            return Err(anyhow!("Invalid Twitch configuration: {}", e));
+        }
+        
+        // Record successful config validation
+        TraceHelper::record_adapter_operation(
+            "twitch",
+            "config_validated",
+            None,
+        ).await;
 
         // Check if authentication info changed
         let current_config = self.config.read().await.clone();
         let auth_changed = current_config.access_token != new_config.access_token
             || current_config.refresh_token != new_config.refresh_token;
+            
+        // Record auth change status
+        TraceHelper::record_adapter_operation(
+            "twitch",
+            "auth_change_check",
+            Some(serde_json::json!({
+                "auth_changed": auth_changed,
+            })),
+        ).await;
 
         // Check if refresh token is approaching its 30-day expiry (if available)
         // If so, quietly trigger a token refresh to extend the expiry period
         if let Some(tm) = &self.token_manager {
-            match tm.refresh_tokens_expire_soon("twitch", 7).await {
-                true => {
-                    info!("Twitch refresh token is approaching its 30-day expiry limit. Triggering background refresh.");
+            // Simplified check for token expiry
+            debug!("Checking if refresh token expires soon");
+            let expiry_check = match tm.refresh_tokens_expire_soon("twitch", 7).await {
+                true => true,
+                false => false,
+            };
+            
+            // Record token expiry check result
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "refresh_token_expiry_check",
+                Some(serde_json::json!({
+                    "expires_soon": expiry_check,
+                })),
+            ).await;
+            
+            if expiry_check {
+                info!("Twitch refresh token is approaching its 30-day expiry limit. Triggering background refresh.");
 
-                    // Get current token and force a refresh
-                    let auth_manager = self.auth_manager.read().await;
-                    if auth_manager.is_authenticated().await {
-                        // Clone what we need before dropping the read lock
-                        let auth_manager_clone = Arc::clone(&self.auth_manager);
-                        drop(auth_manager);
+                // Get current token and force a refresh with improved error handling
+                let auth_manager = self.auth_manager.read().await;
+                let is_authenticated = auth_manager.is_authenticated().await;
+                
+                if is_authenticated {
+                    // Clone what we need before dropping the read lock
+                    let auth_manager_clone = Arc::clone(&self.auth_manager);
+                    drop(auth_manager);
+                    
+                    // Record refresh attempt
+                    TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "token_refresh_attempt_for_expiry",
+                        None,
+                    ).await;
 
-                        // Spawn a background task to refresh the token
-                        tauri::async_runtime::spawn(async move {
-                            match auth_manager_clone
-                                .write()
-                                .await
-                                .refresh_token_if_needed()
-                                .await
-                            {
-                                Ok(_) => info!(
-                                    "Successfully refreshed token to extend 30-day expiry period"
-                                ),
-                                Err(e) => warn!(
-                                    "Failed to refresh token despite approaching expiry: {}",
-                                    e
-                                ),
+                    // Spawn a background task to refresh the token
+                    tauri::async_runtime::spawn(async move {
+                        // Use simplified approach for token refresh
+                        debug!("Attempting to refresh token to extend expiry period");
+                        
+                        // First attempt
+                        let refresh_result = auth_manager_clone.write().await.refresh_token_if_needed().await;
+                        
+                        match refresh_result {
+                            Ok(_) => {
+                                info!("Successfully refreshed token to extend 30-day expiry period");
+                                
+                                // Record successful token refresh
+                                TraceHelper::record_adapter_operation(
+                                    "twitch",
+                                    "token_refresh_success_for_expiry",
+                                    None,
+                                ).await;
+                            },
+                            Err(_) => {
+                                // Try one more time on failure
+                                debug!("First refresh attempt failed, trying again");
+                                
+                                // Short delay
+                                tokio::time::sleep(Duration::from_millis(500)).await;
+                                
+                                // Second attempt
+                                match auth_manager_clone.write().await.refresh_token_if_needed().await {
+                                    Ok(_) => {
+                                        info!("Successfully refreshed token on second attempt");
+                                        
+                                        // Record successful token refresh
+                                        TraceHelper::record_adapter_operation(
+                                            "twitch",
+                                            "token_refresh_success_retry",
+                                            None,
+                                        ).await;
+                                    },
+                                    Err(retry_err) => {
+                                        warn!("Failed to refresh token despite approaching expiry: {}", retry_err);
+                                        
+                                        // Record token refresh failure
+                                        TraceHelper::record_adapter_operation(
+                                            "twitch",
+                                            "token_refresh_failed_for_expiry",
+                                            Some(serde_json::json!({
+                                                "error": retry_err.to_string(),
+                                            })),
+                                        ).await;
+                                    }
+                                }
                             }
-                        });
-                    } else {
-                        debug!(
-                            "Not authenticated, cannot refresh token despite approaching expiry"
-                        );
-                    }
+                        }
+                    });
+                } else {
+                    debug!("Not authenticated, cannot refresh token despite approaching expiry");
+                    
+                    // Record authentication status
+                    TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "token_refresh_skipped_not_authenticated",
+                        None,
+                    ).await;
                 }
-                false => {
-                    debug!("Refresh token is not approaching expiry or no timestamp available")
-                }
+            } else {
+                debug!("Refresh token is not approaching expiry or no timestamp available");
             }
         }
 
         // Check if channel changed
         let channel_changed = current_config.channel_id != new_config.channel_id
             || current_config.channel_login != new_config.channel_login;
+            
+        // Record channel change status
+        TraceHelper::record_adapter_operation(
+            "twitch",
+            "channel_change_check",
+            Some(serde_json::json!({
+                "channel_changed": channel_changed,
+            })),
+        ).await;
 
         // Check if EventSub setting changed
         let eventsub_changed = current_config.use_eventsub != new_config.use_eventsub;
+        
+        // Record EventSub change status
+        TraceHelper::record_adapter_operation(
+            "twitch",
+            "eventsub_change_check",
+            Some(serde_json::json!({
+                "eventsub_changed": eventsub_changed,
+                "new_setting": new_config.use_eventsub,
+            })),
+        ).await;
 
         // Update our configuration
-        let mut current_config = self.config.write().await;
-        *current_config = new_config.clone();
+        {
+            let mut current_config = self.config.write().await;
+            *current_config = new_config.clone();
+            
+            // Record config update
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "config_updated",
+                None,
+            ).await;
+        }
 
         // Handle EventSub setting changes
         if eventsub_changed {
@@ -3131,11 +3287,41 @@ impl ServiceAdapter for TwitchAdapter {
             // If we're connected, we need to restart with the new setting
             if self.is_connected() {
                 info!("Adapter is connected, will restart with new EventSub setting");
+                
+                // Record restart due to setting change
+                TraceHelper::record_adapter_operation(
+                    "twitch",
+                    "restart_for_eventsub_change",
+                    Some(serde_json::json!({
+                        "new_setting": new_config.use_eventsub,
+                    })),
+                ).await;
 
                 // Stop existing EventSub if it's running and we're switching to polling
                 if !new_config.use_eventsub {
-                    if let Err(e) = self.stop_eventsub().await {
-                        warn!("Error stopping EventSub: {}", e);
+                    match self.stop_eventsub().await {
+                        Ok(_) => {
+                            info!("Successfully stopped EventSub for mode change");
+                            
+                            // Record successful EventSub stop
+                            TraceHelper::record_adapter_operation(
+                                "twitch",
+                                "eventsub_stopped_for_mode_change",
+                                None,
+                            ).await;
+                        },
+                        Err(e) => {
+                            warn!("Error stopping EventSub for mode change: {}", e);
+                            
+                            // Record EventSub stop failure
+                            TraceHelper::record_adapter_operation(
+                                "twitch",
+                                "eventsub_stop_failed_for_mode_change",
+                                Some(serde_json::json!({
+                                    "error": e.to_string(),
+                                })),
+                            ).await;
+                        }
                     }
                 }
             }
@@ -3144,15 +3330,40 @@ impl ServiceAdapter for TwitchAdapter {
         // If auth changed, update auth manager
         if auth_changed {
             info!("Authentication info changed, updating auth manager");
+            
+            // Record auth change
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "auth_info_changed",
+                None,
+            ).await;
 
-            // Get the client ID from environment
+            // Get the client ID from environment with improved error handling
             let client_id = match get_client_id() {
                 Ok(id) => {
                     info!("Using Twitch Client ID from environment variable");
+                    
+                    // Record successful client ID retrieval
+                    TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "client_id_retrieved_for_auth",
+                        None,
+                    ).await;
+                    
                     id
                 }
                 Err(e) => {
                     error!("Failed to get Twitch Client ID from environment: {}", e);
+                    
+                    // Record client ID retrieval failure
+                    TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "client_id_retrieval_failed_for_auth",
+                        Some(serde_json::json!({
+                            "error": e.to_string(),
+                        })),
+                    ).await;
+                    
                     String::new()
                 }
             };
@@ -3160,33 +3371,108 @@ impl ServiceAdapter for TwitchAdapter {
             // Update auth manager
             let mut auth_manager = self.auth_manager.write().await;
             *auth_manager = TwitchAuthManager::new(client_id);
+            
+            // Record auth manager update
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "auth_manager_updated",
+                None,
+            ).await;
 
-            // If we have access token, restore it
+            // If we have access token, restore it with retry pattern
             if let Some(access_token) = &new_config.access_token {
                 info!("Attempting to restore authentication from saved tokens");
+                
+                // Record token restoration attempt
+                TraceHelper::record_adapter_operation(
+                    "twitch",
+                    "token_restoration_attempt",
+                    None,
+                ).await;
+                
+                // Update the auth manager outside of with_retry to avoid complex nested types
+                let result = auth_manager.restore_from_saved_tokens(
+                    access_token.clone(),
+                    new_config.refresh_token.clone(),
+                ).await;
+                
+                // Convert the direct result to our retry-based approach
+                let restore_result = match result {
+                    Ok(_) => {
+                        info!("Tokens restored successfully on first attempt");
+                        Ok(())
+                    },
+                    Err(e) => {
+                        warn!("First token restoration attempt failed: {}", e);
+                        
+                        // Only try one more time on failure
+                        let access_token_clone = access_token.clone();
+                        let refresh_token_clone = new_config.refresh_token.clone();
+                        
+                        // Record retry attempt
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            "token_restoration_retry",
+                            None,
+                        ).await;
+                        
+                        match auth_manager.restore_from_saved_tokens(
+                            access_token_clone,
+                            refresh_token_clone,
+                        ).await {
+                            Ok(_) => {
+                                info!("Tokens restored successfully on second attempt");
+                                Ok(())
+                            },
+                            Err(retry_err) => {
+                                error!("Token restoration failed after retry: {}", retry_err);
+                                
+                                // Convert to AdapterError for consistent error handling
+                                Err(AdapterError::from_anyhow_error(
+                                    "auth",
+                                    "Failed to restore auth tokens after retry".to_string(),
+                                    anyhow::anyhow!(retry_err)
+                                ))
+                            }
+                        }
+                    }
+                };
 
-                let result = auth_manager
-                    .restore_from_saved_tokens(
-                        access_token.clone(),
-                        new_config.refresh_token.clone(),
-                    )
-                    .await;
-
-                match result {
+                match restore_result {
                     Ok(_) => {
                         info!("Successfully restored and validated authentication tokens");
+                        
+                        // Record successful token restoration
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            "tokens_restored_successfully",
+                            None,
+                        ).await;
                     }
                     Err(e) => {
                         // Token validation failed, we need to notify the user
-                        warn!(
-                            "Failed to restore from saved tokens (invalid or expired): {}",
-                            e
-                        );
+                        warn!("Failed to restore from saved tokens (invalid or expired): {}", e);
+                        
+                        // Record token restoration failure
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            "token_restoration_failed",
+                            Some(serde_json::json!({
+                                "error": e.to_string(),
+                            })),
+                        ).await;
 
                         // Clear tokens from config since they're invalid
                         let mut config = self.config.write().await;
                         config.access_token = None;
                         config.refresh_token = None;
+                        
+                        // Record tokens cleared
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            "invalid_tokens_cleared",
+                            None,
+                        ).await;
 
                         // Publish an event so the UI can notify the user
                         let payload = json!({
@@ -3196,10 +3482,52 @@ impl ServiceAdapter for TwitchAdapter {
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         });
 
-                        if let Err(event_err) =
-                            self.base.publish_event("auth.token_invalid", payload).await
-                        {
-                            error!("Failed to publish token invalid event: {}", event_err);
+                        // Simplified event publishing
+                        debug!("Publishing token invalid event");
+                        
+                        // First attempt
+                        let publish_result = self.base.publish_event("auth.token_invalid", payload.clone()).await;
+                        
+                        match publish_result {
+                            Ok(_) => {
+                                // Record successful event publish
+                                TraceHelper::record_adapter_operation(
+                                    "twitch",
+                                    "token_invalid_event_published",
+                                    None,
+                                ).await;
+                            },
+                            Err(e) => {
+                                // Try once more if failed
+                                warn!("First publish attempt failed: {}, trying again", e);
+                                
+                                // Short delay
+                                tokio::time::sleep(Duration::from_millis(500)).await;
+                                
+                                // Second attempt
+                                match self.base.publish_event("auth.token_invalid", payload.clone()).await {
+                                    Ok(_) => {
+                                        // Record successful event publish on retry
+                                        TraceHelper::record_adapter_operation(
+                                            "twitch",
+                                            "token_invalid_event_published_retry",
+                                            None,
+                                        ).await;
+                                    },
+                                    Err(retry_err) => {
+                                        error!("Failed to publish token invalid event after retry: {}", retry_err);
+                                        
+                                        // Record event publish failure
+                                        TraceHelper::record_adapter_operation(
+                                            "twitch",
+                                            "token_invalid_event_publish_failed",
+                                            Some(serde_json::json!({
+                                                "error": retry_err.to_string(),
+                                            })),
+                                        ).await;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -3209,6 +3537,14 @@ impl ServiceAdapter for TwitchAdapter {
         // If channel changed, reset state
         if channel_changed {
             info!("Channel changed, resetting state");
+            
+            // Record state reset
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "state_reset_for_channel_change",
+                None,
+            ).await;
+            
             *self.state.write().await = TwitchState::default();
         }
 
@@ -3218,6 +3554,18 @@ impl ServiceAdapter for TwitchAdapter {
             poll_interval_ms = new_config.poll_interval_ms,
             "Twitch adapter configured"
         );
+        
+        // Record successful configuration
+        TraceHelper::record_adapter_operation(
+            "twitch",
+            "configure_success",
+            Some(serde_json::json!({
+                "has_channel_id": new_config.channel_id.is_some(),
+                "has_channel_login": new_config.channel_login.is_some(),
+                "poll_interval_ms": new_config.poll_interval_ms,
+                "use_eventsub": new_config.use_eventsub,
+            })),
+        ).await;
 
         Ok(())
     }

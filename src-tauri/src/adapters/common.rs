@@ -6,7 +6,6 @@
 use anyhow::Result;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::time::sleep;
 use tracing::{error, info, warn};
 
 /// Unified error type for adapter-related operations
@@ -431,6 +430,71 @@ impl RetryOptions {
 }
 
 /// Perform an operation with retries
+/// 
+/// # DEPRECATED
+/// 
+/// This function is deprecated and should be replaced with direct sequential retry logic.
+/// It can cause type recursion issues on macOS when used with complex nested types.
+/// 
+/// Instead, use the following pattern:
+/// 
+/// ```rust
+/// let retry_options = RetryOptions::new(...);
+/// let mut attempt = 0;
+/// let mut last_error = None;
+/// let mut success = false;
+/// 
+/// while attempt < retry_options.max_attempts {
+///     attempt += 1;
+///     match operation().await {
+///         Ok(result) => {
+///             success = true;
+///             // Handle success...
+///             break;
+///         },
+///         Err(e) => {
+///             // Handle error...
+///             if attempt < retry_options.max_attempts {
+///                 let delay = retry_options.get_delay(attempt);
+///                 sleep(delay).await;
+///             }
+///         }
+///     }
+/// }
+/// ```
+/// Perform an operation with retries
+/// 
+/// # DEPRECATED
+/// 
+/// This function is deprecated and should be replaced with direct sequential retry logic.
+/// It can cause type recursion issues on macOS when used with complex nested types.
+/// 
+/// Instead, use the following pattern:
+/// 
+/// ```rust
+/// let retry_options = RetryOptions::new(...);
+/// let mut attempt = 0;
+/// let mut last_error = None;
+/// let mut success = false;
+/// 
+/// while attempt < retry_options.max_attempts {
+///     attempt += 1;
+///     match operation().await {
+///         Ok(result) => {
+///             success = true;
+///             // Handle success...
+///             break;
+///         },
+///         Err(e) => {
+///             // Handle error...
+///             if attempt < retry_options.max_attempts {
+///                 let delay = retry_options.get_delay(attempt);
+///                 sleep(delay).await;
+///             }
+///         }
+///     }
+/// }
+/// ```
 pub async fn with_retry<T, F, Fut, E>(
     operation_name: &str,
     options: RetryOptions,
@@ -439,58 +503,310 @@ pub async fn with_retry<T, F, Fut, E>(
 where
     F: Fn(u32) -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
-    E: std::fmt::Display,
+    E: std::fmt::Display + std::clone::Clone,
 {
-    let mut attempt = 0;
-    let mut last_error = None;
-    
-    while attempt < options.max_attempts {
-        attempt += 1;
-        
-        match operation(attempt).await {
-            Ok(result) => {
-                if attempt > 1 {
-                    info!(
-                        operation = %operation_name,
-                        attempts = attempt,
-                        "Operation succeeded after retries"
-                    );
-                }
-                return Ok(result);
-            }
-            Err(err) => {
-                // Don't retry on the last attempt
-                if attempt >= options.max_attempts {
-                    error!(
-                        operation = %operation_name,
-                        error = %err,
-                        attempts = attempt,
-                        "Operation failed after maximum attempts"
-                    );
-                    last_error = Some(err);
-                    break;
-                }
-                
-                // Calculate delay
-                let delay = options.get_delay(attempt);
-                
-                // Log and wait before retrying
-                warn!(
+    // First attempt (not a retry)
+    let mut attempt = 1;
+    match operation(attempt).await {
+        Ok(result) => return Ok(result),
+        Err(err) => {
+            // If only one attempt is allowed, return the error
+            if options.max_attempts <= 1 {
+                error!(
                     operation = %operation_name,
                     error = %err,
-                    attempt = attempt,
-                    next_delay_ms = %delay.as_millis(),
-                    "Operation failed, retrying after delay"
+                    attempts = 1,
+                    "Operation failed after maximum attempts"
                 );
+                return Err(err);
+            }
+
+            // Log the first failure
+            let delay = options.get_delay(attempt);
+            warn!(
+                operation = %operation_name,
+                error = %err,
+                attempt = attempt,
+                next_delay_ms = %delay.as_millis(),
+                "Operation failed, retrying after delay"
+            );
+
+            // Save the error for return if all retries fail
+            let mut last_error = err;
+            
+            // Sleep before retry
+            tokio::time::sleep(delay).await;
+
+            // Begin retry loop
+            let mut success = false;
+            let mut result_value = None;
+            
+            while attempt < options.max_attempts {
+                attempt += 1;
                 
-                sleep(delay).await;
-                last_error = Some(err);
+                match operation(attempt).await {
+                    Ok(result) => {
+                        // Log success
+                        info!(
+                            operation = %operation_name,
+                            attempts = attempt,
+                            "Operation succeeded after retries"
+                        );
+                        
+                        // Store result and set success flag
+                        result_value = Some(result);
+                        success = true;
+                        break;
+                    },
+                    Err(err) => {
+                        // Save this error
+                        last_error = err.clone();
+                        
+                        // Don't retry on the last attempt
+                        if attempt >= options.max_attempts {
+                            error!(
+                                operation = %operation_name,
+                                error = %err,
+                                attempts = attempt,
+                                "Operation failed after maximum attempts"
+                            );
+                        } else {
+                            // Log and wait before retrying
+                            let delay = options.get_delay(attempt);
+                            warn!(
+                                operation = %operation_name,
+                                error = %err,
+                                attempt = attempt,
+                                next_delay_ms = %delay.as_millis(),
+                                "Operation failed, retrying after delay"
+                            );
+                            
+                            // Sleep before next retry
+                            tokio::time::sleep(delay).await;
+                        }
+                    }
+                }
+            }
+
+            // Return the result or last error
+            if success {
+                Ok(result_value.unwrap())
+            } else {
+                Err(last_error)
             }
         }
     }
+}
+
+/// Helper for implementing direct sequential retry logic
+/// This provides a consistent implementation of the retry pattern without using higher-order functions
+/// that might cause type recursion issues on macOS.
+pub async fn execute_with_retry<T, F, Fut, E>(
+    operation_name: &str,
+    options: RetryOptions,
+    operation: F,
+) -> Result<T, E>
+where
+    F: Fn(u32) -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display + std::clone::Clone,
+{
+    // First attempt (not a retry)
+    let mut attempt = 1;
     
-    // If we get here, all attempts failed
-    Err(last_error.unwrap())
+    // Record attempt in trace if appropriate
+    if operation_name.contains("twitch") || operation_name.contains("obs") {
+        TraceHelper::record_adapter_operation(
+            operation_name.split('_').next().unwrap_or(operation_name),
+            &format!("{}_start", operation_name),
+            Some(serde_json::json!({
+                "max_attempts": options.max_attempts,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+    }
+    
+    match operation(attempt).await {
+        Ok(result) => {
+            // Record success in trace if appropriate
+            if operation_name.contains("twitch") || operation_name.contains("obs") {
+                TraceHelper::record_adapter_operation(
+                    operation_name.split('_').next().unwrap_or(operation_name),
+                    &format!("{}_success", operation_name),
+                    Some(serde_json::json!({
+                        "attempt": attempt,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+            }
+            return Ok(result);
+        },
+        Err(err) => {
+            // If only one attempt is allowed, return the error
+            if options.max_attempts <= 1 {
+                error!(
+                    operation = %operation_name,
+                    error = %err,
+                    attempts = 1,
+                    "Operation failed after maximum attempts"
+                );
+                
+                // Record failure in trace if appropriate
+                if operation_name.contains("twitch") || operation_name.contains("obs") {
+                    TraceHelper::record_adapter_operation(
+                        operation_name.split('_').next().unwrap_or(operation_name),
+                        &format!("{}_failed", operation_name),
+                        Some(serde_json::json!({
+                            "attempt": attempt,
+                            "error": err.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                }
+                
+                return Err(err);
+            }
+
+            // Log the first failure
+            let delay = options.get_delay(attempt);
+            warn!(
+                operation = %operation_name,
+                error = %err,
+                attempt = attempt,
+                next_delay_ms = %delay.as_millis(),
+                "Operation failed, retrying after delay"
+            );
+            
+            // Record first attempt failure in trace if appropriate
+            if operation_name.contains("twitch") || operation_name.contains("obs") {
+                TraceHelper::record_adapter_operation(
+                    operation_name.split('_').next().unwrap_or(operation_name),
+                    &format!("{}_attempt_failure", operation_name),
+                    Some(serde_json::json!({
+                        "attempt": attempt,
+                        "error": err.to_string(),
+                        "next_delay_ms": delay.as_millis(),
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+            }
+
+            // Save the error for return if all retries fail
+            let mut last_error = err;
+            
+            // Sleep before retry
+            tokio::time::sleep(delay).await;
+
+            // Begin retry loop
+            let mut success = false;
+            let mut result_value = None;
+            
+            while attempt < options.max_attempts {
+                attempt += 1;
+                
+                // Record retry attempt in trace if appropriate
+                if operation_name.contains("twitch") || operation_name.contains("obs") {
+                    TraceHelper::record_adapter_operation(
+                        operation_name.split('_').next().unwrap_or(operation_name),
+                        &format!("{}_attempt", operation_name),
+                        Some(serde_json::json!({
+                            "attempt": attempt,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                }
+                
+                match operation(attempt).await {
+                    Ok(result) => {
+                        // Log success
+                        info!(
+                            operation = %operation_name,
+                            attempts = attempt,
+                            "Operation succeeded after retries"
+                        );
+                        
+                        // Record success in trace if appropriate
+                        if operation_name.contains("twitch") || operation_name.contains("obs") {
+                            TraceHelper::record_adapter_operation(
+                                operation_name.split('_').next().unwrap_or(operation_name),
+                                &format!("{}_attempt_success", operation_name),
+                                Some(serde_json::json!({
+                                    "attempt": attempt,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                        }
+                        
+                        // Store result and set success flag
+                        result_value = Some(result);
+                        success = true;
+                        break;
+                    },
+                    Err(err) => {
+                        // Save this error
+                        last_error = err.clone();
+                        
+                        // Don't retry on the last attempt
+                        if attempt >= options.max_attempts {
+                            error!(
+                                operation = %operation_name,
+                                error = %err,
+                                attempts = attempt,
+                                "Operation failed after maximum attempts"
+                            );
+                            
+                            // Record final failure in trace if appropriate
+                            if operation_name.contains("twitch") || operation_name.contains("obs") {
+                                TraceHelper::record_adapter_operation(
+                                    operation_name.split('_').next().unwrap_or(operation_name),
+                                    &format!("{}_failed", operation_name),
+                                    Some(serde_json::json!({
+                                        "attempts": attempt,
+                                        "error": err.to_string(),
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                            }
+                        } else {
+                            // Log and wait before retrying
+                            let delay = options.get_delay(attempt);
+                            warn!(
+                                operation = %operation_name,
+                                error = %err,
+                                attempt = attempt,
+                                next_delay_ms = %delay.as_millis(),
+                                "Operation failed, retrying after delay"
+                            );
+                            
+                            // Record attempt failure in trace if appropriate
+                            if operation_name.contains("twitch") || operation_name.contains("obs") {
+                                TraceHelper::record_adapter_operation(
+                                    operation_name.split('_').next().unwrap_or(operation_name),
+                                    &format!("{}_attempt_failure", operation_name),
+                                    Some(serde_json::json!({
+                                        "attempt": attempt,
+                                        "error": err.to_string(),
+                                        "next_delay_ms": delay.as_millis(),
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                            }
+                            
+                            // Sleep before next retry
+                            tokio::time::sleep(delay).await;
+                        }
+                    }
+                }
+            }
+
+            // Return the result or last error
+            if success {
+                Ok(result_value.unwrap())
+            } else {
+                Err(last_error)
+            }
+        }
+    }
 }
 
 /// Trace helper for adapter operations
@@ -549,7 +865,7 @@ pub struct TokenHelper;
 
 impl TokenHelper {
     /// Attempt to refresh a token using the provided refresh function
-    /// Uses standard retry logic and proper trace recording
+    /// Uses direct sequential retry logic and proper trace recording
     pub async fn refresh_token<T, F, Fut>(
         adapter_name: &str,
         refresh_fn: F,
@@ -576,12 +892,37 @@ impl TokenHelper {
             trace_context,
         ).await;
         
-        // Create an operation that both refreshes token and updates trace
-        let result = with_retry(&operation_name, options, |attempt| {
-            let refresh_fn_clone = refresh_fn.clone();
-            async move {
-                // Attempt to refresh the token
-                match refresh_fn_clone(attempt).await {
+        // Implement direct sequential retry logic to avoid type recursion issues
+        let mut attempt = 0;
+        let mut last_error: Option<AdapterError> = None;
+        let mut success = false;
+        let mut result_value: Option<T> = None;
+        
+        // Record that we're starting retry attempts
+        TraceHelper::record_adapter_operation(
+            adapter_name,
+            "token_refresh_retry_start",
+            Some(serde_json::json!({
+                "max_attempts": options.max_attempts,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
+        while attempt < options.max_attempts {
+            attempt += 1;
+            
+            // Record the current attempt in trace
+            TraceHelper::record_adapter_operation(
+                adapter_name,
+                "token_refresh_attempt",
+                Some(serde_json::json!({
+                    "attempt": attempt,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            // Attempt to refresh the token
+            match refresh_fn(attempt).await {
                 Ok(token) => {
                     // Record successful refresh
                     TraceHelper::record_adapter_operation(
@@ -589,41 +930,70 @@ impl TokenHelper {
                         "token_refresh_success",
                         Some(serde_json::json!({
                             "attempt": attempt,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
                     ).await;
                     
-                    Ok(token)
-                }
+                    // Store result and set success flag
+                    result_value = Some(token);
+                    success = true;
+                    break;
+                },
                 Err(err) => {
+                    // Save this error
+                    last_error = Some(err.clone());
+                    
                     // Record failed refresh attempt
                     TraceHelper::record_adapter_operation(
                         adapter_name,
-                        "token_refresh_failure",
+                        "token_refresh_attempt_failure",
                         Some(serde_json::json!({
                             "attempt": attempt,
                             "error": err.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
                     ).await;
                     
-                    Err(err)
-                }
+                    // If not the last attempt, calculate delay and retry
+                    if attempt < options.max_attempts {
+                        let delay = options.get_delay(attempt);
+                        warn!(
+                            operation = %operation_name,
+                            error = %err,
+                            attempt = attempt,
+                            next_delay_ms = %delay.as_millis(),
+                            "Token refresh failed, retrying after delay"
+                        );
+                        tokio::time::sleep(delay).await;
+                    } else {
+                        error!(
+                            operation = %operation_name,
+                            error = %err,
+                            attempts = attempt,
+                            "Token refresh failed after maximum attempts"
+                        );
+                        
+                        // Record final failure in trace
+                        TraceHelper::record_adapter_operation(
+                            adapter_name,
+                            "token_refresh_failed",
+                            Some(serde_json::json!({
+                                "error": err.to_string(),
+                                "max_attempts": options.max_attempts,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                    }
                 }
             }
-        }).await;
-        
-        if result.is_err() {
-            // Record final failure in trace
-            TraceHelper::record_adapter_operation(
-                adapter_name,
-                "token_refresh_failed",
-                Some(serde_json::json!({
-                    "error": result.as_ref().err().unwrap().to_string(),
-                    "max_attempts": options.max_attempts,
-                })),
-            ).await;
         }
         
-        result
+        // Return the result or last error
+        if success {
+            Ok(result_value.unwrap())
+        } else {
+            Err(last_error.unwrap())
+        }
     }
     
     /// Validate a token is not expired
@@ -668,6 +1038,7 @@ impl TokenHelper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     
     #[test]
     fn test_backoff_calculation() {
@@ -715,7 +1086,7 @@ mod tests {
         let called = Arc::new(AtomicU32::new(0));
         let called_clone = called.clone();
         
-        let result = with_retry("test_operation", options, move |_| {
+        let result = execute_with_retry("test_operation", options, move |_| {
             let called_inner = called_clone.clone();
             async move {
                 let current = called_inner.fetch_add(1, Ordering::SeqCst) + 1;
@@ -745,7 +1116,7 @@ mod tests {
         let called = Arc::new(AtomicU32::new(0));
         let called_clone = called.clone();
         
-        let result = with_retry("test_operation", options, move |_| {
+        let result = execute_with_retry("test_operation", options, move |_| {
             let called_inner = called_clone.clone();
             async move {
                 let current = called_inner.fetch_add(1, Ordering::SeqCst) + 1;

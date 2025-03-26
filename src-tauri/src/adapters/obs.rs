@@ -217,31 +217,110 @@ impl ObsAdapter {
             true, // Add jitter
         );
         
-        // Clone the event for use in closure
-        let event_clone = event.clone();
+        // Implement direct sequential retry logic
+        let mut attempt = 0;
+        let mut last_error: Option<AdapterError> = None;
+        let mut success = false;
+        let mut callback_count = 0;
         
-        // Use retry for triggering event
-        let result = crate::adapters::common::with_retry(
-            "trigger_obs_event",
-            trigger_retry_options,
-            move |attempt| {
-                let event_for_attempt = event_clone.clone();
-                let callbacks = self.callbacks.clone();
-                async move {
-                    if attempt > 1 {
-                        debug!(attempt, "Retrying OBS event trigger");
-                    }
-                    match callbacks.trigger(event_for_attempt).await {
-                        Ok(count) => Ok(count),
-                        Err(e) => Err(AdapterError::from_anyhow_error(
-                            "event",
-                            format!("Failed to trigger OBS event: {}", e),
-                            e,
-                        ))
+        // Record the beginning of retry attempts in trace
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "trigger_obs_event_start",
+            Some(json!({
+                "event_type": event.event_type(),
+                "max_attempts": trigger_retry_options.max_attempts,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
+        while attempt < trigger_retry_options.max_attempts {
+            attempt += 1;
+            
+            // Record the current attempt in trace
+            TraceHelper::record_adapter_operation(
+                "obs",
+                "trigger_obs_event_attempt",
+                Some(json!({
+                    "attempt": attempt,
+                    "event_type": event.event_type(),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            // Attempt to trigger the event
+            if attempt > 1 {
+                debug!(attempt, "Retrying OBS event trigger");
+            }
+            
+            match self.callbacks.trigger(event.clone()).await {
+                Ok(count) => {
+                    success = true;
+                    callback_count = count;
+                    
+                    // Record successful trigger in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "trigger_obs_event_success",
+                        Some(json!({
+                            "attempt": attempt,
+                            "callbacks_triggered": count,
+                            "event_type": event.event_type(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    debug!(callbacks = count, "Triggered OBS event successfully");
+                    break;
+                },
+                Err(e) => {
+                    // Convert to AdapterError
+                    let error = AdapterError::from_anyhow_error(
+                        "event",
+                        format!("Failed to trigger OBS event: {}", e),
+                        e,
+                    );
+                    last_error = Some(error.clone());
+                    
+                    // Record failure in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "trigger_obs_event_attempt_failure",
+                        Some(json!({
+                            "attempt": attempt,
+                            "error": error.to_string(),
+                            "event_type": event.event_type(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // If not the last attempt, calculate delay and retry
+                    if attempt < trigger_retry_options.max_attempts {
+                        let delay = trigger_retry_options.get_delay(attempt);
+                        warn!(
+                            error = %error,
+                            attempt = attempt,
+                            next_delay_ms = %delay.as_millis(),
+                            "OBS event trigger failed, retrying after delay"
+                        );
+                        sleep(delay).await;
+                    } else {
+                        error!(
+                            error = %error,
+                            attempts = attempt,
+                            "Failed to trigger OBS event after maximum attempts"
+                        );
                     }
                 }
             }
-        ).await;
+        }
+        
+        // Determine result based on success flag
+        let result = if success {
+            Ok(callback_count)
+        } else {
+            Err(last_error.unwrap())
+        };
         
         match result {
             Ok(count) => {
@@ -416,39 +495,131 @@ impl ObsAdapter {
                                     true, // Add jitter
                                 );
                                 
-                                // Get a clone of the client for the closure
-                                let client_clone = client.clone();
+                                // Implement direct sequential retry logic for scene details
+                                let scene_name_for_attempts = id.name.clone();
+                                let mut attempt = 0;
+                                let mut last_error: Option<AdapterError> = None;
+                                let mut success = false;
+                                let mut scene_index_result: Option<usize> = None;
                                 
-                                // Use retry for fetching scene details
-                                let scene_details_result = crate::adapters::common::with_retry(
-                                    "fetch_scene_details",
-                                    scene_details_retry,
-                                    move |attempt| {
-                                        let client_for_attempt = client_clone.clone();
-                                        let scene_name_for_attempt = id.name.clone();
-                                        async move {
-                                            if attempt > 1 {
-                                                debug!(attempt, "Retrying scene details fetch");
+                                // Record the beginning of retry attempts in trace
+                                TraceHelper::record_adapter_operation(
+                                    "obs",
+                                    "fetch_scene_details_start",
+                                    Some(json!({
+                                        "scene_name": scene_name_for_attempts,
+                                        "max_attempts": scene_details_retry.max_attempts,
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                                
+                                while attempt < scene_details_retry.max_attempts {
+                                    attempt += 1;
+                                    
+                                    // Record the current attempt in trace
+                                    TraceHelper::record_adapter_operation(
+                                        "obs",
+                                        "fetch_scene_details_attempt",
+                                        Some(json!({
+                                            "attempt": attempt,
+                                            "scene_name": scene_name_for_attempts,
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })),
+                                    ).await;
+                                    
+                                    // Attempt to fetch scene details
+                                    if attempt > 1 {
+                                        debug!(attempt, "Retrying scene details fetch");
+                                    }
+                                    
+                                    match client.scenes().list().await {
+                                        Ok(scene_list) => {
+                                            if let Some(scene) = scene_list.scenes.iter()
+                                                .find(|s| s.id.name == scene_name_for_attempts)
+                                            {
+                                                success = true;
+                                                scene_index_result = Some(scene.index);
+                                                
+                                                // Record successful fetch in trace
+                                                TraceHelper::record_adapter_operation(
+                                                    "obs",
+                                                    "fetch_scene_details_success",
+                                                    Some(json!({
+                                                        "attempt": attempt,
+                                                        "scene_name": scene_name_for_attempts,
+                                                        "scene_index": scene.index,
+                                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                                    })),
+                                                ).await;
+                                                
+                                                break;
+                                            } else {
+                                                // Scene not found, but this is not an error
+                                                success = true;
+                                                scene_index_result = None;
+                                                
+                                                // Record scene not found in trace
+                                                TraceHelper::record_adapter_operation(
+                                                    "obs",
+                                                    "fetch_scene_details_scene_not_found",
+                                                    Some(json!({
+                                                        "attempt": attempt,
+                                                        "scene_name": scene_name_for_attempts,
+                                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                                    })),
+                                                ).await;
+                                                
+                                                break;
                                             }
-                                            match client_for_attempt.scenes().list().await {
-                                                Ok(scene_list) => {
-                                                    if let Some(scene) = scene_list.scenes.iter()
-                                                        .find(|s| s.id.name == scene_name_for_attempt)
-                                                    {
-                                                        Ok(Some(scene.index))
-                                                    } else {
-                                                        Ok(None)
-                                                    }
-                                                },
-                                                Err(e) => Err(AdapterError::from_anyhow_error(
-                                                    "api",
-                                                    format!("Failed to fetch scene details: {}", e),
-                                                    anyhow::anyhow!("{}", e)
-                                                ))
+                                        },
+                                        Err(e) => {
+                                            // Convert to AdapterError
+                                            let error = AdapterError::from_anyhow_error(
+                                                "api",
+                                                format!("Failed to fetch scene details: {}", e),
+                                                anyhow::anyhow!("{}", e)
+                                            );
+                                            last_error = Some(error.clone());
+                                            
+                                            // Record failure in trace
+                                            TraceHelper::record_adapter_operation(
+                                                "obs",
+                                                "fetch_scene_details_attempt_failure",
+                                                Some(json!({
+                                                    "attempt": attempt,
+                                                    "error": error.to_string(),
+                                                    "scene_name": scene_name_for_attempts,
+                                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                                })),
+                                            ).await;
+                                            
+                                            // If not the last attempt, calculate delay and retry
+                                            if attempt < scene_details_retry.max_attempts {
+                                                let delay = scene_details_retry.get_delay(attempt);
+                                                warn!(
+                                                    error = %error,
+                                                    attempt = attempt,
+                                                    next_delay_ms = %delay.as_millis(),
+                                                    "Scene details fetch failed, retrying after delay"
+                                                );
+                                                sleep(delay).await;
+                                            } else {
+                                                error!(
+                                                    error = %error,
+                                                    attempts = attempt,
+                                                    "Failed to fetch scene details after maximum attempts"
+                                                );
                                             }
                                         }
                                     }
-                                ).await;
+                                }
+                                
+                                // Determine result based on success flag
+                                let scene_details_result = if success {
+                                    Ok(scene_index_result)
+                                } else {
+                                    Err(last_error.unwrap())
+                                };
                                 
                                 // Process the result
                                 match scene_details_result {
@@ -475,31 +646,111 @@ impl ObsAdapter {
                                 true, // Add jitter
                             );
                             
-                            // Use retry for publishing event
-                            let event_bus_clone = event_bus.clone();
-                            let payload_clone = payload.clone();
-                            let publish_result = crate::adapters::common::with_retry(
-                                "publish_scene_change",
-                                publish_retry,
-                                move |attempt| {
-                                    let event_bus_for_attempt = event_bus_clone.clone();
-                                    let payload_for_attempt = payload_clone.clone();
-                                    async move {
-                                        if attempt > 1 {
-                                            debug!(attempt, "Retrying scene change event publication");
-                                        }
-                                        let stream_event = StreamEvent::new("obs", "scene.changed", payload_for_attempt);
-                                        match event_bus_for_attempt.publish(stream_event).await {
-                                            Ok(receivers) => Ok(receivers),
-                                            Err(e) => Err(AdapterError::from_anyhow_error(
-                                                "event",
-                                                format!("Failed to publish scene change event: {}", e),
-                                                anyhow::anyhow!("{}", e)
-                                            ))
+                            // Implement direct sequential retry logic for publishing
+                            let payload_for_publish = payload.clone();
+                            let mut attempt = 0;
+                            let mut last_error: Option<AdapterError> = None;
+                            let mut success = false;
+                            let mut receivers_count = 0;
+                            
+                            // Record the beginning of publish attempts in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "publish_scene_change_start",
+                                Some(json!({
+                                    "scene_name": scene_name,
+                                    "max_attempts": publish_retry.max_attempts,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            while attempt < publish_retry.max_attempts {
+                                attempt += 1;
+                                
+                                // Record the current attempt in trace
+                                TraceHelper::record_adapter_operation(
+                                    "obs",
+                                    "publish_scene_change_attempt",
+                                    Some(json!({
+                                        "attempt": attempt,
+                                        "scene_name": scene_name,
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                                
+                                // Attempt to publish the event
+                                if attempt > 1 {
+                                    debug!(attempt, "Retrying scene change event publication");
+                                }
+                                
+                                let stream_event = StreamEvent::new("obs", "scene.changed", payload_for_publish.clone());
+                                match event_bus.publish(stream_event).await {
+                                    Ok(receivers) => {
+                                        success = true;
+                                        receivers_count = receivers;
+                                        
+                                        // Record successful publish in trace
+                                        TraceHelper::record_adapter_operation(
+                                            "obs",
+                                            "publish_scene_change_success",
+                                            Some(json!({
+                                                "attempt": attempt,
+                                                "receivers": receivers,
+                                                "scene_name": scene_name,
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            })),
+                                        ).await;
+                                        
+                                        break;
+                                    },
+                                    Err(e) => {
+                                        // Convert to AdapterError
+                                        let error = AdapterError::from_anyhow_error(
+                                            "event",
+                                            format!("Failed to publish scene change event: {}", e),
+                                            anyhow::anyhow!("{}", e)
+                                        );
+                                        last_error = Some(error.clone());
+                                        
+                                        // Record failure in trace
+                                        TraceHelper::record_adapter_operation(
+                                            "obs",
+                                            "publish_scene_change_attempt_failure",
+                                            Some(json!({
+                                                "attempt": attempt,
+                                                "error": error.to_string(),
+                                                "scene_name": scene_name,
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            })),
+                                        ).await;
+                                        
+                                        // If not the last attempt, calculate delay and retry
+                                        if attempt < publish_retry.max_attempts {
+                                            let delay = publish_retry.get_delay(attempt);
+                                            warn!(
+                                                error = %error,
+                                                attempt = attempt,
+                                                next_delay_ms = %delay.as_millis(),
+                                                "Scene change publication failed, retrying after delay"
+                                            );
+                                            sleep(delay).await;
+                                        } else {
+                                            error!(
+                                                error = %error,
+                                                attempts = attempt,
+                                                "Failed to publish scene change event after maximum attempts"
+                                            );
                                         }
                                     }
                                 }
-                            ).await;
+                            }
+                            
+                            // Determine result based on success flag
+                            let publish_result = if success {
+                                Ok(receivers_count)
+                            } else {
+                                Err(last_error.unwrap())
+                            };
                             
                             // Process publish result
                             match publish_result {
@@ -511,35 +762,115 @@ impl ObsAdapter {
                                 }
                             }
                             
-                            // Also trigger callbacks with retry
+                            // Create callback event
                             let callback_event = ObsEvent::SceneChanged { 
                                 scene_name: scene_name.clone(),
                                 data: payload,
                             };
                             
-                            let callbacks_clone = callbacks.clone();
-                            let callback_event_clone = callback_event.clone();
-                            let trigger_result = crate::adapters::common::with_retry(
-                                "trigger_scene_change_callbacks",
-                                publish_retry,
-                                move |attempt| {
-                                    let callbacks_for_attempt = callbacks_clone.clone();
-                                    let event_for_attempt = callback_event_clone.clone();
-                                    async move {
-                                        if attempt > 1 {
-                                            debug!(attempt, "Retrying scene change callback trigger");
-                                        }
-                                        match callbacks_for_attempt.trigger(event_for_attempt).await {
-                                            Ok(count) => Ok(count),
-                                            Err(e) => Err(AdapterError::from_anyhow_error(
-                                                "event",
-                                                format!("Failed to trigger scene change callbacks: {}", e),
-                                                anyhow::anyhow!("{}", e)
-                                            ))
+                            // Implement direct sequential retry logic for triggering callbacks
+                            let mut attempt = 0;
+                            let mut last_error: Option<AdapterError> = None;
+                            let mut success = false;
+                            let mut callbacks_triggered = 0;
+                            
+                            // Record the beginning of trigger attempts in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "trigger_scene_change_callbacks_start",
+                                Some(json!({
+                                    "scene_name": scene_name,
+                                    "max_attempts": publish_retry.max_attempts,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            while attempt < publish_retry.max_attempts {
+                                attempt += 1;
+                                
+                                // Record the current attempt in trace
+                                TraceHelper::record_adapter_operation(
+                                    "obs",
+                                    "trigger_scene_change_callbacks_attempt",
+                                    Some(json!({
+                                        "attempt": attempt,
+                                        "scene_name": scene_name,
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                                
+                                // Attempt to trigger callbacks
+                                if attempt > 1 {
+                                    debug!(attempt, "Retrying scene change callback trigger");
+                                }
+                                
+                                match callbacks.trigger(callback_event.clone()).await {
+                                    Ok(count) => {
+                                        success = true;
+                                        callbacks_triggered = count;
+                                        
+                                        // Record successful trigger in trace
+                                        TraceHelper::record_adapter_operation(
+                                            "obs",
+                                            "trigger_scene_change_callbacks_success",
+                                            Some(json!({
+                                                "attempt": attempt,
+                                                "callbacks_triggered": count,
+                                                "scene_name": scene_name,
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            })),
+                                        ).await;
+                                        
+                                        break;
+                                    },
+                                    Err(e) => {
+                                        // Convert to AdapterError
+                                        let error = AdapterError::from_anyhow_error(
+                                            "event",
+                                            format!("Failed to trigger scene change callbacks: {}", e),
+                                            e
+                                        );
+                                        last_error = Some(error.clone());
+                                        
+                                        // Record failure in trace
+                                        TraceHelper::record_adapter_operation(
+                                            "obs",
+                                            "trigger_scene_change_callbacks_attempt_failure",
+                                            Some(json!({
+                                                "attempt": attempt,
+                                                "error": error.to_string(),
+                                                "scene_name": scene_name,
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            })),
+                                        ).await;
+                                        
+                                        // If not the last attempt, calculate delay and retry
+                                        if attempt < publish_retry.max_attempts {
+                                            let delay = publish_retry.get_delay(attempt);
+                                            warn!(
+                                                error = %error,
+                                                attempt = attempt,
+                                                next_delay_ms = %delay.as_millis(),
+                                                "Scene change callbacks trigger failed, retrying after delay"
+                                            );
+                                            sleep(delay).await;
+                                        } else {
+                                            error!(
+                                                error = %error,
+                                                attempts = attempt,
+                                                "Failed to trigger scene change callbacks after maximum attempts"
+                                            );
                                         }
                                     }
                                 }
-                            ).await;
+                            }
+                            
+                            // Determine result based on success flag
+                            let trigger_result = if success {
+                                Ok(callbacks_triggered)
+                            } else {
+                                Err(last_error.unwrap())
+                            };
                             
                             // Process trigger result
                             match trigger_result {
@@ -877,45 +1208,122 @@ impl ServiceAdapter for ObsAdapter {
             "Preparing OBS connection parameters"
         );
 
-        // Use retry for connecting to OBS - we need to recreate the connect_opts in the closure
-        // because ConnectConfig doesn't implement Clone
-        let config_clone = config.clone();
-        let connect_result = crate::adapters::common::with_retry(
-            "connect_to_obs",
-            connect_retry_options,
-            move |attempt| {
-                // Recreate connection options for each attempt since it doesn't implement Clone
-                let config_for_attempt = config_clone.clone();
-                async move {
-                    if attempt > 1 {
-                        debug!(attempt, "Retrying OBS connection");
-                    }
+        // Implement direct sequential retry logic to avoid type recursion issues
+        // This matches the pattern we implemented for the Twitch adapter
+        let mut attempt = 0;
+        let mut client: Option<Arc<Client>> = None;
+        let mut last_error: Option<AdapterError> = None;
+
+        // Record that we're starting retry attempts
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "connect_retry_start",
+            Some(json!({
+                "host": config.host,
+                "port": config.port,
+                "max_attempts": connect_retry_options.max_attempts,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+
+        while attempt < connect_retry_options.max_attempts {
+            attempt += 1;
+            debug!(attempt, "Attempting to connect to OBS");
+
+            // Recreate the connection options for each attempt
+            let connect_opts = ConnectConfig {
+                host: config.host.clone(),
+                port: config.port,
+                password: if config.password.is_empty() {
+                    None
+                } else {
+                    Some(config.password.clone())
+                },
+                event_subscriptions: Some(EventSubscription::ALL),
+                broadcast_capacity: 128,
+                connect_timeout: Duration::from_secs(10),
+                dangerous: None,
+            };
+            
+            // Record the attempt in trace
+            TraceHelper::record_adapter_operation(
+                "obs",
+                "connect_attempt",
+                Some(json!({
+                    "attempt": attempt,
+                    "host": config.host,
+                    "port": config.port,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            // Attempt to connect
+            match Client::connect_with_config(connect_opts).await {
+                Ok(new_client) => {
+                    // Connection successful
+                    client = Some(Arc::new(new_client));
                     
-                    // Recreate the connection options for each attempt
-                    let connect_opts = ConnectConfig {
-                        host: config_for_attempt.host.clone(),
-                        port: config_for_attempt.port,
-                        password: if config_for_attempt.password.is_empty() {
-                            None
-                        } else {
-                            Some(config_for_attempt.password.clone())
-                        },
-                        event_subscriptions: Some(EventSubscription::ALL),
-                        broadcast_capacity: 128,
-                        connect_timeout: Duration::from_secs(10),
-                        dangerous: None,
-                    };
+                    // Record success in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "connect_attempt_success",
+                        Some(json!({
+                            "attempt": attempt,
+                            "host": config.host,
+                            "port": config.port,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
                     
-                    match Client::connect_with_config(connect_opts).await {
-                        Ok(client) => Ok(Arc::new(client)),
-                        Err(e) => Err(AdapterError::connection_with_source(
-                            format!("Failed to connect to OBS WebSocket: {}", e),
-                            e
-                        ))
+                    break;
+                },
+                Err(e) => {
+                    // Connection failed
+                    let error = AdapterError::connection_with_source(
+                        format!("Failed to connect to OBS WebSocket: {}", e),
+                        e
+                    );
+                    last_error = Some(error.clone());
+                    
+                    // Record failure in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "connect_attempt_failure",
+                        Some(json!({
+                            "attempt": attempt,
+                            "host": config.host,
+                            "port": config.port,
+                            "error": error.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // If this wasn't the last attempt, calculate delay and retry
+                    if attempt < connect_retry_options.max_attempts {
+                        let delay = connect_retry_options.get_delay(attempt);
+                        warn!(
+                            error = %error,
+                            attempt = attempt,
+                            next_delay_ms = %delay.as_millis(),
+                            "OBS connection failed, retrying after delay"
+                        );
+                        sleep(delay).await;
+                    } else {
+                        error!(
+                            error = %error,
+                            attempts = attempt,
+                            "Failed to connect to OBS after maximum attempts"
+                        );
                     }
                 }
             }
-        ).await;
+        }
+        
+        // Process the final result
+        let connect_result = match client {
+            Some(client) => Ok(client),
+            None => Err(last_error.unwrap()),
+        };
 
         // Process connection result
         match connect_result {
@@ -939,35 +1347,103 @@ impl ServiceAdapter for ObsAdapter {
                     })),
                 ).await;
 
-                // Publish initial state with retry
-                let client_clone = Arc::clone(&client);
-                let event_bus_clone = Arc::clone(&self.base.event_bus());
-                let initial_state_result = crate::adapters::common::with_retry(
-                    "publish_initial_state",
-                    RetryOptions::default(),
-                    move |attempt| {
-                        let client_for_attempt = client_clone.clone();
-                        let event_bus_for_attempt = event_bus_clone.clone();
-                        async move {
-                            if attempt > 1 {
-                                debug!(attempt, "Retrying initial state publication");
-                            }
-                            match Self::publish_initial_state(&client_for_attempt, &event_bus_for_attempt).await {
-                                Ok(_) => Ok(()),
-                                Err(e) => Err(AdapterError::from_anyhow_error(
-                                    "internal",
-                                    format!("Failed to publish initial OBS state: {}", e),
-                                    anyhow::anyhow!("{}", e)
-                                ))
+                // Publish initial state using direct sequential retry logic
+                let initial_state_retry_options = RetryOptions::default();
+                let mut attempt = 0;
+                let mut initial_state_error: Option<AdapterError> = None;
+                let mut initial_state_success = false;
+                
+                // Record that we're starting initial state publication
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "publish_initial_state_start",
+                    Some(json!({
+                        "max_attempts": initial_state_retry_options.max_attempts,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                while attempt < initial_state_retry_options.max_attempts {
+                    attempt += 1;
+                    debug!(attempt, "Attempting to publish initial OBS state");
+                    
+                    // Record the attempt in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "publish_initial_state_attempt",
+                        Some(json!({
+                            "attempt": attempt,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // Attempt to publish initial state
+                    match Self::publish_initial_state(&client, &self.base.event_bus()).await {
+                        Ok(_) => {
+                            // Publication successful
+                            initial_state_success = true;
+                            
+                            // Record success in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "publish_initial_state_success",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            debug!("Published initial OBS state successfully");
+                            break;
+                        },
+                        Err(e) => {
+                            // Publication failed
+                            let error = AdapterError::from_anyhow_error(
+                                "internal",
+                                format!("Failed to publish initial OBS state: {}", e),
+                                e
+                            );
+                            initial_state_error = Some(error.clone());
+                            
+                            // Record failure in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "publish_initial_state_attempt_failure",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "error": error.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            // If this wasn't the last attempt, calculate delay and retry
+                            if attempt < initial_state_retry_options.max_attempts {
+                                let delay = initial_state_retry_options.get_delay(attempt);
+                                warn!(
+                                    error = %error,
+                                    attempt = attempt,
+                                    next_delay_ms = %delay.as_millis(),
+                                    "Initial state publication failed, retrying after delay"
+                                );
+                                sleep(delay).await;
+                            } else {
+                                error!(
+                                    error = %error,
+                                    attempts = attempt,
+                                    "Failed to publish initial OBS state after maximum attempts"
+                                );
                             }
                         }
                     }
-                ).await;
+                }
                 
-                // Process initial state result
-                if let Err(e) = initial_state_result {
-                    error!(error = %e, "Failed to publish initial OBS state after retries");
-                } else {
+                // Process final result of initial state publication
+                if !initial_state_success && initial_state_error.is_some() {
+                    error!(
+                        error = %initial_state_error.unwrap(),
+                        "Failed to publish initial OBS state after retries"
+                    );
+                } else if initial_state_success {
                     debug!("Published initial OBS state");
                 }
 
@@ -975,23 +1451,23 @@ impl ServiceAdapter for ObsAdapter {
                 let (_, shutdown_rx) = self.base.create_shutdown_channel().await;
 
                 // Start event handler
-                let client_clone = Arc::clone(&client);
-                let event_bus_clone = Arc::clone(&self.base.event_bus());
-                let config_clone = config.clone();
-                let callbacks_clone = Arc::clone(&self.callbacks);
-                
                 // Create a connected flag for the event handler
                 let connected_flag = Arc::new(AtomicBool::new(true));
 
+                // Clone what we need from self for the async block
+                let event_bus = self.base.event_bus();
+                let callbacks = self.callbacks.clone();
+                let config_clone = config.clone();
+                
                 let handle = tauri::async_runtime::spawn(
                     async move {
                         if let Err(e) = Self::handle_obs_events(
-                            client_clone,
-                            event_bus_clone,
+                            client,
+                            event_bus,
                             config_clone,
                             connected_flag,
                             shutdown_rx,
-                            callbacks_clone,
+                            callbacks,
                         )
                         .await
                         {
@@ -1004,86 +1480,227 @@ impl ServiceAdapter for ObsAdapter {
                 // Store the event handler using BaseAdapter
                 self.base.set_event_handler(handle).await;
 
-                // Set up retry for publishing connection event
-                let event_bus_clone = Arc::clone(&self.base.event_bus());
+                // Create a copy of the connection configuration data we need
+                let host = config.host.clone();
+                let port = config.port;
+                
+                // Set up connection established event with payload
                 let payload = json!({
-                    "host": config.host,
-                    "port": config.port,
+                    "host": host,
+                    "port": port,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 });
                 
-                let payload_clone = payload.clone();
-                let publish_result = crate::adapters::common::with_retry(
-                    "publish_connection_established",
-                    RetryOptions::default(),
-                    move |attempt| {
-                        let event_bus_for_attempt = event_bus_clone.clone();
-                        let payload_for_attempt = payload_clone.clone();
-                        async move {
-                            if attempt > 1 {
-                                debug!(attempt, "Retrying connection event publication");
-                            }
-                            let stream_event = StreamEvent::new("obs", "connection.established", payload_for_attempt);
-                            match event_bus_for_attempt.publish(stream_event).await {
-                                Ok(receivers) => Ok(receivers),
-                                Err(e) => Err(AdapterError::from_anyhow_error(
-                                    "event",
-                                    format!("Failed to publish connection event: {}", e),
-                                    anyhow::anyhow!("{}", e)
-                                ))
+                // Use direct sequential retry logic for publishing connection event
+                let publish_retry_options = RetryOptions::default();
+                let mut attempt = 0;
+                let mut publish_error: Option<AdapterError> = None;
+                let mut publish_success = false;
+                let mut receivers_count = 0;
+                
+                // Record that we're starting event publication
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "publish_connection_event_start",
+                    Some(json!({
+                        "max_attempts": publish_retry_options.max_attempts,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                while attempt < publish_retry_options.max_attempts {
+                    attempt += 1;
+                    debug!(attempt, "Attempting to publish connection event");
+                    
+                    // Record the attempt in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "publish_connection_event_attempt",
+                        Some(json!({
+                            "attempt": attempt,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // Create the event and attempt to publish
+                    let stream_event = StreamEvent::new("obs", "connection.established", payload.clone());
+                    match self.base.event_bus().publish(stream_event).await {
+                        Ok(receivers) => {
+                            // Publication successful
+                            publish_success = true;
+                            receivers_count = receivers;
+                            
+                            // Record success in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "publish_connection_event_success",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "receivers": receivers,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            debug!(receivers, "Published OBS connection event successfully");
+                            break;
+                        },
+                        Err(e) => {
+                            // Publication failed
+                            let error = AdapterError::from_anyhow_error(
+                                "event",
+                                format!("Failed to publish connection event: {}", e),
+                                anyhow::anyhow!("{}", e)
+                            );
+                            publish_error = Some(error.clone());
+                            
+                            // Record failure in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "publish_connection_event_attempt_failure",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "error": error.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            // If this wasn't the last attempt, calculate delay and retry
+                            if attempt < publish_retry_options.max_attempts {
+                                let delay = publish_retry_options.get_delay(attempt);
+                                warn!(
+                                    error = %error,
+                                    attempt = attempt,
+                                    next_delay_ms = %delay.as_millis(),
+                                    "Connection event publication failed, retrying after delay"
+                                );
+                                sleep(delay).await;
+                            } else {
+                                error!(
+                                    error = %error,
+                                    attempts = attempt,
+                                    "Failed to publish connection event after maximum attempts"
+                                );
                             }
                         }
                     }
-                ).await;
-                
-                // Process publish result
-                match publish_result {
-                    Ok(receivers) => {
-                        debug!(receivers, "Published OBS connection event");
-                    },
-                    Err(e) => {
-                        error!(error = %e, "Failed to publish OBS connection event after retries");
-                    }
                 }
                 
-                // Set up retry for triggering connection callbacks
-                let callbacks_clone = self.callbacks.clone();
+                // Process final result of event publication
+                if !publish_success && publish_error.is_some() {
+                    error!(
+                        error = %publish_error.unwrap(),
+                        "Failed to publish OBS connection event after retries"
+                    );
+                } else if publish_success {
+                    debug!(receivers = receivers_count, "Published OBS connection event");
+                }
+                
+                // Now trigger connection callbacks with direct sequential retry logic
                 let callback_event = ObsEvent::ConnectionChanged {
                     connected: true,
                     data: payload,
                 };
                 
-                let callback_event_clone = callback_event.clone();
-                let trigger_result = crate::adapters::common::with_retry(
-                    "trigger_connection_callbacks",
-                    RetryOptions::default(),
-                    move |attempt| {
-                        let callbacks_for_attempt = callbacks_clone.clone();
-                        let event_for_attempt = callback_event_clone.clone();
-                        async move {
-                            if attempt > 1 {
-                                debug!(attempt, "Retrying connection callback trigger");
-                            }
-                            match callbacks_for_attempt.trigger(event_for_attempt).await {
-                                Ok(count) => Ok(count),
-                                Err(e) => Err(AdapterError::from_anyhow_error(
-                                    "event",
-                                    format!("Failed to trigger connection callbacks: {}", e),
-                                    anyhow::anyhow!("{}", e)
-                                ))
+                let trigger_retry_options = RetryOptions::default();
+                let mut attempt = 0;
+                let mut trigger_error: Option<AdapterError> = None;
+                let mut trigger_success = false;
+                let mut callbacks_triggered = 0;
+                
+                // Record that we're starting callback trigger
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "trigger_connection_callbacks_start",
+                    Some(json!({
+                        "max_attempts": trigger_retry_options.max_attempts,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                while attempt < trigger_retry_options.max_attempts {
+                    attempt += 1;
+                    debug!(attempt, "Attempting to trigger connection callbacks");
+                    
+                    // Record the attempt in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "trigger_connection_callbacks_attempt",
+                        Some(json!({
+                            "attempt": attempt,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // Attempt to trigger callbacks
+                    match self.callbacks.trigger(callback_event.clone()).await {
+                        Ok(count) => {
+                            // Trigger successful
+                            trigger_success = true;
+                            callbacks_triggered = count;
+                            
+                            // Record success in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "trigger_connection_callbacks_success",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "callbacks_triggered": count,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            debug!(callbacks = count, "Triggered OBS connection callbacks successfully");
+                            break;
+                        },
+                        Err(e) => {
+                            // Trigger failed
+                            let error = AdapterError::from_anyhow_error(
+                                "event",
+                                format!("Failed to trigger connection callbacks: {}", e),
+                                e
+                            );
+                            trigger_error = Some(error.clone());
+                            
+                            // Record failure in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "trigger_connection_callbacks_attempt_failure",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "error": error.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            // If this wasn't the last attempt, calculate delay and retry
+                            if attempt < trigger_retry_options.max_attempts {
+                                let delay = trigger_retry_options.get_delay(attempt);
+                                warn!(
+                                    error = %error,
+                                    attempt = attempt,
+                                    next_delay_ms = %delay.as_millis(),
+                                    "Connection callbacks trigger failed, retrying after delay"
+                                );
+                                sleep(delay).await;
+                            } else {
+                                error!(
+                                    error = %error,
+                                    attempts = attempt,
+                                    "Failed to trigger connection callbacks after maximum attempts"
+                                );
                             }
                         }
                     }
-                ).await;
+                }
                 
-                // Process trigger result
-                match trigger_result {
-                    Ok(count) => {
-                        debug!(callbacks = count, "Triggered OBS connection callbacks");
-                    },
-                    Err(e) => {
-                        error!(error = %e, "Failed to trigger OBS connection callbacks after retries");
-                    }
+                // Process final result of trigger
+                if !trigger_success && trigger_error.is_some() {
+                    error!(
+                        error = %trigger_error.unwrap(),
+                        "Failed to trigger OBS connection callbacks after retries"
+                    );
+                } else if trigger_success {
+                    debug!(callbacks = callbacks_triggered, "Triggered OBS connection callbacks");
                 }
 
                 Ok(())
@@ -1108,49 +1725,126 @@ impl ServiceAdapter for ObsAdapter {
                     })),
                 ).await;
 
-                // Set up retry for publishing failure event
-                let event_bus_clone = Arc::clone(&self.base.event_bus());
-                let error_clone = e.to_string();
-                let config_clone = config.clone();
+                // Use direct sequential retry logic for publishing failure event
+                let payload = json!({
+                    "host": config.host,
+                    "port": config.port,
+                    "error": e.to_string(),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                });
                 
-                let publish_result = crate::adapters::common::with_retry(
-                    "publish_connection_failed",
-                    RetryOptions::default(),
-                    move |attempt| {
-                        let event_bus_for_attempt = event_bus_clone.clone();
-                        let error_for_attempt = error_clone.clone();
-                        let config_for_attempt = config_clone.clone();
-                        async move {
-                            if attempt > 1 {
-                                debug!(attempt, "Retrying connection failure event publication");
-                            }
-                            let payload = json!({
-                                "host": config_for_attempt.host,
-                                "port": config_for_attempt.port,
-                                "error": error_for_attempt,
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            });
+                let failure_retry_options = RetryOptions::default();
+                let mut attempt = 0;
+                let mut failure_error: Option<AdapterError> = None;
+                let mut failure_success = false;
+                
+                // Record that we're starting failure event publication
+                TraceHelper::record_adapter_operation(
+                    "obs",
+                    "publish_connection_failed_start",
+                    Some(json!({
+                        "max_attempts": failure_retry_options.max_attempts,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                while attempt < failure_retry_options.max_attempts {
+                    attempt += 1;
+                    debug!(attempt, "Attempting to publish connection failure event");
+                    
+                    // Record the attempt in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "publish_connection_failed_attempt",
+                        Some(json!({
+                            "attempt": attempt,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // Create the event and attempt to publish
+                    let stream_event = StreamEvent::new("obs", "connection.failed", payload.clone());
+                    match self.base.event_bus().publish(stream_event).await {
+                        Ok(_) => {
+                            // Publication successful
+                            failure_success = true;
                             
-                            let stream_event = StreamEvent::new("obs", "connection.failed", payload);
-                            match event_bus_for_attempt.publish(stream_event).await {
-                                Ok(receivers) => Ok(receivers),
-                                Err(e) => Err(AdapterError::from_anyhow_error(
-                                    "event",
-                                    format!("Failed to publish connection failure event: {}", e),
-                                    anyhow::anyhow!("{}", e)
-                                ))
+                            // Record success in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "publish_connection_failed_success",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            debug!("Published OBS connection failure event successfully");
+                            break;
+                        },
+                        Err(pub_err) => {
+                            // Publication failed
+                            let error = AdapterError::from_anyhow_error(
+                                "event",
+                                format!("Failed to publish connection failure event: {}", pub_err),
+                                anyhow::anyhow!("{}", pub_err)
+                            );
+                            failure_error = Some(error.clone());
+                            
+                            // Record failure in trace
+                            TraceHelper::record_adapter_operation(
+                                "obs",
+                                "publish_connection_failed_attempt_failure",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "error": error.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            // If this wasn't the last attempt, calculate delay and retry
+                            if attempt < failure_retry_options.max_attempts {
+                                let delay = failure_retry_options.get_delay(attempt);
+                                warn!(
+                                    error = %error,
+                                    attempt = attempt,
+                                    next_delay_ms = %delay.as_millis(),
+                                    "Connection failure event publication failed, retrying after delay"
+                                );
+                                sleep(delay).await;
+                            } else {
+                                error!(
+                                    error = %error,
+                                    attempts = attempt,
+                                    "Failed to publish connection failure event after maximum attempts"
+                                );
                             }
                         }
                     }
-                ).await;
+                }
                 
-                if let Err(publish_err) = publish_result {
+                // Process final result of failure event publication
+                if !failure_success && failure_error.is_some() {
                     error!(
-                        error = %publish_err,
+                        error = %failure_error.unwrap(),
                         "Failed to publish OBS connection failure event after retries"
                     );
-                } else {
+                } else if failure_success {
                     debug!("Published OBS connection failure event");
+                }
+
+                // Also try to trigger callbacks for the failure
+                let callback_event = ObsEvent::ConnectionChanged {
+                    connected: false,
+                    data: payload,
+                };
+                
+                // We can attempt to trigger callbacks but it's not critical if it fails
+                if let Err(trigger_err) = self.callbacks.trigger(callback_event).await {
+                    warn!(
+                        error = %trigger_err,
+                        "Failed to trigger connection failure callbacks"
+                    );
                 }
 
                 Err(e.into())
@@ -1191,86 +1885,221 @@ impl ServiceAdapter for ObsAdapter {
         *self.client.lock().await = None;
         debug!("Cleared OBS client reference");
 
-        // Set up retry for publishing disconnection event
-        let event_bus_clone = Arc::clone(&self.base.event_bus());
-        let publish_result = crate::adapters::common::with_retry(
-            "publish_disconnection_event",
-            RetryOptions::default(),
-            move |attempt| {
-                let event_bus_for_attempt = event_bus_clone.clone();
-                async move {
-                    if attempt > 1 {
-                        debug!(attempt, "Retrying disconnection event publication");
-                    }
-                    let payload = json!({
-                        "message": "Disconnected from OBS WebSocket",
-                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                    });
-                    
-                    let stream_event = StreamEvent::new("obs", "connection.closed", payload);
-                    match event_bus_for_attempt.publish(stream_event).await {
-                        Ok(receivers) => Ok(receivers),
-                        Err(e) => Err(AdapterError::from_anyhow_error(
-                            "event",
-                            format!("Failed to publish disconnection event: {}", e),
-                            anyhow::anyhow!("{}", e)
-                        ))
-                    }
-                }
-            }
+        // Use direct sequential retry logic for publishing disconnection event
+        let event_payload = json!({
+            "message": "Disconnected from OBS WebSocket",
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        
+        let publish_retry_options = RetryOptions::default();
+        let mut attempt = 0;
+        let mut publish_error: Option<AdapterError> = None;
+        let mut publish_success = false;
+        let mut receivers_count = 0;
+        
+        // Record that we're starting event publication
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "publish_disconnection_event_start",
+            Some(json!({
+                "max_attempts": publish_retry_options.max_attempts,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
         ).await;
         
-        // Process publish result
-        match publish_result {
-            Ok(receivers) => {
-                debug!(receivers, "Published OBS disconnection event");
-            },
-            Err(e) => {
-                error!(error = %e, "Failed to publish OBS disconnection event after retries");
+        while attempt < publish_retry_options.max_attempts {
+            attempt += 1;
+            debug!(attempt, "Attempting to publish disconnection event");
+            
+            // Record the attempt in trace
+            TraceHelper::record_adapter_operation(
+                "obs",
+                "publish_disconnection_event_attempt",
+                Some(json!({
+                    "attempt": attempt,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            // Create the event and attempt to publish
+            let stream_event = StreamEvent::new("obs", "connection.closed", event_payload.clone());
+            match self.base.event_bus().publish(stream_event).await {
+                Ok(receivers) => {
+                    // Publication successful
+                    publish_success = true;
+                    receivers_count = receivers;
+                    
+                    // Record success in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "publish_disconnection_event_success",
+                        Some(json!({
+                            "attempt": attempt,
+                            "receivers": receivers,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    debug!(receivers, "Published OBS disconnection event successfully");
+                    break;
+                },
+                Err(e) => {
+                    // Publication failed
+                    let error = AdapterError::from_anyhow_error(
+                        "event",
+                        format!("Failed to publish disconnection event: {}", e),
+                        anyhow::anyhow!("{}", e)
+                    );
+                    publish_error = Some(error.clone());
+                    
+                    // Record failure in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "publish_disconnection_event_attempt_failure",
+                        Some(json!({
+                            "attempt": attempt,
+                            "error": error.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // If this wasn't the last attempt, calculate delay and retry
+                    if attempt < publish_retry_options.max_attempts {
+                        let delay = publish_retry_options.get_delay(attempt);
+                        warn!(
+                            error = %error,
+                            attempt = attempt,
+                            next_delay_ms = %delay.as_millis(),
+                            "Disconnection event publication failed, retrying after delay"
+                        );
+                        sleep(delay).await;
+                    } else {
+                        error!(
+                            error = %error,
+                            attempts = attempt,
+                            "Failed to publish disconnection event after maximum attempts"
+                        );
+                    }
+                }
             }
         }
         
-        // Set up retry for triggering disconnection callbacks
-        let callbacks_clone = self.callbacks.clone();
+        // Process final result of event publication
+        if !publish_success && publish_error.is_some() {
+            error!(
+                error = %publish_error.unwrap(),
+                "Failed to publish OBS disconnection event after retries"
+            );
+        } else if publish_success {
+            debug!(receivers = receivers_count, "Published OBS disconnection event");
+        }
+        
+        // Now trigger disconnection callbacks with direct sequential retry logic
         let callback_event = ObsEvent::ConnectionChanged {
             connected: false,
-            data: json!({
-                "message": "Disconnected from OBS WebSocket",
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            }),
+            data: event_payload.clone(),
         };
         
-        let callback_event_clone = callback_event.clone();
-        let trigger_result = crate::adapters::common::with_retry(
-            "trigger_disconnection_callbacks",
-            RetryOptions::default(),
-            move |attempt| {
-                let callbacks_for_attempt = callbacks_clone.clone();
-                let event_for_attempt = callback_event_clone.clone();
-                async move {
-                    if attempt > 1 {
-                        debug!(attempt, "Retrying disconnection callback trigger");
-                    }
-                    match callbacks_for_attempt.trigger(event_for_attempt).await {
-                        Ok(count) => Ok(count),
-                        Err(e) => Err(AdapterError::from_anyhow_error(
-                            "event",
-                            format!("Failed to trigger disconnection callbacks: {}", e),
-                            anyhow::anyhow!("{}", e)
-                        ))
+        let trigger_retry_options = RetryOptions::default();
+        let mut attempt = 0;
+        let mut trigger_error: Option<AdapterError> = None;
+        let mut trigger_success = false;
+        let mut callbacks_triggered = 0;
+        
+        // Record that we're starting callback trigger
+        TraceHelper::record_adapter_operation(
+            "obs",
+            "trigger_disconnection_callbacks_start",
+            Some(json!({
+                "max_attempts": trigger_retry_options.max_attempts,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
+        while attempt < trigger_retry_options.max_attempts {
+            attempt += 1;
+            debug!(attempt, "Attempting to trigger disconnection callbacks");
+            
+            // Record the attempt in trace
+            TraceHelper::record_adapter_operation(
+                "obs",
+                "trigger_disconnection_callbacks_attempt",
+                Some(json!({
+                    "attempt": attempt,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            // Attempt to trigger callbacks
+            match self.callbacks.trigger(callback_event.clone()).await {
+                Ok(count) => {
+                    // Trigger successful
+                    trigger_success = true;
+                    callbacks_triggered = count;
+                    
+                    // Record success in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "trigger_disconnection_callbacks_success",
+                        Some(json!({
+                            "attempt": attempt,
+                            "callbacks_triggered": count,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    debug!(callbacks = count, "Triggered OBS disconnection callbacks successfully");
+                    break;
+                },
+                Err(e) => {
+                    // Trigger failed
+                    let error = AdapterError::from_anyhow_error(
+                        "event",
+                        format!("Failed to trigger disconnection callbacks: {}", e),
+                        e
+                    );
+                    trigger_error = Some(error.clone());
+                    
+                    // Record failure in trace
+                    TraceHelper::record_adapter_operation(
+                        "obs",
+                        "trigger_disconnection_callbacks_attempt_failure",
+                        Some(json!({
+                            "attempt": attempt,
+                            "error": error.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // If this wasn't the last attempt, calculate delay and retry
+                    if attempt < trigger_retry_options.max_attempts {
+                        let delay = trigger_retry_options.get_delay(attempt);
+                        warn!(
+                            error = %error,
+                            attempt = attempt,
+                            next_delay_ms = %delay.as_millis(),
+                            "Disconnection callbacks trigger failed, retrying after delay"
+                        );
+                        sleep(delay).await;
+                    } else {
+                        error!(
+                            error = %error,
+                            attempts = attempt,
+                            "Failed to trigger disconnection callbacks after maximum attempts"
+                        );
                     }
                 }
             }
-        ).await;
+        }
         
-        // Process trigger result
-        match trigger_result {
-            Ok(count) => {
-                debug!(callbacks = count, "Triggered OBS disconnection callbacks");
-            },
-            Err(e) => {
-                error!(error = %e, "Failed to trigger OBS disconnection callbacks after retries");
-            }
+        // Process final result of trigger
+        if !trigger_success && trigger_error.is_some() {
+            error!(
+                error = %trigger_error.unwrap(),
+                "Failed to trigger OBS disconnection callbacks after retries"
+            );
+        } else if trigger_success {
+            debug!(callbacks = callbacks_triggered, "Triggered OBS disconnection callbacks");
         }
         
         // Record successful disconnection in trace

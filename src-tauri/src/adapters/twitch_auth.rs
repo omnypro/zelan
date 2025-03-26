@@ -11,7 +11,7 @@ use twitch_oauth2::{
 
 // Internal imports
 use crate::adapters::{
-    common::{AdapterError, RetryOptions, TraceHelper, with_retry},
+    common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper},
     http_client::{HttpClient, ReqwestHttpClient},
 };
 
@@ -382,27 +382,44 @@ impl TwitchAuthManager {
             // Define retry options for token refresh
             let retry_options = RetryOptions::new(
                 2, // Only try twice for token refresh
-                super::common::BackoffStrategy::Exponential {
+                BackoffStrategy::Exponential {
                     base_delay: std::time::Duration::from_millis(100),
                     max_delay: std::time::Duration::from_secs(2),
                 },
                 true, // Add jitter
             );
             
-            // Use the common retry logic
+            // Implement direct sequential retry logic
             let operation_name = "token_refresh";
             let self_clone = self.clone();
             let token_clone = token.clone();
             
-            let result = with_retry(operation_name, retry_options, move |attempt| {
-                // Clone values first to avoid move issues
-                let self_clone_inner = self_clone.clone();
-                let token_clone_inner = token_clone.clone();
-                
-                async move {
-                    // Use the inner clones for the async block
-                    let inner_self_clone = self_clone_inner.clone();
-                    let _inner_token_clone = token_clone_inner.clone();
+            // Start tracing the operation
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                &format!("{}_start", operation_name),
+                Some(serde_json::json!({
+                    "max_attempts": retry_options.max_attempts,
+                    "backoff": format!("{:?}", retry_options.backoff),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            // Initialize result
+            let mut result = None;
+            let mut last_error = None;
+            
+            // Retry loop
+            for attempt in 1..=retry_options.max_attempts {
+                // Record attempt
+                TraceHelper::record_adapter_operation(
+                    "twitch",
+                    &format!("{}_attempt", operation_name),
+                    Some(serde_json::json!({
+                        "attempt": attempt,
+                        "max_attempts": retry_options.max_attempts,
+                    })),
+                ).await;
                 
                 debug!(
                     attempt = attempt,
@@ -415,11 +432,43 @@ impl TwitchAuthManager {
                 let client_id = match get_client_id() {
                     Ok(id) => id,
                     Err(e) => {
-                        return Err(AdapterError::from_anyhow_error(
+                        let error = AdapterError::from_anyhow_error(
                             "config",
                             "Failed to get client ID for token refresh",
                             e
-                        ));
+                        );
+                        
+                        // Record failure
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            &format!("{}_failure", operation_name),
+                            Some(serde_json::json!({
+                                "attempt": attempt,
+                                "max_attempts": retry_options.max_attempts,
+                                "error": error.to_string(),
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        // Store last error for return if all attempts fail
+                        last_error = Some(error);
+                        
+                        // If this is the last attempt, we're done with errors
+                        if attempt == retry_options.max_attempts {
+                            break;
+                        }
+                        
+                        // Calculate delay for the next attempt
+                        let delay = retry_options.get_delay(attempt);
+                        debug!(
+                            attempt = attempt,
+                            delay_ms = delay.as_millis(),
+                            "Retrying after delay"
+                        );
+                        
+                        // Wait before next attempt
+                        tokio::time::sleep(delay).await;
+                        continue;
                     }
                 };
                 
@@ -429,15 +478,47 @@ impl TwitchAuthManager {
                     .build() {
                     Ok(client) => client,
                     Err(e) => {
-                        return Err(AdapterError::connection_with_source(
+                        let error = AdapterError::connection_with_source(
                             "Failed to create HTTP client for token refresh",
                             e
-                        ));
+                        );
+                        
+                        // Record failure
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            &format!("{}_failure", operation_name),
+                            Some(serde_json::json!({
+                                "attempt": attempt,
+                                "max_attempts": retry_options.max_attempts,
+                                "error": error.to_string(),
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        // Store last error for return if all attempts fail
+                        last_error = Some(error);
+                        
+                        // If this is the last attempt, we're done with errors
+                        if attempt == retry_options.max_attempts {
+                            break;
+                        }
+                        
+                        // Calculate delay for the next attempt
+                        let delay = retry_options.get_delay(attempt);
+                        debug!(
+                            attempt = attempt,
+                            delay_ms = delay.as_millis(),
+                            "Retrying after delay"
+                        );
+                        
+                        // Wait before next attempt
+                        tokio::time::sleep(delay).await;
+                        continue;
                     }
                 };
                 
                 // Check if we have a refresh token
-                if let Some(refresh_token) = token_clone_inner.refresh_token.clone() {
+                if let Some(refresh_token) = token_clone.refresh_token.clone() {
                     // Log that we're attempting to refresh the token
                     TraceHelper::record_adapter_operation(
                         "twitch",
@@ -445,7 +526,7 @@ impl TwitchAuthManager {
                         Some(serde_json::json!({
                             "attempt": attempt,
                             "has_refresh_token": true,
-                            "token_expires_in_seconds": token_clone_inner.expires_in().as_secs(),
+                            "token_expires_in_seconds": token_clone.expires_in().as_secs(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
                     ).await;
@@ -453,7 +534,7 @@ impl TwitchAuthManager {
                     // Use the method that automatically refreshes if needed
                     match UserToken::from_existing_or_refresh_token(
                         &http_client,
-                        token_clone_inner.access_token.clone(),
+                        token_clone.access_token.clone(),
                         refresh_token,
                         client_id,
                         None, // client_secret
@@ -469,10 +550,10 @@ impl TwitchAuthManager {
                             );
                             
                             // Update auth state with the refreshed token
-                            *inner_self_clone.auth_state.write().await = AuthState::Authenticated(refreshed_token.clone());
+                            *self_clone.auth_state.write().await = AuthState::Authenticated(refreshed_token.clone());
                             
                             // Send refresh event
-                            if let Err(e) = inner_self_clone.send_event(AuthEvent::TokenRefreshed).await {
+                            if let Err(e) = self_clone.send_event(AuthEvent::TokenRefreshed).await {
                                 warn!("Failed to send token refreshed event: {}", e);
                             }
                             
@@ -494,7 +575,7 @@ impl TwitchAuthManager {
                                 payload: token_refresh_payload.clone()
                             };
                             
-                            if let Err(e) = inner_self_clone.send_event(refresh_details_event).await {
+                            if let Err(e) = self_clone.send_event(refresh_details_event).await {
                                 warn!("Could not send token refresh details: {}", e);
                             }
                             
@@ -505,7 +586,18 @@ impl TwitchAuthManager {
                                 Some(token_refresh_payload),
                             ).await;
                             
-                            Ok(refreshed_token)
+                            // Record success and return result
+                            TraceHelper::record_adapter_operation(
+                                "twitch",
+                                &format!("{}_success", operation_name),
+                                Some(serde_json::json!({
+                                    "attempt": attempt,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            result = Some(Ok(refreshed_token));
+                            break;
                         },
                         Err(e) => {
                             // Enhanced error logging
@@ -515,22 +607,41 @@ impl TwitchAuthManager {
                                 "Failed to validate or refresh token"
                             );
                             
+                            // Create structured error
+                            let error = AdapterError::from_anyhow_error("auth", 
+                                format!("Failed to validate or refresh token (attempt {})", attempt),
+                                anyhow::anyhow!(e)
+                            );
+                            
                             // Log the failure in trace
                             TraceHelper::record_adapter_operation(
                                 "twitch",
                                 "token_refresh_failure",
                                 Some(serde_json::json!({
                                     "attempt": attempt,
-                                    "error": e.to_string(),
+                                    "error": error.to_string(),
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
                             ).await;
                             
-                            // Return a structured error
-                            Err(AdapterError::from_anyhow_error("auth", 
-                                format!("Failed to validate or refresh token (attempt {})", attempt),
-                                anyhow::anyhow!(e)
-                            ))
+                            // Store last error for return if all attempts fail
+                            last_error = Some(error);
+                            
+                            // If this is the last attempt, we're done with errors
+                            if attempt == retry_options.max_attempts {
+                                break;
+                            }
+                            
+                            // Calculate delay for the next attempt
+                            let delay = retry_options.get_delay(attempt);
+                            debug!(
+                                attempt = attempt,
+                                delay_ms = delay.as_millis(),
+                                "Retrying after delay"
+                            );
+                            
+                            // Wait before next attempt
+                            tokio::time::sleep(delay).await;
                         }
                     }
                 } else {
@@ -544,12 +655,12 @@ impl TwitchAuthManager {
                         Some(serde_json::json!({
                             "attempt": attempt,
                             "has_refresh_token": false,
-                            "token_expires_in_seconds": token_clone_inner.expires_in().as_secs(),
+                            "token_expires_in_seconds": token_clone.expires_in().as_secs(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
                     ).await;
                     
-                    match token_clone_inner.access_token.validate_token(&http_client).await {
+                    match token_clone.access_token.validate_token(&http_client).await {
                         Ok(_) => {
                             info!("Access token is still valid (validated directly)");
                             
@@ -559,13 +670,24 @@ impl TwitchAuthManager {
                                 "token_validation_success",
                                 Some(serde_json::json!({
                                     "attempt": attempt,
-                                    "expires_in_seconds": token_clone_inner.expires_in().as_secs(),
+                                    "expires_in_seconds": token_clone.expires_in().as_secs(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            // Record success and return result
+                            TraceHelper::record_adapter_operation(
+                                "twitch",
+                                &format!("{}_success", operation_name),
+                                Some(serde_json::json!({
+                                    "attempt": attempt,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
                             ).await;
                             
                             // Return the original token since it's still valid
-                            Ok(token_clone_inner.clone())
+                            result = Some(Ok(token_clone.clone()));
+                            break;
                         },
                         Err(e) => {
                             error!(
@@ -574,27 +696,72 @@ impl TwitchAuthManager {
                                 "Token validation failed"
                             );
                             
+                            // Create structured error
+                            let error = AdapterError::from_anyhow_error("auth", 
+                                format!("Token validation failed (attempt {})", attempt),
+                                anyhow::anyhow!(e)
+                            );
+                            
                             // Log the failure in trace
                             TraceHelper::record_adapter_operation(
                                 "twitch",
                                 "token_validation_failure",
                                 Some(serde_json::json!({
                                     "attempt": attempt,
-                                    "error": e.to_string(),
+                                    "error": error.to_string(),
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
                             ).await;
                             
-                            // Return a structured error
-                            Err(AdapterError::from_anyhow_error("auth", 
-                                format!("Token validation failed (attempt {})", attempt),
-                                anyhow::anyhow!(e)
-                            ))
+                            // Store last error for return if all attempts fail
+                            last_error = Some(error);
+                            
+                            // If this is the last attempt, we're done with errors
+                            if attempt == retry_options.max_attempts {
+                                break;
+                            }
+                            
+                            // Calculate delay for the next attempt
+                            let delay = retry_options.get_delay(attempt);
+                            debug!(
+                                attempt = attempt,
+                                delay_ms = delay.as_millis(),
+                                "Retrying after delay"
+                            );
+                            
+                            // Wait before next attempt
+                            tokio::time::sleep(delay).await;
                         }
                     }
                 }
+            }
+            
+            // Process the final result
+            let result = match result {
+                Some(ok_result) => ok_result,
+                None => {
+                    // Record final failure
+                    let error_msg = match last_error {
+                        Some(ref e) => e.to_string(),
+                        None => "Unknown error during token refresh".to_string(),
+                    };
+                    
+                    TraceHelper::record_adapter_operation(
+                        "twitch",
+                        &format!("{}_all_attempts_failed", operation_name),
+                        Some(serde_json::json!({
+                            "max_attempts": retry_options.max_attempts,
+                            "error": error_msg,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // Return the last error
+                    Err(last_error.unwrap_or_else(|| 
+                        AdapterError::auth("Failed to refresh token after all retry attempts")
+                    ))
                 }
-            }).await;
+            };
             
             // Handle the result of the token refresh operation
             match result {
@@ -661,23 +828,42 @@ impl TwitchAuthManager {
         // Define retry options for token restoration
         let retry_options = RetryOptions::new(
             2, // Only try twice for token restoration
-            super::common::BackoffStrategy::Constant(std::time::Duration::from_secs(1)), 
+            BackoffStrategy::Constant(std::time::Duration::from_secs(1)), 
             true, // Add jitter
         );
         
-        // Use the common retry logic
+        // Implement direct sequential retry logic
         let operation_name = "token_restoration";
         let self_clone = self.clone();
         
-        let result = with_retry(operation_name, retry_options, move |attempt| {
-            // Clone values first to avoid move issues
-            let self_clone_inner = self_clone.clone();
-            let access_token_inner = access_token.clone();
-            let refresh_token_inner = refresh_token.clone();
-            
-            async move {
-                // Use the inner clones for the async block
-                let inner_self_clone = self_clone_inner.clone();
+        // Start tracing the operation
+        TraceHelper::record_adapter_operation(
+            "twitch",
+            &format!("{}_start", operation_name),
+            Some(serde_json::json!({
+                "max_attempts": retry_options.max_attempts,
+                "backoff": format!("{:?}", retry_options.backoff),
+                "access_token_len": access_token.len(),
+                "has_refresh_token": refresh_token.is_some(),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
+        // Initialize result
+        let mut result = None;
+        let mut last_error = None;
+        
+        // Retry loop
+        for attempt in 1..=retry_options.max_attempts {
+            // Record attempt
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                &format!("{}_attempt", operation_name),
+                Some(serde_json::json!({
+                    "attempt": attempt,
+                    "max_attempts": retry_options.max_attempts,
+                })),
+            ).await;
             
             // Log the attempt
             debug!(
@@ -693,17 +879,49 @@ impl TwitchAuthManager {
                 .build() {
                 Ok(client) => client,
                 Err(e) => {
-                    return Err(AdapterError::connection_with_source(
+                    let error = AdapterError::connection_with_source(
                         "Failed to create HTTP client for token restoration",
                         e
-                    ));
+                    );
+                    
+                    // Record failure
+                    TraceHelper::record_adapter_operation(
+                        "twitch",
+                        &format!("{}_failure", operation_name),
+                        Some(serde_json::json!({
+                            "attempt": attempt,
+                            "max_attempts": retry_options.max_attempts,
+                            "error": error.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // Store last error for return if all attempts fail
+                    last_error = Some(error);
+                    
+                    // If this is the last attempt, we're done with errors
+                    if attempt == retry_options.max_attempts {
+                        break;
+                    }
+                    
+                    // Calculate delay for the next attempt
+                    let delay = retry_options.get_delay(attempt);
+                    debug!(
+                        attempt = attempt,
+                        delay_ms = delay.as_millis(),
+                        "Retrying after delay"
+                    );
+                    
+                    // Wait before next attempt
+                    tokio::time::sleep(delay).await;
+                    continue;
                 }
             };
             
             // Create access token object
-            let access_token_obj = AccessToken::new(access_token_inner.clone());
+            let access_token_obj = AccessToken::new(access_token.clone());
             
-            if let Some(refresh_token_str) = refresh_token_inner.clone() {
+            if let Some(refresh_token_str) = refresh_token.clone() {
                 // If we have both access token and refresh token, use the new method
                 let refresh_token_obj = RefreshToken::new(refresh_token_str);
                 
@@ -711,11 +929,43 @@ impl TwitchAuthManager {
                 let client_id = match get_client_id() {
                     Ok(id) => id,
                     Err(e) => {
-                        return Err(AdapterError::from_anyhow_error(
+                        let error = AdapterError::from_anyhow_error(
                             "config",
                             "Failed to get client ID for token restoration",
                             e
-                        ));
+                        );
+                        
+                        // Record failure
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            &format!("{}_failure", operation_name),
+                            Some(serde_json::json!({
+                                "attempt": attempt,
+                                "max_attempts": retry_options.max_attempts,
+                                "error": error.to_string(),
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        // Store last error for return if all attempts fail
+                        last_error = Some(error);
+                        
+                        // If this is the last attempt, we're done with errors
+                        if attempt == retry_options.max_attempts {
+                            break;
+                        }
+                        
+                        // Calculate delay for the next attempt
+                        let delay = retry_options.get_delay(attempt);
+                        debug!(
+                            attempt = attempt,
+                            delay_ms = delay.as_millis(),
+                            "Retrying after delay"
+                        );
+                        
+                        // Wait before next attempt
+                        tokio::time::sleep(delay).await;
+                        continue;
                     }
                 };
                 
@@ -740,10 +990,10 @@ impl TwitchAuthManager {
                         );
                         
                         // Store the token in the auth state
-                        *inner_self_clone.auth_state.write().await = AuthState::Authenticated(token.clone());
+                        *self_clone.auth_state.write().await = AuthState::Authenticated(token.clone());
                         
                         // Send a refresh event if it was refreshed
-                        if let Err(e) = inner_self_clone.send_event(AuthEvent::TokenRefreshed).await {
+                        if let Err(e) = self_clone.send_event(AuthEvent::TokenRefreshed).await {
                             warn!("Failed to send token refreshed event: {}", e);
                         }
                         
@@ -759,7 +1009,18 @@ impl TwitchAuthManager {
                             })),
                         ).await;
                         
-                        Ok(token)
+                        // Record success and set result
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            &format!("{}_success", operation_name),
+                            Some(serde_json::json!({
+                                "attempt": attempt,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        result = Some(Ok(token));
+                        break;
                     },
                     Err(e) => {
                         // Failed to restore or refresh token
@@ -769,22 +1030,41 @@ impl TwitchAuthManager {
                             "Failed to restore or refresh token"
                         );
                         
+                        // Create structured error
+                        let error = AdapterError::from_anyhow_error("auth", 
+                            format!("Failed to restore or refresh token (attempt {})", attempt),
+                            anyhow::anyhow!(e)
+                        );
+                        
                         // Log the failure in trace
                         TraceHelper::record_adapter_operation(
                             "twitch",
                             "token_restoration_failure",
                             Some(serde_json::json!({
                                 "attempt": attempt,
-                                "error": e.to_string(),
+                                "error": error.to_string(),
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         ).await;
                         
-                        // Return a structured error
-                        Err(AdapterError::from_anyhow_error("auth", 
-                            format!("Failed to restore or refresh token (attempt {})", attempt),
-                            anyhow::anyhow!(e)
-                        ))
+                        // Store last error for return if all attempts fail
+                        last_error = Some(error);
+                        
+                        // If this is the last attempt, we're done with errors
+                        if attempt == retry_options.max_attempts {
+                            break;
+                        }
+                        
+                        // Calculate delay for the next attempt
+                        let delay = retry_options.get_delay(attempt);
+                        debug!(
+                            attempt = attempt,
+                            delay_ms = delay.as_millis(),
+                            "Retrying after delay"
+                        );
+                        
+                        // Wait before next attempt
+                        tokio::time::sleep(delay).await;
                     }
                 }
             } else {
@@ -804,15 +1084,48 @@ impl TwitchAuthManager {
                         ).await {
                             Ok(t) => t,
                             Err(e) => {
-                                return Err(AdapterError::from_anyhow_error("auth", 
+                                // Create structured error
+                                let error = AdapterError::from_anyhow_error("auth", 
                                     "Failed to create UserToken from validated access token",
                                     anyhow::anyhow!(e)
-                                ));
+                                );
+                                
+                                // Record failure
+                                TraceHelper::record_adapter_operation(
+                                    "twitch",
+                                    &format!("{}_failure", operation_name),
+                                    Some(serde_json::json!({
+                                        "attempt": attempt,
+                                        "max_attempts": retry_options.max_attempts,
+                                        "error": error.to_string(),
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                                
+                                // Store last error for return if all attempts fail
+                                last_error = Some(error);
+                                
+                                // If this is the last attempt, we're done with errors
+                                if attempt == retry_options.max_attempts {
+                                    break;
+                                }
+                                
+                                // Calculate delay for the next attempt
+                                let delay = retry_options.get_delay(attempt);
+                                debug!(
+                                    attempt = attempt,
+                                    delay_ms = delay.as_millis(),
+                                    "Retrying after delay"
+                                );
+                                
+                                // Wait before next attempt
+                                tokio::time::sleep(delay).await;
+                                continue;
                             }
                         };
                         
                         // Store valid token in auth state
-                        *inner_self_clone.auth_state.write().await = AuthState::Authenticated(token.clone());
+                        *self_clone.auth_state.write().await = AuthState::Authenticated(token.clone());
                         
                         // Log success in trace
                         TraceHelper::record_adapter_operation(
@@ -825,7 +1138,18 @@ impl TwitchAuthManager {
                             })),
                         ).await;
                         
-                        Ok(token)
+                        // Record success and set result
+                        TraceHelper::record_adapter_operation(
+                            "twitch",
+                            &format!("{}_success", operation_name),
+                            Some(serde_json::json!({
+                                "attempt": attempt,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        result = Some(Ok(token));
+                        break;
                     },
                     Err(e) => {
                         // Failed to validate access token
@@ -835,27 +1159,72 @@ impl TwitchAuthManager {
                             "Token validation failed"
                         );
                         
+                        // Create structured error
+                        let error = AdapterError::from_anyhow_error("auth", 
+                            format!("Token validation failed (attempt {})", attempt),
+                            anyhow::anyhow!(e)
+                        );
+                        
                         // Log failure in trace
                         TraceHelper::record_adapter_operation(
                             "twitch",
                             "token_validation_failure",
                             Some(serde_json::json!({
                                 "attempt": attempt,
-                                "error": e.to_string(),
+                                "error": error.to_string(),
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         ).await;
                         
-                        // Return a structured error
-                        Err(AdapterError::from_anyhow_error("auth", 
-                            format!("Token validation failed (attempt {})", attempt),
-                            anyhow::anyhow!(e)
-                        ))
+                        // Store last error for return if all attempts fail
+                        last_error = Some(error);
+                        
+                        // If this is the last attempt, we're done with errors
+                        if attempt == retry_options.max_attempts {
+                            break;
+                        }
+                        
+                        // Calculate delay for the next attempt
+                        let delay = retry_options.get_delay(attempt);
+                        debug!(
+                            attempt = attempt,
+                            delay_ms = delay.as_millis(),
+                            "Retrying after delay"
+                        );
+                        
+                        // Wait before next attempt
+                        tokio::time::sleep(delay).await;
                     }
                 }
             }
+        }
+        
+        // Process the final result
+        let result = match result {
+            Some(ok_result) => ok_result,
+            None => {
+                // Record final failure
+                let error_msg = match last_error {
+                    Some(ref e) => e.to_string(),
+                    None => "Unknown error during token restoration".to_string(),
+                };
+                
+                TraceHelper::record_adapter_operation(
+                    "twitch",
+                    &format!("{}_all_attempts_failed", operation_name),
+                    Some(serde_json::json!({
+                        "max_attempts": retry_options.max_attempts,
+                        "error": error_msg,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                // Return the last error
+                Err(last_error.unwrap_or_else(|| 
+                    AdapterError::auth("Failed to restore token after all retry attempts")
+                ))
             }
-        }).await;
+        };
         
         // Convert from AdapterError back to anyhow::Error for compatibility
         match result {

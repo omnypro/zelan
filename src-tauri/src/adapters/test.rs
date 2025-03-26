@@ -183,31 +183,110 @@ impl TestAdapter {
             true, // Add jitter
         );
         
-        // Clone the event for use in closure
-        let event_clone = event.clone();
+        // Implement direct sequential retry logic
+        let mut attempt = 0;
+        let mut last_error: Option<AdapterError> = None;
+        let mut success = false;
+        let mut callback_count = 0;
         
-        // Use retry for triggering event
-        let result = crate::adapters::common::with_retry(
-            "trigger_test_event",
-            trigger_retry_options,
-            move |attempt| {
-                let event_for_attempt = event_clone.clone();
-                let callbacks = self.callbacks.clone();
-                async move {
-                    if attempt > 1 {
-                        debug!(attempt, "Retrying test event trigger");
-                    }
-                    match callbacks.trigger(event_for_attempt).await {
-                        Ok(count) => Ok(count),
-                        Err(e) => Err(AdapterError::from_anyhow_error(
-                            "event",
-                            format!("Failed to trigger test event: {}", e),
-                            e,
-                        ))
+        // Record the beginning of retry attempts in trace
+        TraceHelper::record_adapter_operation(
+            "test",
+            "trigger_test_event_start",
+            Some(json!({
+                "event_type": event.event_type(),
+                "max_attempts": trigger_retry_options.max_attempts,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })),
+        ).await;
+        
+        while attempt < trigger_retry_options.max_attempts {
+            attempt += 1;
+            
+            // Record the current attempt in trace
+            TraceHelper::record_adapter_operation(
+                "test",
+                "trigger_test_event_attempt",
+                Some(json!({
+                    "attempt": attempt,
+                    "event_type": event.event_type(),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            // Attempt to trigger the event
+            if attempt > 1 {
+                debug!(attempt, "Retrying test event trigger");
+            }
+            
+            match self.callbacks.trigger(event.clone()).await {
+                Ok(count) => {
+                    success = true;
+                    callback_count = count;
+                    
+                    // Record successful trigger in trace
+                    TraceHelper::record_adapter_operation(
+                        "test",
+                        "trigger_test_event_success",
+                        Some(json!({
+                            "attempt": attempt,
+                            "callbacks_triggered": count,
+                            "event_type": event.event_type(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    debug!(callbacks = count, "Triggered test event successfully");
+                    break;
+                },
+                Err(e) => {
+                    // Convert to AdapterError
+                    let error = AdapterError::from_anyhow_error(
+                        "event",
+                        format!("Failed to trigger test event: {}", e),
+                        e,
+                    );
+                    last_error = Some(error.clone());
+                    
+                    // Record failure in trace
+                    TraceHelper::record_adapter_operation(
+                        "test",
+                        "trigger_test_event_attempt_failure",
+                        Some(json!({
+                            "attempt": attempt,
+                            "error": error.to_string(),
+                            "event_type": event.event_type(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    // If not the last attempt, calculate delay and retry
+                    if attempt < trigger_retry_options.max_attempts {
+                        let delay = trigger_retry_options.get_delay(attempt);
+                        warn!(
+                            error = %error,
+                            attempt = attempt,
+                            next_delay_ms = %delay.as_millis(),
+                            "Test event trigger failed, retrying after delay"
+                        );
+                        sleep(delay).await;
+                    } else {
+                        error!(
+                            error = %error,
+                            attempts = attempt,
+                            "Failed to trigger test event after maximum attempts"
+                        );
                     }
                 }
             }
-        ).await;
+        }
+        
+        // Determine result based on success flag
+        let result = if success {
+            Ok(callback_count)
+        } else {
+            Err(last_error.unwrap())
+        };
         
         match result {
             Ok(count) => {
@@ -302,29 +381,112 @@ impl TestAdapter {
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
             
-            // Use retry mechanism for publishing to event bus
+            // Use direct sequential retry logic for publishing to event bus
             let event_type = "test.initial";
             let payload_clone = payload.clone();
-            let publish_result = crate::adapters::common::with_retry(
-                &format!("publish_initial_event_{}", i),
-                publish_retry_options,
-                move |attempt| {
-                    let payload_for_attempt = payload_clone.clone();
-                    async move {
-                        if attempt > 1 {
-                            debug!(attempt, "Retrying initial event publication");
-                        }
-                        match self.base.publish_event(event_type, payload_for_attempt).await {
-                            Ok(receivers) => Ok(receivers),
-                            Err(e) => Err(AdapterError::from_anyhow_error(
-                                "event",
-                                format!("Failed to publish initial event: {}", e),
-                                e,
-                            ))
+            
+            // Implement retry logic
+            let mut attempt = 0;
+            let mut last_error: Option<AdapterError> = None;
+            let mut success = false;
+            let mut receivers_count = 0;
+            
+            // Record the beginning of retry attempts in trace
+            TraceHelper::record_adapter_operation(
+                "test",
+                "publish_initial_event_start",
+                Some(json!({
+                    "counter": i,
+                    "max_attempts": publish_retry_options.max_attempts,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            while attempt < publish_retry_options.max_attempts {
+                attempt += 1;
+                
+                // Record the current attempt in trace
+                TraceHelper::record_adapter_operation(
+                    "test",
+                    "publish_initial_event_attempt",
+                    Some(json!({
+                        "attempt": attempt,
+                        "counter": i,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                if attempt > 1 {
+                    debug!(attempt, "Retrying initial event publication");
+                }
+                
+                match self.base.publish_event(event_type, payload_clone.clone()).await {
+                    Ok(count) => {
+                        success = true;
+                        receivers_count = count;
+                        
+                        // Record successful publication in trace
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            "publish_initial_event_attempt_success",
+                            Some(json!({
+                                "attempt": attempt,
+                                "receivers": count,
+                                "counter": i,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        break;
+                    },
+                    Err(e) => {
+                        // Convert to AdapterError
+                        let error = AdapterError::from_anyhow_error(
+                            "event",
+                            format!("Failed to publish initial event: {}", e),
+                            e,
+                        );
+                        last_error = Some(error.clone());
+                        
+                        // Record failure in trace
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            "publish_initial_event_attempt_failure",
+                            Some(json!({
+                                "attempt": attempt,
+                                "error": error.to_string(),
+                                "counter": i,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        // If not the last attempt, calculate delay and retry
+                        if attempt < publish_retry_options.max_attempts {
+                            let delay = publish_retry_options.get_delay(attempt);
+                            warn!(
+                                error = %error,
+                                attempt = attempt,
+                                next_delay_ms = %delay.as_millis(),
+                                "Initial event publication failed, retrying after delay"
+                            );
+                            sleep(delay).await;
+                        } else {
+                            error!(
+                                error = %error,
+                                attempts = attempt,
+                                "Failed to publish initial event after maximum attempts"
+                            );
                         }
                     }
                 }
-            ).await;
+            }
+            
+            // Determine the final result
+            let publish_result = if success {
+                Ok(receivers_count)
+            } else {
+                Err(last_error.unwrap())
+            };
             
             match publish_result {
                 Ok(receivers) => {
@@ -358,37 +520,116 @@ impl TestAdapter {
                 }
             }
             
-            // Also trigger callbacks with retry
+            // Also trigger callbacks using direct sequential retry logic
             let callback_event = TestEvent::Initial {
                 counter: i,
                 message: message.clone(),
                 data: payload,
             };
             
-            // Use retry for callback triggering
-            let callback_event_clone = callback_event.clone();
-            let callbacks_clone = self.callbacks.clone(); 
-            let trigger_result = crate::adapters::common::with_retry(
-                &format!("trigger_initial_callback_{}", i),
-                publish_retry_options,
-                move |attempt| {
-                    let event_for_attempt = callback_event_clone.clone();
-                    let callbacks_for_attempt = callbacks_clone.clone();
-                    async move {
-                        if attempt > 1 {
-                            debug!(attempt, "Retrying initial callback trigger");
-                        }
-                        match callbacks_for_attempt.trigger(event_for_attempt).await {
-                            Ok(count) => Ok(count),
-                            Err(e) => Err(AdapterError::from_anyhow_error(
-                                "event",
-                                format!("Failed to trigger initial event callback: {}", e),
-                                e,
-                            ))
+            // Implement direct sequential retry logic for callbacks
+            let mut attempt = 0;
+            let mut last_error: Option<AdapterError> = None;
+            let mut success = false;
+            let mut callbacks_triggered = 0;
+            let callbacks_clone = self.callbacks.clone();
+            
+            // Record the beginning of callback retry attempts in trace
+            TraceHelper::record_adapter_operation(
+                "test",
+                "trigger_initial_callback_start",
+                Some(json!({
+                    "counter": i,
+                    "max_attempts": publish_retry_options.max_attempts,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            while attempt < publish_retry_options.max_attempts {
+                attempt += 1;
+                
+                // Record the current attempt in trace
+                TraceHelper::record_adapter_operation(
+                    "test",
+                    "trigger_initial_callback_attempt",
+                    Some(json!({
+                        "attempt": attempt,
+                        "counter": i,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                if attempt > 1 {
+                    debug!(attempt, "Retrying initial callback trigger");
+                }
+                
+                match callbacks_clone.trigger(callback_event.clone()).await {
+                    Ok(count) => {
+                        success = true;
+                        callbacks_triggered = count;
+                        
+                        // Record successful trigger in trace
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            "trigger_initial_callback_attempt_success",
+                            Some(json!({
+                                "attempt": attempt,
+                                "callbacks_triggered": count,
+                                "counter": i,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        break;
+                    },
+                    Err(e) => {
+                        // Convert to AdapterError
+                        let error = AdapterError::from_anyhow_error(
+                            "event",
+                            format!("Failed to trigger initial event callback: {}", e),
+                            e,
+                        );
+                        last_error = Some(error.clone());
+                        
+                        // Record failure in trace
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            "trigger_initial_callback_attempt_failure",
+                            Some(json!({
+                                "attempt": attempt,
+                                "error": error.to_string(),
+                                "counter": i,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        // If not the last attempt, calculate delay and retry
+                        if attempt < publish_retry_options.max_attempts {
+                            let delay = publish_retry_options.get_delay(attempt);
+                            warn!(
+                                error = %error,
+                                attempt = attempt,
+                                next_delay_ms = %delay.as_millis(),
+                                "Initial callback trigger failed, retrying after delay"
+                            );
+                            sleep(delay).await;
+                        } else {
+                            error!(
+                                error = %error,
+                                attempts = attempt,
+                                "Failed to trigger initial callback after maximum attempts"
+                            );
                         }
                     }
                 }
-            ).await;
+            }
+            
+            // Determine the final result
+            let trigger_result = if success {
+                Ok(callbacks_triggered)
+            } else {
+                Err(last_error.unwrap())
+            };
             
             match trigger_result {
                 Ok(count) => {
@@ -484,30 +725,112 @@ impl TestAdapter {
 
             debug!(counter, "Publishing regular test event");
 
-            // Use retry mechanism for standard event publishing
+            // Use direct sequential retry logic for standard event publishing
             let event_type = "test.event";
             let payload_clone = payload.clone();
-            let publish_result = crate::adapters::common::with_retry(
-                &format!("publish_standard_event_{}", counter),
-                publish_retry_options,
-                move |attempt| {
-                    let payload_for_attempt = payload_clone.clone();
-                    let counter_val = counter; // Capture counter for the debug log
-                    async move {
-                        if attempt > 1 {
-                            debug!(attempt, counter = counter_val, "Retrying standard event publication");
-                        }
-                        match self.base.publish_event(event_type, payload_for_attempt).await {
-                            Ok(receivers) => Ok(receivers),
-                            Err(e) => Err(AdapterError::from_anyhow_error(
-                                "event",
-                                format!("Failed to publish standard event: {}", e),
-                                e,
-                            ))
+            
+            // Implement direct sequential retry logic
+            let mut attempt = 0;
+            let mut last_error: Option<AdapterError> = None;
+            let mut success = false;
+            let mut receivers_count = 0;
+            
+            // Record the beginning of retry attempts in trace
+            TraceHelper::record_adapter_operation(
+                "test",
+                "publish_standard_event_start",
+                Some(json!({
+                    "counter": counter,
+                    "max_attempts": publish_retry_options.max_attempts,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            while attempt < publish_retry_options.max_attempts {
+                attempt += 1;
+                
+                // Record the current attempt in trace
+                TraceHelper::record_adapter_operation(
+                    "test",
+                    "publish_standard_event_attempt",
+                    Some(json!({
+                        "attempt": attempt,
+                        "counter": counter,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                if attempt > 1 {
+                    debug!(attempt, counter, "Retrying standard event publication");
+                }
+                
+                match self.base.publish_event(event_type, payload_clone.clone()).await {
+                    Ok(count) => {
+                        success = true;
+                        receivers_count = count;
+                        
+                        // Record successful publication in trace
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            "publish_standard_event_attempt_success",
+                            Some(json!({
+                                "attempt": attempt,
+                                "receivers": count,
+                                "counter": counter,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        break;
+                    },
+                    Err(e) => {
+                        // Convert to AdapterError
+                        let error = AdapterError::from_anyhow_error(
+                            "event",
+                            format!("Failed to publish standard event: {}", e),
+                            e,
+                        );
+                        last_error = Some(error.clone());
+                        
+                        // Record failure in trace
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            "publish_standard_event_attempt_failure",
+                            Some(json!({
+                                "attempt": attempt,
+                                "error": error.to_string(),
+                                "counter": counter,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        // If not the last attempt, calculate delay and retry
+                        if attempt < publish_retry_options.max_attempts {
+                            let delay = publish_retry_options.get_delay(attempt);
+                            warn!(
+                                error = %error,
+                                attempt = attempt,
+                                next_delay_ms = %delay.as_millis(),
+                                "Standard event publication failed, retrying after delay"
+                            );
+                            sleep(delay).await;
+                        } else {
+                            error!(
+                                error = %error,
+                                attempts = attempt,
+                                "Failed to publish standard event after maximum attempts"
+                            );
                         }
                     }
                 }
-            ).await;
+            }
+            
+            // Determine the final result
+            let publish_result = if success {
+                Ok(receivers_count)
+            } else {
+                Err(last_error.unwrap())
+            };
             
             match publish_result {
                 Ok(receivers) => {
@@ -557,38 +880,116 @@ impl TestAdapter {
                 }
             }
             
-            // Also trigger callbacks with retry
+            // Also trigger callbacks using direct sequential retry logic
             let callback_event = TestEvent::Standard {
                 counter,
                 message: message.clone(),
                 data: payload,
             };
             
-            // Use retry for callback triggering
-            let callback_event_clone = callback_event.clone();
-            let counter_val = counter; // Capture counter for the debug log
+            // Implement direct sequential retry logic for callbacks
+            let mut attempt = 0;
+            let mut last_error: Option<AdapterError> = None;
+            let mut success = false;
+            let mut callbacks_triggered = 0;
             let callbacks_clone = self.callbacks.clone();
-            let trigger_result = crate::adapters::common::with_retry(
-                &format!("trigger_standard_callback_{}", counter),
-                publish_retry_options,
-                move |attempt| {
-                    let event_for_attempt = callback_event_clone.clone();
-                    let callbacks_for_attempt = callbacks_clone.clone();
-                    async move {
-                        if attempt > 1 {
-                            debug!(attempt, counter = counter_val, "Retrying standard callback trigger");
-                        }
-                        match callbacks_for_attempt.trigger(event_for_attempt).await {
-                            Ok(count) => Ok(count),
-                            Err(e) => Err(AdapterError::from_anyhow_error(
-                                "event",
-                                format!("Failed to trigger standard event callback: {}", e),
-                                e,
-                            ))
+            
+            // Record the beginning of callback retry attempts in trace
+            TraceHelper::record_adapter_operation(
+                "test",
+                "trigger_standard_callback_start",
+                Some(json!({
+                    "counter": counter,
+                    "max_attempts": publish_retry_options.max_attempts,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
+            while attempt < publish_retry_options.max_attempts {
+                attempt += 1;
+                
+                // Record the current attempt in trace
+                TraceHelper::record_adapter_operation(
+                    "test",
+                    "trigger_standard_callback_attempt",
+                    Some(json!({
+                        "attempt": attempt,
+                        "counter": counter,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                if attempt > 1 {
+                    debug!(attempt, counter, "Retrying standard callback trigger");
+                }
+                
+                match callbacks_clone.trigger(callback_event.clone()).await {
+                    Ok(count) => {
+                        success = true;
+                        callbacks_triggered = count;
+                        
+                        // Record successful trigger in trace
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            "trigger_standard_callback_attempt_success",
+                            Some(json!({
+                                "attempt": attempt,
+                                "callbacks_triggered": count,
+                                "counter": counter,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        break;
+                    },
+                    Err(e) => {
+                        // Convert to AdapterError
+                        let error = AdapterError::from_anyhow_error(
+                            "event",
+                            format!("Failed to trigger standard event callback: {}", e),
+                            e,
+                        );
+                        last_error = Some(error.clone());
+                        
+                        // Record failure in trace
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            "trigger_standard_callback_attempt_failure",
+                            Some(json!({
+                                "attempt": attempt,
+                                "error": error.to_string(),
+                                "counter": counter,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
+                        
+                        // If not the last attempt, calculate delay and retry
+                        if attempt < publish_retry_options.max_attempts {
+                            let delay = publish_retry_options.get_delay(attempt);
+                            warn!(
+                                error = %error,
+                                attempt = attempt,
+                                next_delay_ms = %delay.as_millis(),
+                                "Standard callback trigger failed, retrying after delay"
+                            );
+                            sleep(delay).await;
+                        } else {
+                            error!(
+                                error = %error,
+                                attempts = attempt,
+                                "Failed to trigger standard callback after maximum attempts"
+                            );
                         }
                     }
                 }
-            ).await;
+            }
+            
+            // Determine the final result
+            let trigger_result = if success {
+                Ok(callbacks_triggered)
+            } else {
+                Err(last_error.unwrap())
+            };
             
             match trigger_result {
                 Ok(count) => {
@@ -633,30 +1034,112 @@ impl TestAdapter {
 
                 debug!(counter, "Publishing special test event");
 
-                // Use retry mechanism for special event publishing
+                // Use direct sequential retry logic for special event publishing
                 let special_event_type = "test.special";
                 let special_payload_clone = special_payload.clone();
-                let counter_val = counter; // Capture counter for debug log
-                let special_result = crate::adapters::common::with_retry(
-                    &format!("publish_special_event_{}", counter),
-                    publish_retry_options,
-                    move |attempt| {
-                        let payload_for_attempt = special_payload_clone.clone();
-                        async move {
-                            if attempt > 1 {
-                                debug!(attempt, counter = counter_val, "Retrying special event publication");
-                            }
-                            match self.base.publish_event(special_event_type, payload_for_attempt).await {
-                                Ok(receivers) => Ok(receivers),
-                                Err(e) => Err(AdapterError::from_anyhow_error(
-                                    "event",
-                                    format!("Failed to publish special event: {}", e),
-                                    e,
-                                ))
+                
+                // Implement direct sequential retry logic
+                let mut attempt = 0;
+                let mut last_error: Option<AdapterError> = None;
+                let mut success = false;
+                let mut receivers_count = 0;
+                
+                // Record the beginning of retry attempts in trace
+                TraceHelper::record_adapter_operation(
+                    "test",
+                    "publish_special_event_start",
+                    Some(json!({
+                        "counter": counter,
+                        "max_attempts": publish_retry_options.max_attempts,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                while attempt < publish_retry_options.max_attempts {
+                    attempt += 1;
+                    
+                    // Record the current attempt in trace
+                    TraceHelper::record_adapter_operation(
+                        "test",
+                        "publish_special_event_attempt",
+                        Some(json!({
+                            "attempt": attempt,
+                            "counter": counter,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    if attempt > 1 {
+                        debug!(attempt, counter, "Retrying special event publication");
+                    }
+                    
+                    match self.base.publish_event(special_event_type, special_payload_clone.clone()).await {
+                        Ok(count) => {
+                            success = true;
+                            receivers_count = count;
+                            
+                            // Record successful publication in trace
+                            TraceHelper::record_adapter_operation(
+                                "test",
+                                "publish_special_event_attempt_success",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "receivers": count,
+                                    "counter": counter,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            break;
+                        },
+                        Err(e) => {
+                            // Convert to AdapterError
+                            let error = AdapterError::from_anyhow_error(
+                                "event",
+                                format!("Failed to publish special event: {}", e),
+                                e,
+                            );
+                            last_error = Some(error.clone());
+                            
+                            // Record failure in trace
+                            TraceHelper::record_adapter_operation(
+                                "test",
+                                "publish_special_event_attempt_failure",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "error": error.to_string(),
+                                    "counter": counter,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            // If not the last attempt, calculate delay and retry
+                            if attempt < publish_retry_options.max_attempts {
+                                let delay = publish_retry_options.get_delay(attempt);
+                                warn!(
+                                    error = %error,
+                                    attempt = attempt,
+                                    next_delay_ms = %delay.as_millis(),
+                                    "Special event publication failed, retrying after delay"
+                                );
+                                sleep(delay).await;
+                            } else {
+                                error!(
+                                    error = %error,
+                                    attempts = attempt,
+                                    "Failed to publish special event after maximum attempts"
+                                );
                             }
                         }
                     }
-                ).await;
+                }
+                
+                // Determine the final result
+                let special_result = if success {
+                    Ok(receivers_count)
+                } else {
+                    Err(last_error.unwrap())
+                };
                 
                 match special_result {
                     Ok(receivers) => {
@@ -706,37 +1189,116 @@ impl TestAdapter {
                     }
                 }
                 
-                // Also trigger callbacks for special event with retry
+                // Also trigger callbacks using direct sequential retry logic for special events
                 let special_callback_event = TestEvent::Special {
                     counter,
                     message: special_message.to_string(),
                     data: special_payload,
                 };
                 
-                // Use retry for special callback triggering
-                let special_callback_event_clone = special_callback_event.clone();
-                let counter_val = counter; // Capture counter for debug log
-                let special_trigger_result = crate::adapters::common::with_retry(
-                    &format!("trigger_special_callback_{}", counter),
-                    publish_retry_options,
-                    move |attempt| {
-                        let event_for_attempt = special_callback_event_clone.clone();
-                        let callbacks_for_attempt = self.callbacks.clone();
-                        async move {
-                            if attempt > 1 {
-                                debug!(attempt, counter = counter_val, "Retrying special callback trigger");
-                            }
-                            match callbacks_for_attempt.trigger(event_for_attempt).await {
-                                Ok(count) => Ok(count),
-                                Err(e) => Err(AdapterError::from_anyhow_error(
-                                    "event",
-                                    format!("Failed to trigger special event callback: {}", e),
-                                    e,
-                                ))
+                // Implement direct sequential retry logic for special callbacks
+                let mut attempt = 0;
+                let mut last_error: Option<AdapterError> = None;
+                let mut success = false;
+                let mut callbacks_triggered = 0;
+                let callbacks_clone = self.callbacks.clone();
+                
+                // Record the beginning of callback retry attempts in trace
+                TraceHelper::record_adapter_operation(
+                    "test",
+                    "trigger_special_callback_start",
+                    Some(json!({
+                        "counter": counter,
+                        "max_attempts": publish_retry_options.max_attempts,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    })),
+                ).await;
+                
+                while attempt < publish_retry_options.max_attempts {
+                    attempt += 1;
+                    
+                    // Record the current attempt in trace
+                    TraceHelper::record_adapter_operation(
+                        "test",
+                        "trigger_special_callback_attempt",
+                        Some(json!({
+                            "attempt": attempt,
+                            "counter": counter,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
+                    if attempt > 1 {
+                        debug!(attempt, counter, "Retrying special callback trigger");
+                    }
+                    
+                    match callbacks_clone.trigger(special_callback_event.clone()).await {
+                        Ok(count) => {
+                            success = true;
+                            callbacks_triggered = count;
+                            
+                            // Record successful trigger in trace
+                            TraceHelper::record_adapter_operation(
+                                "test",
+                                "trigger_special_callback_attempt_success",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "callbacks_triggered": count,
+                                    "counter": counter,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            break;
+                        },
+                        Err(e) => {
+                            // Convert to AdapterError
+                            let error = AdapterError::from_anyhow_error(
+                                "event",
+                                format!("Failed to trigger special event callback: {}", e),
+                                e,
+                            );
+                            last_error = Some(error.clone());
+                            
+                            // Record failure in trace
+                            TraceHelper::record_adapter_operation(
+                                "test",
+                                "trigger_special_callback_attempt_failure",
+                                Some(json!({
+                                    "attempt": attempt,
+                                    "error": error.to_string(),
+                                    "counter": counter,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
+                            // If not the last attempt, calculate delay and retry
+                            if attempt < publish_retry_options.max_attempts {
+                                let delay = publish_retry_options.get_delay(attempt);
+                                warn!(
+                                    error = %error,
+                                    attempt = attempt,
+                                    next_delay_ms = %delay.as_millis(),
+                                    "Special callback trigger failed, retrying after delay"
+                                );
+                                sleep(delay).await;
+                            } else {
+                                error!(
+                                    error = %error,
+                                    attempts = attempt,
+                                    "Failed to trigger special callback after maximum attempts"
+                                );
                             }
                         }
                     }
-                ).await;
+                }
+                
+                // Determine the final result
+                let special_trigger_result = if success {
+                    Ok(callbacks_triggered)
+                } else {
+                    Err(last_error.unwrap())
+                };
                 
                 match special_trigger_result {
                     Ok(count) => {
