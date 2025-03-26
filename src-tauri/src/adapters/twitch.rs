@@ -1424,20 +1424,33 @@ impl TwitchAdapter {
                     
                     match super::common::TokenHelper::refresh_token(
                         adapter_name,
-                        move |_attempt| async move {
-                            let result = self_clone
+                        move |_attempt| {
+                            // Clone the variables outside the async block
+                            let self_clone_inner = self_clone.clone();
+                            let access_token_inner = access_token.clone();
+                            let refresh_token_inner = refresh_token.clone();
+                            
+                            async move {
+                                // Use the inner clones inside the async block
+                                let inner_self_clone = self_clone_inner.clone();
+                                let access_token_clone = access_token_inner.clone();
+                                let refresh_token_clone = refresh_token_inner.clone();
+                            
+                            let result = inner_self_clone
                                 .auth_manager
                                 .write()
                                 .await
-                                .restore_from_saved_tokens(access_token.clone(), refresh_token.clone())
+                                .restore_from_saved_tokens(access_token_clone, refresh_token_clone)
                                 .await;
                             
                             match result {
                                 Ok(token) => Ok(token),
-                                Err(e) => Err(super::common::AdapterError::auth_with_source(
+                                Err(e) => Err(super::common::AdapterError::from_anyhow_error(
+                                    "auth",
                                     format!("Failed to restore auth from saved tokens: {}", e),
-                                    e
+                                    anyhow::anyhow!(e)
                                 )),
+                            }
                             }
                         },
                         Some(retry_options),

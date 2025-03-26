@@ -10,7 +10,7 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 /// Unified error type for adapter-related operations
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub enum AdapterError {
     /// Authentication error
     #[error("Authentication error: {message}")]
@@ -19,7 +19,7 @@ pub enum AdapterError {
         message: String,
         /// Optional context
         #[source]
-        source: Option<anyhow::Error>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
     
     /// Connection error
@@ -29,7 +29,7 @@ pub enum AdapterError {
         message: String,
         /// Optional context
         #[source]
-        source: Option<anyhow::Error>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
     
     /// Configuration error
@@ -39,7 +39,7 @@ pub enum AdapterError {
         message: String,
         /// Optional context
         #[source]
-        source: Option<anyhow::Error>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
     
     /// API error
@@ -51,7 +51,7 @@ pub enum AdapterError {
         status: Option<u16>,
         /// Optional context
         #[source]
-        source: Option<anyhow::Error>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
     
     /// Event error
@@ -61,7 +61,7 @@ pub enum AdapterError {
         message: String,
         /// Optional context
         #[source]
-        source: Option<anyhow::Error>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
     
     /// Internal error
@@ -71,8 +71,41 @@ pub enum AdapterError {
         message: String,
         /// Optional context
         #[source]
-        source: Option<anyhow::Error>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
+}
+
+// Implement Clone manually since we can't derive it due to the error trait object
+impl Clone for AdapterError {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Auth { message, source: _ } => Self::Auth {
+                message: message.clone(),
+                source: None, // We can't clone the error trait object, so we drop it during cloning
+            },
+            Self::Connection { message, source: _ } => Self::Connection {
+                message: message.clone(),
+                source: None,
+            },
+            Self::Config { message, source: _ } => Self::Config {
+                message: message.clone(),
+                source: None,
+            },
+            Self::Api { message, status, source: _ } => Self::Api {
+                message: message.clone(),
+                status: *status,
+                source: None,
+            },
+            Self::Event { message, source: _ } => Self::Event {
+                message: message.clone(),
+                source: None,
+            },
+            Self::Internal { message, source: _ } => Self::Internal {
+                message: message.clone(),
+                source: None,
+            },
+        }
+    }
 }
 
 impl AdapterError {
@@ -84,11 +117,72 @@ impl AdapterError {
         }
     }
     
+    /// Special handling for anyhow errors
+    pub fn from_anyhow_error(error_type: &str, message: impl Into<String>, source: anyhow::Error) -> Self {
+        // Convert anyhow::Error to a string representation since it can't be used directly
+        let error_string = source.to_string();
+        
+        // Create a simple error that can be boxed
+        let boxed_error = std::io::Error::new(
+            std::io::ErrorKind::Other, 
+            format!("Original error: {}", error_string)
+        );
+        
+        match error_type {
+            "auth" => Self::Auth {
+                message: message.into(),
+                source: Some(Box::new(boxed_error)),
+            },
+            "connection" => Self::Connection {
+                message: message.into(),
+                source: Some(Box::new(boxed_error)),
+            },
+            "config" => Self::Config {
+                message: message.into(),
+                source: Some(Box::new(boxed_error)),
+            },
+            "api" => Self::Api {
+                message: message.into(),
+                status: None,
+                source: Some(Box::new(boxed_error)),
+            },
+            "event" => Self::Event {
+                message: message.into(),
+                source: Some(Box::new(boxed_error)),
+            },
+            _ => Self::Internal {
+                message: message.into(),
+                source: Some(Box::new(boxed_error)),
+            },
+        }
+    }
+    
+    /// Special handling for anyhow errors with status code
+    /// This is a convenience method to handle API errors with status codes from anyhow errors
+    pub fn from_anyhow_error_with_status(
+        message: impl Into<String>, 
+        status: u16, 
+        source: anyhow::Error
+    ) -> Self {
+        // First create a basic API error
+        let mut error = Self::from_anyhow_error("api", message, source);
+        
+        // Then set the status code
+        if let Self::Api { status: status_field, .. } = &mut error {
+            *status_field = Some(status);
+        }
+        
+        error
+    }
+    
     /// Create a new authentication error with source
-    pub fn auth_with_source(message: impl Into<String>, source: impl Into<anyhow::Error>) -> Self {
+    pub fn auth_with_source<E>(message: impl Into<String>, source: E) -> Self 
+    where 
+        E: std::error::Error + Send + Sync + 'static 
+    {
         Self::Auth {
             message: message.into(),
-            source: Some(source.into()),
+            source: Some(Box::new(source)),
         }
     }
     
@@ -101,10 +195,13 @@ impl AdapterError {
     }
     
     /// Create a new connection error with source
-    pub fn connection_with_source(message: impl Into<String>, source: impl Into<anyhow::Error>) -> Self {
+    pub fn connection_with_source<E>(message: impl Into<String>, source: E) -> Self 
+    where 
+        E: std::error::Error + Send + Sync + 'static 
+    {
         Self::Connection {
             message: message.into(),
-            source: Some(source.into()),
+            source: Some(Box::new(source)),
         }
     }
     
@@ -117,10 +214,13 @@ impl AdapterError {
     }
     
     /// Create a new configuration error with source
-    pub fn config_with_source(message: impl Into<String>, source: impl Into<anyhow::Error>) -> Self {
+    pub fn config_with_source<E>(message: impl Into<String>, source: E) -> Self 
+    where 
+        E: std::error::Error + Send + Sync + 'static 
+    {
         Self::Config {
             message: message.into(),
-            source: Some(source.into()),
+            source: Some(Box::new(source)),
         }
     }
     
@@ -143,24 +243,30 @@ impl AdapterError {
     }
     
     /// Create a new API error with source
-    pub fn api_with_source(message: impl Into<String>, source: impl Into<anyhow::Error>) -> Self {
+    pub fn api_with_source<E>(message: impl Into<String>, source: E) -> Self 
+    where 
+        E: std::error::Error + Send + Sync + 'static 
+    {
         Self::Api {
             message: message.into(),
             status: None,
-            source: Some(source.into()),
+            source: Some(Box::new(source)),
         }
     }
     
     /// Create a new API error with status and source
-    pub fn api_with_status_and_source(
+    pub fn api_with_status_and_source<E>(
         message: impl Into<String>,
         status: u16,
-        source: impl Into<anyhow::Error>,
-    ) -> Self {
+        source: E,
+    ) -> Self 
+    where 
+        E: std::error::Error + Send + Sync + 'static 
+    {
         Self::Api {
             message: message.into(),
             status: Some(status),
-            source: Some(source.into()),
+            source: Some(Box::new(source)),
         }
     }
     
@@ -173,10 +279,13 @@ impl AdapterError {
     }
     
     /// Create a new event error with source
-    pub fn event_with_source(message: impl Into<String>, source: impl Into<anyhow::Error>) -> Self {
+    pub fn event_with_source<E>(message: impl Into<String>, source: E) -> Self 
+    where 
+        E: std::error::Error + Send + Sync + 'static 
+    {
         Self::Event {
             message: message.into(),
-            source: Some(source.into()),
+            source: Some(Box::new(source)),
         }
     }
     
@@ -189,10 +298,13 @@ impl AdapterError {
     }
     
     /// Create a new internal error with source
-    pub fn internal_with_source(message: impl Into<String>, source: impl Into<anyhow::Error>) -> Self {
+    pub fn internal_with_source<E>(message: impl Into<String>, source: E) -> Self 
+    where 
+        E: std::error::Error + Send + Sync + 'static 
+    {
         Self::Internal {
             message: message.into(),
-            source: Some(source.into()),
+            source: Some(Box::new(source)),
         }
     }
     
@@ -319,13 +431,14 @@ impl RetryOptions {
 }
 
 /// Perform an operation with retries
-pub async fn with_retry<T, F, E>(
+pub async fn with_retry<T, F, Fut, E>(
     operation_name: &str,
     options: RetryOptions,
     operation: F,
 ) -> Result<T, E>
 where
-    F: Fn(u32) -> impl std::future::Future<Output = Result<T, E>>,
+    F: Fn(u32) -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
     E: std::fmt::Display,
 {
     let mut attempt = 0;
@@ -426,13 +539,14 @@ pub struct TokenHelper;
 impl TokenHelper {
     /// Attempt to refresh a token using the provided refresh function
     /// Uses standard retry logic and proper trace recording
-    pub async fn refresh_token<T, F>(
+    pub async fn refresh_token<T, F, Fut>(
         adapter_name: &str,
         refresh_fn: F,
         options: Option<RetryOptions>,
     ) -> Result<T, AdapterError>
     where
-        F: Fn(u32) -> impl std::future::Future<Output = Result<T, AdapterError>>,
+        F: Fn(u32) -> Fut + Clone,
+        Fut: std::future::Future<Output = Result<T, AdapterError>>,
     {
         let options = options.unwrap_or_default();
         let operation_name = format!("{}_token_refresh", adapter_name);
@@ -444,10 +558,19 @@ impl TokenHelper {
             "max_attempts": options.max_attempts,
         }));
         
+        // Record the operation start in trace
+        TraceHelper::record_adapter_operation(
+            adapter_name,
+            "token_refresh_start",
+            trace_context,
+        ).await;
+        
         // Create an operation that both refreshes token and updates trace
-        let result = with_retry(&operation_name, options, |attempt| async move {
-            // Attempt to refresh the token
-            match refresh_fn(attempt).await {
+        let result = with_retry(&operation_name, options, |attempt| {
+            let refresh_fn_clone = refresh_fn.clone();
+            async move {
+                // Attempt to refresh the token
+                match refresh_fn_clone(attempt).await {
                 Ok(token) => {
                     // Record successful refresh
                     TraceHelper::record_adapter_operation(
@@ -472,6 +595,7 @@ impl TokenHelper {
                     ).await;
                     
                     Err(err)
+                }
                 }
             }
         }).await;

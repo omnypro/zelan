@@ -192,7 +192,8 @@ impl TwitchApiClient {
             let client_id = match get_client_id() {
                 Ok(id) => id,
                 Err(e) => {
-                    return Err(AdapterError::config_with_source(
+                    return Err(AdapterError::from_anyhow_error(
+                        "config",
                         format!("Failed to get client ID: {}", e),
                         e
                     ));
@@ -222,9 +223,10 @@ impl TwitchApiClient {
                         attempt = attempt,
                         "HTTP request failed when fetching channel info"
                     );
-                    return Err(AdapterError::connection_with_source(
+                    return Err(AdapterError::from_anyhow_error(
+                        "connection",
                         format!("Failed to connect to Twitch API: {}", e),
-                        e
+                        anyhow::anyhow!(e)
                     ));
                 }
             };
@@ -238,7 +240,7 @@ impl TwitchApiClient {
                     "Received error status from Twitch API"
                 );
                 
-                return Err(AdapterError::api_with_status_and_source(
+                return Err(AdapterError::from_anyhow_error_with_status(
                     format!("Twitch API error: {}", response.body()),
                     response.status(),
                     anyhow!("API request failed with status {}", response.status())
@@ -269,9 +271,10 @@ impl TwitchApiClient {
                             return Ok(Some(channel_info));
                         }
                         Err(e) => {
-                            return Err(AdapterError::api_with_source(
+                            return Err(AdapterError::from_anyhow_error(
+                                "api",
                                 "Failed to deserialize channel information",
-                                e
+                                anyhow::anyhow!(e)
                             ));
                         }
                     }
@@ -327,7 +330,8 @@ impl TwitchApiClient {
             let client_id = match get_client_id() {
                 Ok(id) => id,
                 Err(e) => {
-                    return Err(AdapterError::config_with_source(
+                    return Err(AdapterError::from_anyhow_error(
+                        "config",
                         format!("Failed to get client ID: {}", e),
                         e
                     ));
@@ -354,9 +358,10 @@ impl TwitchApiClient {
                         attempt = attempt,
                         "HTTP request failed when fetching stream info"
                     );
-                    return Err(AdapterError::connection_with_source(
+                    return Err(AdapterError::from_anyhow_error(
+                        "connection",
                         format!("Failed to connect to Twitch API: {}", e),
-                        e
+                        anyhow::anyhow!(e)
                     ));
                 }
             };
@@ -370,7 +375,7 @@ impl TwitchApiClient {
                     "Received error status from Twitch API"
                 );
                 
-                return Err(AdapterError::api_with_status_and_source(
+                return Err(AdapterError::from_anyhow_error_with_status(
                     format!("Twitch API error: {}", response.body()),
                     response.status(),
                     anyhow!("API request failed with status {}", response.status())
@@ -402,9 +407,10 @@ impl TwitchApiClient {
                             return Ok(Some(stream_info));
                         }
                         Err(e) => {
-                            return Err(AdapterError::api_with_source(
+                            return Err(AdapterError::from_anyhow_error(
+                                "api",
                                 "Failed to deserialize stream information",
-                                e
+                                anyhow::anyhow!(e)
                             ));
                         }
                     }
