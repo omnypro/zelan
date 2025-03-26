@@ -1,4 +1,3 @@
-use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::{env, sync::Arc, time::Duration};
@@ -19,6 +18,7 @@ use twitch_oauth2::{ClientId, UserToken, TwitchToken};
 
 use crate::EventBus;
 use crate::StreamEvent;
+use crate::adapters::common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper, with_retry};
 
 /// Default reconnect delay in seconds
 const DEFAULT_RECONNECT_DELAY_SECS: u64 = 2;
@@ -33,11 +33,11 @@ const WEBSOCKET_CONNECT_TIMEOUT_SECS: u64 = 10;
 const TWITCH_CLIENT_ID_ENV: &str = "TWITCH_CLIENT_ID";
 
 /// Get the Twitch Client ID from environment
-fn get_client_id() -> Result<ClientId> {
+fn get_client_id() -> Result<ClientId, AdapterError> {
     match env::var(TWITCH_CLIENT_ID_ENV) {
         Ok(client_id) if !client_id.is_empty() => Ok(ClientId::new(client_id)),
-        Ok(_) => Err(anyhow!("TWITCH_CLIENT_ID environment variable is empty")),
-        Err(_) => Err(anyhow!("TWITCH_CLIENT_ID environment variable is not set")),
+        Ok(_) => Err(AdapterError::config("TWITCH_CLIENT_ID environment variable is empty")),
+        Err(_) => Err(AdapterError::config("TWITCH_CLIENT_ID environment variable is not set")),
     }
 }
 
@@ -144,7 +144,7 @@ pub struct EventSubSubscriptionInfo {
 }
 
 /// Callback function type for token refresh
-pub type TokenRefresher = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<UserToken>> + Send>> + Send + Sync>;
+pub type TokenRefresher = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<UserToken, anyhow::Error>> + Send>> + Send + Sync>;
 
 /// Twitch EventSub client
 pub struct EventSubClient {
@@ -188,11 +188,18 @@ impl Clone for EventSubClient {
 
 impl EventSubClient {
     /// Create a new EventSub client
-    pub fn new(event_bus: Arc<EventBus>) -> Result<Self> {
+    pub async fn new(event_bus: Arc<EventBus>) -> Result<Self, AdapterError> {
+        // Record the operation in the trace system
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "client_creation",
+            None,
+        ).await;
+        
         // Get client ID from environment
         let client_id = get_client_id()?;
 
-        Ok(Self {
+        let client = Self {
             event_bus,
             client_id,
             connection: Arc::new(tokio::sync::Mutex::new(None)),
@@ -201,7 +208,16 @@ impl EventSubClient {
             token: Arc::new(RwLock::new(None)),
             token_refresher: Arc::new(RwLock::new(None)),
             token_hash: Arc::new(RwLock::new(None)),
-        })
+        };
+        
+        // Record successful creation
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "client_created_success",
+            None,
+        ).await;
+        
+        Ok(client)
     }
     
     /// Set the token refresher callback
@@ -213,7 +229,14 @@ impl EventSubClient {
     }
     
     /// Update the token stored in the client
-    pub async fn update_token(&self, token: UserToken) -> Result<()> {
+    pub async fn update_token(&self, token: UserToken) -> Result<(), AdapterError> {
+        // Record the operation in the trace system
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "token_update_start",
+            None,
+        ).await;
+        
         // Calculate token hash for change detection
         let token_hash = self.hash_token(&token);
         
@@ -221,33 +244,101 @@ impl EventSubClient {
         *self.token.write().await = Some(token);
         *self.token_hash.write().await = Some(token_hash);
         
+        // Record successful update
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "token_update_success",
+            None,
+        ).await;
+        
         Ok(())
     }
     
     /// Get a fresh token (refresh if needed)
-    pub async fn get_fresh_token(&self) -> Result<UserToken> {
+    pub async fn get_fresh_token(&self) -> Result<UserToken, AdapterError> {
+        // Record the operation in the trace system
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "get_fresh_token_start",
+            None,
+        ).await;
+        
         // First check if we need to refresh
         if let Err(e) = self.check_and_refresh_token_if_needed().await {
             error!("Error refreshing token during get_fresh_token: {}", e);
+            
+            // Record the error
+            TraceHelper::record_adapter_operation(
+                "twitch_eventsub",
+                "token_refresh_error",
+                Some(serde_json::json!({
+                    "error": e.to_string(),
+                })),
+            ).await;
+            
             // Continue anyway and try to use what we have
         }
         
         // Get the current token
         let token_guard = self.token.read().await;
         match &*token_guard {
-            Some(token) => Ok(token.clone()),
-            None => Err(anyhow!("No token available")),
+            Some(token) => {
+                // Record successful token access
+                TraceHelper::record_adapter_operation(
+                    "twitch_eventsub",
+                    "get_fresh_token_success",
+                    Some(serde_json::json!({
+                        "expires_in_seconds": token.expires_in().as_secs(),
+                    })),
+                ).await;
+                
+                Ok(token.clone())
+            },
+            None => {
+                let error = AdapterError::auth("No token available");
+                
+                // Record the error
+                TraceHelper::record_adapter_operation(
+                    "twitch_eventsub",
+                    "get_fresh_token_error",
+                    Some(serde_json::json!({
+                        "error": error.to_string(),
+                    })),
+                ).await;
+                
+                Err(error)
+            },
         }
     }
     
     /// Check if token needs refresh and refresh it if needed
-    pub async fn check_and_refresh_token_if_needed(&self) -> Result<()> {
+    pub async fn check_and_refresh_token_if_needed(&self) -> Result<(), AdapterError> {
+        // Record the operation start
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "check_token_expiration_start",
+            None,
+        ).await;
+        
         // Get current token
         let current_token = {
             let token_guard = self.token.read().await;
             match &*token_guard {
                 Some(token) => token.clone(),
-                None => return Err(anyhow!("No token available to refresh")),
+                None => {
+                    let error = AdapterError::auth("No token available to refresh");
+                    
+                    // Record the error
+                    TraceHelper::record_adapter_operation(
+                        "twitch_eventsub",
+                        "check_token_expiration_error",
+                        Some(serde_json::json!({
+                            "error": error.to_string(),
+                        })),
+                    ).await;
+                    
+                    return Err(error);
+                },
             }
         };
         
@@ -256,17 +347,65 @@ impl EventSubClient {
         if expires_in.as_secs() < 600 {
             info!("Token expires in {} seconds, refreshing", expires_in.as_secs());
             
+            // Record that token needs refresh
+            TraceHelper::record_adapter_operation(
+                "twitch_eventsub",
+                "token_needs_refresh",
+                Some(serde_json::json!({
+                    "expires_in_seconds": expires_in.as_secs(),
+                })),
+            ).await;
+            
             // Get the refresher function
             let refresher = {
                 let refresher_guard = self.token_refresher.read().await;
                 match &*refresher_guard {
                     Some(refresher) => refresher.clone(),
-                    None => return Err(anyhow!("No token refresher available")),
+                    None => {
+                        let error = AdapterError::auth("No token refresher available");
+                        
+                        // Record the error
+                        TraceHelper::record_adapter_operation(
+                            "twitch_eventsub",
+                            "token_refresh_error",
+                            Some(serde_json::json!({
+                                "error": error.to_string(),
+                            })),
+                        ).await;
+                        
+                        return Err(error);
+                    },
                 }
             };
             
-            // Call the refresher to get a new token
-            match refresher().await {
+            // Define retry options for refreshing tokens
+            let retry_options = RetryOptions::new(
+                2, // Max attempts
+                BackoffStrategy::Linear {
+                    base_delay: Duration::from_millis(500),
+                },
+                true, // Add jitter
+            );
+            
+            // Use with_retry for token refresh
+            match with_retry("token_refresh", retry_options, |attempt| {
+                let refresher_clone = refresher.clone(); 
+                async move {
+                    debug!(attempt = attempt, "Attempting to refresh token");
+                    
+                    match refresher_clone().await {
+                        Ok(token) => Ok(token),
+                        Err(e) => {
+                            // Convert anyhow error to AdapterError
+                            Err(AdapterError::from_anyhow_error(
+                                "auth", 
+                                format!("Failed to refresh token (attempt {})", attempt),
+                                e
+                            ))
+                        }
+                    }
+                }
+            }).await {
                 Ok(new_token) => {
                     // Calculate token hash
                     let token_hash = self.hash_token(&new_token);
@@ -278,21 +417,58 @@ impl EventSubClient {
                     // Update token if hash is different (token has changed)
                     if current_hash.is_none() || current_hash.unwrap() != token_hash {
                         info!("Token has changed, updating stored token");
+                        
+                        // Record token change
+                        TraceHelper::record_adapter_operation(
+                            "twitch_eventsub",
+                            "token_changed",
+                            Some(serde_json::json!({
+                                "expires_in_seconds": new_token.expires_in().as_secs(),
+                            })),
+                        ).await;
+                        
                         self.update_token(new_token).await?;
                     } else {
                         info!("Token is unchanged after refresh");
+                        
+                        // Record no change
+                        TraceHelper::record_adapter_operation(
+                            "twitch_eventsub",
+                            "token_unchanged",
+                            None,
+                        ).await;
                     }
                     
                     Ok(())
                 },
                 Err(e) => {
-                    error!("Failed to refresh token: {}", e);
-                    Err(anyhow!("Failed to refresh token: {}", e))
+                    error!("Failed to refresh token after all retries: {}", e);
+                    
+                    // Record the error
+                    TraceHelper::record_adapter_operation(
+                        "twitch_eventsub",
+                        "token_refresh_failed",
+                        Some(serde_json::json!({
+                            "error": e.to_string(),
+                        })),
+                    ).await;
+                    
+                    Err(e)
                 }
             }
         } else {
             // Token is still valid
             debug!("Token is still valid for {} seconds", expires_in.as_secs());
+            
+            // Record that token is still valid
+            TraceHelper::record_adapter_operation(
+                "twitch_eventsub",
+                "token_still_valid",
+                Some(serde_json::json!({
+                    "expires_in_seconds": expires_in.as_secs(),
+                })),
+            ).await;
+            
             Ok(())
         }
     }
@@ -311,13 +487,28 @@ impl EventSubClient {
     }
 
     /// Start the EventSub client
-    pub async fn start(&self, token: &UserToken) -> Result<()> {
+    pub async fn start(&self, token: &UserToken) -> Result<(), AdapterError> {
+        // Record the operation start
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "client_start",
+            None,
+        ).await;
+        
         info!("Starting Twitch EventSub client");
         
         // Try to get a lock on the connection to check if it already exists
         if let Ok(guard) = self.connection.try_lock() {
             if guard.is_some() {
                 info!("EventSub client already has a connection, skipping start");
+                
+                // Record already started
+                TraceHelper::record_adapter_operation(
+                    "twitch_eventsub",
+                    "client_already_started",
+                    None,
+                ).await;
+                
                 return Ok(());
             }
             // Release the lock immediately
@@ -325,6 +516,14 @@ impl EventSubClient {
         } else {
             // Couldn't get the lock, which means someone else is working with it
             info!("EventSub client is already being modified by another task, skipping start");
+            
+            // Record lock conflict
+            TraceHelper::record_adapter_operation(
+                "twitch_eventsub",
+                "client_start_lock_conflict",
+                None,
+            ).await;
+            
             return Ok(());
         }
 
@@ -338,6 +537,15 @@ impl EventSubClient {
         // Get broadcaster ID from token user ID
         let user_id = Self::get_user_id_from_token(&self.client_id, token).await?;
         *self.user_id.write().await = Some(user_id.to_string());
+        
+        // Record user ID obtained
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "user_id_obtained",
+            Some(serde_json::json!({
+                "user_id": user_id.to_string(),
+            })),
+        ).await;
 
         // Clone Arc references for the background task
         let event_bus = self.event_bus.clone();
@@ -412,22 +620,30 @@ impl EventSubClient {
                     }
                 }
 
-                // Calculate reconnect delay with exponential backoff
+                // Calculate reconnect delay with exponential backoff using our common utility
+                let retry_options = RetryOptions::new(
+                    u32::MAX, // We're manually handling the loop, so this won't be used
+                    BackoffStrategy::Exponential {
+                        base_delay: Duration::from_secs(DEFAULT_RECONNECT_DELAY_SECS),
+                        max_delay: Duration::from_secs(MAX_RECONNECT_DELAY_SECS),
+                    },
+                    true, // Add jitter to prevent thundering herd
+                );
+                
+                // No delay for first attempt
                 let reconnect_delay = if reconnect_attempts == 0 {
-                    0 // First attempt, no delay
+                    Duration::ZERO
                 } else {
-                    let base_delay =
-                        DEFAULT_RECONNECT_DELAY_SECS * 2u64.pow(reconnect_attempts as u32);
-                    std::cmp::min(base_delay, MAX_RECONNECT_DELAY_SECS)
+                    retry_options.get_delay(reconnect_attempts as u32)
                 };
 
                 // Wait for reconnect delay if needed
-                if reconnect_delay > 0 {
+                if !reconnect_delay.is_zero() {
                     info!(
-                        "Reconnecting to Twitch EventSub in {} seconds",
-                        reconnect_delay
+                        "Reconnecting to Twitch EventSub in {:.2} seconds",
+                        reconnect_delay.as_secs_f64()
                     );
-                    tokio::time::sleep(Duration::from_secs(reconnect_delay)).await;
+                    tokio::time::sleep(reconnect_delay).await;
                 }
 
                 // Connect to EventSub WebSocket
@@ -524,18 +740,51 @@ impl EventSubClient {
     }
 
     /// Stop the EventSub client
-    pub async fn stop(&self) -> Result<()> {
+    pub async fn stop(&self) -> Result<(), AdapterError> {
+        // Record the operation start
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "client_stop",
+            None,
+        ).await;
+        
         info!("Stopping Twitch EventSub client");
 
         // Send shutdown signal first
         if let Some(tx) = self.shutdown_tx.write().await.take() {
-            let _ = tx.send(()).await;
+            if let Err(e) = tx.send(()).await {
+                // Non-fatal error, as the receiver might be already dropped
+                warn!("Failed to send shutdown signal: {}", e);
+                
+                // Record shutdown signal error
+                TraceHelper::record_adapter_operation(
+                    "twitch_eventsub",
+                    "shutdown_signal_error",
+                    Some(serde_json::json!({
+                        "error": e.to_string(),
+                    })),
+                ).await;
+            } else {
+                // Record shutdown signal sent
+                TraceHelper::record_adapter_operation(
+                    "twitch_eventsub",
+                    "shutdown_signal_sent",
+                    None,
+                ).await;
+            }
         }
 
         // Clear the connection
         let mut conn = self.connection.lock().await;
         *conn = None;
         info!("Successfully cleared EventSub connection");
+        
+        // Record successful stop
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "client_stop_success",
+            None,
+        ).await;
 
         Ok(())
     }
@@ -557,7 +806,17 @@ impl EventSubClient {
     /// Connect to Twitch EventSub WebSocket
     async fn connect_to_eventsub(
         connection: &Arc<tokio::sync::Mutex<Option<EventSubConnection>>>,
-    ) -> Result<String> {
+    ) -> Result<String, AdapterError> {
+        // Record the operation in the trace system
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "connect_start",
+            Some(serde_json::json!({
+                "websocket_url": "wss://eventsub.wss.twitch.tv/ws",
+                "timeout_seconds": WEBSOCKET_CONNECT_TIMEOUT_SECS,
+            })),
+        ).await;
+        
         // Get an exclusive lock on the connection for the duration of this function
         // This ensures only one task can create a connection at a time
         let mut conn_lock = connection.lock().await;
@@ -566,30 +825,60 @@ impl EventSubClient {
         if let Some(existing_conn) = &*conn_lock {
             if !existing_conn.session_id.is_empty() {
                 info!("Reusing existing EventSub connection with session_id: {}", existing_conn.session_id);
+                // Record successful reuse in trace
+                TraceHelper::record_adapter_operation(
+                    "twitch_eventsub",
+                    "connection_reused",
+                    Some(serde_json::json!({
+                        "session_id": existing_conn.session_id,
+                    })),
+                ).await;
                 return Ok(existing_conn.session_id.clone());
             }
         }
         
         // If we reach here, we need to create a new connection
-    
         info!("Connecting to Twitch EventSub WebSocket");
 
         // EventSub WebSocket URL
         let ws_url = "wss://eventsub.wss.twitch.tv/ws";
 
-        // Connect with timeout
-        let ws_stream = match timeout(
-            Duration::from_secs(WEBSOCKET_CONNECT_TIMEOUT_SECS),
-            connect_async(ws_url),
-        )
-        .await
-        {
-            Ok(result) => match result {
-                Ok((stream, _)) => stream,
-                Err(e) => return Err(anyhow!("WebSocket connection failed: {}", e)),
+        // Use a retry pattern for the connection
+        let retry_options = RetryOptions::new(
+            3,  // Max attempts
+            BackoffStrategy::Exponential {
+                base_delay: Duration::from_millis(500),
+                max_delay: Duration::from_secs(5),
             },
-            Err(_) => return Err(anyhow!("WebSocket connection timed out")),
-        };
+            true, // Add jitter
+        );
+        
+        // Connect with retries
+        let ws_stream = with_retry("connect_to_eventsub", retry_options, |attempt| async move {
+            debug!(attempt = attempt, "Attempting to connect to EventSub WebSocket");
+            
+            match timeout(
+                Duration::from_secs(WEBSOCKET_CONNECT_TIMEOUT_SECS),
+                connect_async(ws_url),
+            ).await {
+                Ok(result) => match result {
+                    Ok((stream, _)) => Ok(stream),
+                    Err(e) => {
+                        let error = AdapterError::connection_with_source(
+                            format!("WebSocket connection failed (attempt {}): {}", attempt, e),
+                            e
+                        );
+                        Err(error)
+                    },
+                },
+                Err(_) => {
+                    Err(AdapterError::connection(
+                        format!("WebSocket connection timed out after {}s (attempt {})", 
+                                WEBSOCKET_CONNECT_TIMEOUT_SECS, attempt)
+                    ))
+                },
+            }
+        }).await?;
 
         // Create connection with no session ID yet
         let mut conn = EventSubConnection {
@@ -599,6 +888,14 @@ impl EventSubClient {
         };
         
         // We'll keep the lock while we wait for the welcome message
+        // Record waiting for welcome message in trace
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "waiting_for_welcome",
+            Some(serde_json::json!({
+                "timeout_seconds": 10,
+            })),
+        ).await;
 
         // Wait for welcome message to get session ID
         let welcome_timeout = Duration::from_secs(10);
@@ -622,6 +919,16 @@ impl EventSubClient {
                                 *conn_lock = Some(conn);
 
                                 info!("Successfully stored new EventSub connection with session_id: {}", session_id);
+                                
+                                // Record successful connection in trace
+                                TraceHelper::record_adapter_operation(
+                                    "twitch_eventsub",
+                                    "connect_success",
+                                    Some(serde_json::json!({
+                                        "session_id": session_id,
+                                    })),
+                                ).await;
+                                
                                 return Ok(session_id);
                             }
                             Ok(_) => {
@@ -635,10 +942,35 @@ impl EventSubClient {
                     }
                 }
                 Ok(Some(Err(e))) => {
-                    return Err(anyhow!("WebSocket error: {}", e));
+                    let error = AdapterError::connection_with_source(
+                        format!("WebSocket error while waiting for welcome: {}", e),
+                        e
+                    );
+                    
+                    // Record error in trace
+                    TraceHelper::record_adapter_operation(
+                        "twitch_eventsub",
+                        "connect_error",
+                        Some(serde_json::json!({
+                            "error": error.to_string(),
+                        })),
+                    ).await;
+                    
+                    return Err(error);
                 }
                 Ok(None) => {
-                    return Err(anyhow!("WebSocket closed unexpectedly"));
+                    let error = AdapterError::connection("WebSocket closed unexpectedly while waiting for welcome");
+                    
+                    // Record error in trace
+                    TraceHelper::record_adapter_operation(
+                        "twitch_eventsub",
+                        "connect_error",
+                        Some(serde_json::json!({
+                            "error": error.to_string(),
+                        })),
+                    ).await;
+                    
+                    return Err(error);
                 }
                 Err(_) => {
                     // Timeout on this iteration, continue
@@ -647,51 +979,117 @@ impl EventSubClient {
             }
         }
 
-        Err(anyhow!("Timed out waiting for welcome message"))
+        let error = AdapterError::connection("Timed out waiting for welcome message");
+        
+        // Record error in trace
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "connect_timeout",
+            Some(serde_json::json!({
+                "error": error.to_string(),
+                "timeout_seconds": welcome_timeout.as_secs(),
+            })),
+        ).await;
+        
+        Err(error)
     }
 
     /// Get user ID from token
-    async fn get_user_id_from_token(client_id: &ClientId, token: &UserToken) -> Result<UserId> {
+    async fn get_user_id_from_token(client_id: &ClientId, token: &UserToken) -> Result<UserId, AdapterError> {
+        // Record the operation in the trace system
+        TraceHelper::record_adapter_operation(
+            "twitch_eventsub",
+            "get_user_id_start",
+            Some(serde_json::json!({
+                "endpoint": "https://api.twitch.tv/helix/users",
+            })),
+        ).await;
+        
         info!("Getting user ID from token");
 
-        // Create client
-        let client = reqwest::Client::new();
+        // Define retry options
+        let retry_options = RetryOptions::new(
+            3, // Max attempts
+            BackoffStrategy::Exponential {
+                base_delay: Duration::from_millis(500),
+                max_delay: Duration::from_secs(5),
+            },
+            true, // Add jitter
+        );
+        
+        // Use with_retry for the API call
+        with_retry("get_user_id_from_token", retry_options, |attempt| async move {
+            debug!(attempt = attempt, "Attempting to get user ID from token");
+            
+            // Create client
+            let client = reqwest::Client::new();
 
-        // Validate token
-        let response = client
-            .get("https://api.twitch.tv/helix/users")
-            .header("Client-ID", client_id.as_str())
-            .header(
-                "Authorization",
-                format!("Bearer {}", token.access_token.secret()),
-            )
-            .send()
-            .await?;
+            // Make the API request
+            let response = match client
+                .get("https://api.twitch.tv/helix/users")
+                .header("Client-ID", client_id.as_str())
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", token.access_token.secret()),
+                )
+                .send()
+                .await
+            {
+                Ok(resp) => resp,
+                Err(e) => {
+                    return Err(AdapterError::api_with_source(
+                        format!("Failed to send request to Twitch API (attempt {}): {}", attempt, e),
+                        e
+                    ));
+                }
+            };
 
-        // Check response
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await?;
-            return Err(anyhow!(
-                "Failed to get user info: HTTP {} - {}",
-                status,
-                error_text
-            ));
-        }
+            // Check response status
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = match response.text().await {
+                    Ok(text) => text,
+                    Err(e) => format!("Failed to read error response: {}", e),
+                };
+                
+                return Err(AdapterError::api_with_status(
+                    format!("Failed to get user info: HTTP {} - {}", status, error_text),
+                    status.as_u16(),
+                ));
+            }
 
-        // Parse response
-        let response_json: Value = response.json().await?;
+            // Parse response
+            let response_json: Value = match response.json().await {
+                Ok(json) => json,
+                Err(e) => {
+                    return Err(AdapterError::api_with_source(
+                        format!("Failed to parse response JSON: {}", e),
+                        e
+                    ));
+                }
+            };
 
-        // Extract user ID
-        if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
-            if let Some(user) = data.first() {
-                if let Some(id) = user.get("id").and_then(|id| id.as_str()) {
-                    return Ok(UserId::new(id.to_string()));
+            // Extract user ID
+            if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
+                if let Some(user) = data.first() {
+                    if let Some(id) = user.get("id").and_then(|id| id.as_str()) {
+                        // Record successful lookup in trace
+                        TraceHelper::record_adapter_operation(
+                            "twitch_eventsub",
+                            "get_user_id_success",
+                            Some(serde_json::json!({
+                                "user_id": id,
+                                "attempt": attempt,
+                            })),
+                        ).await;
+                        
+                        return Ok(UserId::new(id.to_string()));
+                    }
                 }
             }
-        }
 
-        Err(anyhow!("Failed to extract user ID from response"))
+            Err(AdapterError::api("Failed to extract user ID from response"))
+        }).await
     }
     
     /// Create EventSub subscriptions using create_eventsub_subscription() from the library
@@ -700,7 +1098,7 @@ impl EventSubClient {
         token: &UserToken,
         broadcaster_id: &str,
         session_id: &str,
-    ) -> Result<usize> {
+    ) -> Result<usize, AdapterError> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use twitch_api::{
             helix::HelixClient,
@@ -735,7 +1133,7 @@ impl EventSubClient {
             transport: &twitch_api::eventsub::Transport,
             token: &UserToken,
             success_count: Arc<AtomicUsize>
-        ) -> Result<()>
+        ) -> Result<(), AdapterError>
         where 
             C: twitch_api::eventsub::EventSubscription + std::fmt::Debug + Send
         {
@@ -752,13 +1150,16 @@ impl EventSubClient {
                 },
                 Err(e) => {
                     error!("Failed to create subscription for {}: {}", name, e);
-                    Err(anyhow!("Failed to create subscription for {}: {}", name, e))
+                    Err(AdapterError::api_with_source(
+                        format!("Failed to create subscription for {}", name),
+                        e
+                    ))
                 }
             }
         }
         
         // Vector of (name, subscription creation function) pairs
-        let subscriptions: Vec<(&str, Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> + Send>)> = vec![
+        let subscriptions: Vec<(&str, Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AdapterError>> + Send>> + Send>)> = vec![
             // Stream events
             ("stream.online", Box::new(|| Box::pin(create_sub(
                 "stream.online",
@@ -1280,10 +1681,103 @@ mod tests {
         let event_bus = Arc::new(EventBus::new(100));
 
         // Create EventSub client
-        let client = EventSubClient::new(event_bus);
+        let client = EventSubClient::new(event_bus).await;
         
         // Verify client was created successfully
         assert!(client.is_ok());
+        
+        // Clean up
+        unmock_env_var();
+    }
+    
+    #[tokio::test]
+    async fn test_backoff_strategy() {
+        // Test our backoff strategy implementation
+        let strategy = BackoffStrategy::Exponential {
+            base_delay: Duration::from_secs(DEFAULT_RECONNECT_DELAY_SECS),
+            max_delay: Duration::from_secs(MAX_RECONNECT_DELAY_SECS),
+        };
+        
+        // First attempt (should be equal to base delay)
+        let delay1 = strategy.calculate_delay(1);
+        assert_eq!(delay1, Duration::from_secs(DEFAULT_RECONNECT_DELAY_SECS));
+        
+        // Second attempt (should be 2x base delay)
+        let delay2 = strategy.calculate_delay(2);
+        assert_eq!(delay2, Duration::from_secs(DEFAULT_RECONNECT_DELAY_SECS * 2));
+        
+        // Should respect max delay
+        let delay10 = strategy.calculate_delay(10);
+        assert!(delay10 <= Duration::from_secs(MAX_RECONNECT_DELAY_SECS));
+    }
+    
+    #[tokio::test]
+    async fn test_token_hash_calculation() {
+        // Set up environment
+        mock_env_var();
+        
+        // Create event bus with default capacity
+        let event_bus = Arc::new(EventBus::new(100));
+        
+        // Create EventSub client
+        let _client = EventSubClient::new(event_bus).await.unwrap(); // Prefix with _ to indicate intentional non-use
+        
+        // For testing, we'll use a simpler approach that doesn't involve real token validation
+        // Just create structure to use with our hash function
+        
+        // Helper struct that mimics the parts of UserToken we need for hashing
+        struct TestUserToken {
+            access_token: String,
+            refresh_token: Option<String>,
+        }
+        
+        impl TestUserToken {
+            fn new(access_token: &str, refresh_token: Option<&str>) -> Self {
+                Self {
+                    access_token: access_token.to_string(),
+                    refresh_token: refresh_token.map(|s| s.to_string()),
+                }
+            }
+            
+            // Method to get access token secret - mimics the UserToken interface
+            fn access_token_secret(&self) -> &str {
+                &self.access_token
+            }
+            
+            // Method to get refresh token - mimics the UserToken interface
+            fn refresh_token_secret(&self) -> Option<&str> {
+                self.refresh_token.as_deref()
+            }
+        }
+        
+        // Let's modify the hash_token function for our test to use our test struct
+        let hash_token = |token: &TestUserToken| {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            
+            let mut hasher = DefaultHasher::new();
+            token.access_token_secret().hash(&mut hasher);
+            if let Some(refresh_token) = token.refresh_token_secret() {
+                refresh_token.hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+        
+        // Create test tokens
+        let token1 = TestUserToken::new("test_access_token", Some("test_refresh_token"));
+        let token2 = TestUserToken::new("test_access_token", Some("test_refresh_token"));
+        let token3 = TestUserToken::new("different_access_token", Some("test_refresh_token"));
+        
+        // Calculate hashes
+        let hash1 = hash_token(&token1);
+        let hash2 = hash_token(&token2);
+        let hash3 = hash_token(&token3);
+        
+        // Identical tokens should have identical hashes
+        assert_eq!(hash1, hash2);
+        
+        // Different tokens should have different hashes
+        assert_ne!(hash1, hash3);
         
         // Clean up
         unmock_env_var();

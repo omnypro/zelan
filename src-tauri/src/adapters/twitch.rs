@@ -402,9 +402,9 @@ impl TwitchAdapter {
     async fn init_eventsub_client(&self) -> Result<()> {
         info!("Initializing EventSub client");
 
-        // Create new EventSub client
+        // Create new EventSub client (note the await here since the constructor is now async)
         let event_bus = self.base.event_bus();
-        match EventSubClient::new(event_bus.clone()) {
+        match EventSubClient::new(event_bus.clone()).await {
             Ok(client) => {
                 // Store client in adapter
                 *self.eventsub_client.write().await = Some(client);
