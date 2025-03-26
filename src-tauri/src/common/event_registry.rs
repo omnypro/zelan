@@ -203,16 +203,15 @@ impl<T: Clone + Send + Sync + 'static> EventTypeRegistry<T> {
         debug!(event_type = %name, "Creating new EventTypeRegistry");
         
         Self {
-            callbacks: SharedState::with_name(HashMap::new(), format!("event_registry_{}", name)),
+            callbacks: SharedState::new(HashMap::new()),
             _marker: PhantomData,
             name,
         }
     }
     
     /// Get the number of subscribers
-    pub async fn subscriber_count(&self) -> Result<usize, EventRegistryError> {
-        let count = self.callbacks.read(|callbacks| callbacks.len()).await?;
-        Ok(count)
+    pub async fn subscriber_count(&self) -> usize {
+        self.callbacks.read(|callbacks| callbacks.len()).await
     }
 }
 
@@ -223,7 +222,7 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
         // Get all callbacks
         let callbacks = self.callbacks.read(|callbacks| {
             callbacks.iter().map(|(id, callback)| (*id, Arc::clone(callback))).collect::<Vec<_>>()
-        }).await?;
+        }).await;
         
         trace!(
             event_type = %self.name,
@@ -285,58 +284,39 @@ impl<T: Clone + Send + Sync + 'static> EventSubscriber<T> for EventTypeRegistry<
         let callback = Arc::new(Callback::new(callback));
         
         // Register the callback
-        match self.callbacks.write(|callbacks| {
+        self.callbacks.write(|callbacks| {
             callbacks.insert(id, callback);
-        }).await {
-            Ok(()) => {
-                debug!(
-                    event_type = %self.name,
-                    subscription_id = %id,
-                    "Registered event callback"
-                );
-            },
-            Err(e) => {
-                error!(
-                    event_type = %self.name,
-                    error = %e,
-                    "Failed to register event callback"
-                );
-            }
-        }
+        }).await;
+        
+        debug!(
+            event_type = %self.name,
+            subscription_id = %id,
+            "Registered event callback"
+        );
         
         id
     }
     
     async fn unsubscribe(&self, id: SubscriptionId) -> bool {
-        match self.callbacks.write(|callbacks| {
+        let removed = self.callbacks.write(|callbacks| {
             callbacks.remove(&id).is_some()
-        }).await {
-            Ok(removed) => {
-                if removed {
-                    debug!(
-                        event_type = %self.name,
-                        subscription_id = %id,
-                        "Unregistered event callback"
-                    );
-                } else {
-                    warn!(
-                        event_type = %self.name,
-                        subscription_id = %id,
-                        "Attempted to unregister non-existent event callback"
-                    );
-                }
-                removed
-            }
-            Err(e) => {
-                error!(
-                    event_type = %self.name,
-                    subscription_id = %id,
-                    error = %e,
-                    "Failed to unregister event callback"
-                );
-                false
-            }
+        }).await;
+        
+        if removed {
+            debug!(
+                event_type = %self.name,
+                subscription_id = %id,
+                "Unregistered event callback"
+            );
+        } else {
+            warn!(
+                event_type = %self.name,
+                subscription_id = %id,
+                "Attempted to unregister non-existent event callback"
+            );
         }
+        
+        removed
     }
 }
 
@@ -372,16 +352,16 @@ impl EventRegistry {
         
         Self {
             name: name.clone(),
-            registries: SharedState::with_name(HashMap::new(), format!("event_registry_{}", name)),
+            registries: SharedState::new(HashMap::new()),
         }
     }
     
     /// Get or create a registry for a specific event type
-    pub async fn registry<T: Clone + Send + Sync + 'static>(&self) -> Result<Arc<EventTypeRegistry<T>>, EventRegistryError> {
+    pub async fn registry<T: Clone + Send + Sync + 'static>(&self) -> Arc<EventTypeRegistry<T>> {
         let type_id = TypeId::of::<T>();
         let type_name = std::any::type_name::<T>();
         
-        let result = self.registries.write(|registries| {
+        self.registries.write(|registries| {
             // Check if registry exists
             if let Some(registry) = registries.get(&type_id) {
                 // Try to downcast
@@ -413,14 +393,11 @@ impl EventRegistry {
                 registries.insert(type_id, Arc::new(registry.clone()));
                 registry
             }
-        }).await;
-        
-        // Convert LockError to EventRegistryError
-        result.map_err(|e| e.into())
+        }).await
     }
     
     /// Get registry statistics
-    pub async fn stats(&self) -> Result<HashMap<String, usize>, EventRegistryError> {
+    pub async fn stats(&self) -> HashMap<String, usize> {
         self.registries.read(|registries| {
             // Collect stats about each registry
             let mut stats = HashMap::new();
@@ -436,7 +413,7 @@ impl EventRegistry {
             }
             
             stats
-        }).await.map_err(|e| e.into())
+        }).await
     }
 }
 
@@ -461,7 +438,7 @@ mod tests {
         let registry = EventTypeRegistry::<TestEvent>::new();
         
         // Initially no subscribers
-        assert_eq!(registry.subscriber_count().await.unwrap(), 0);
+        assert_eq!(registry.subscriber_count().await, 0);
         
         // Subscribe
         let id = registry.subscribe(|event| {
@@ -471,7 +448,7 @@ mod tests {
         }).await;
         
         // Now one subscriber
-        assert_eq!(registry.subscriber_count().await.unwrap(), 1);
+        assert_eq!(registry.subscriber_count().await, 1);
         
         // Publish
         let event = TestEvent {
@@ -486,7 +463,7 @@ mod tests {
         assert!(registry.unsubscribe(id).await);
         
         // No more subscribers
-        assert_eq!(registry.subscriber_count().await.unwrap(), 0);
+        assert_eq!(registry.subscriber_count().await, 0);
     }
     
     #[tokio::test]
@@ -494,8 +471,8 @@ mod tests {
         let registry = EventRegistry::new();
         
         // Get registries for different event types
-        let test_registry = registry.registry::<TestEvent>().await.unwrap();
-        let other_registry = registry.registry::<OtherEvent>().await.unwrap();
+        let test_registry = registry.registry::<TestEvent>().await;
+        let other_registry = registry.registry::<OtherEvent>().await;
         
         // Subscribe to TestEvent
         let test_id = test_registry.subscribe(|event| {

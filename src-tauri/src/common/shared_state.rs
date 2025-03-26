@@ -4,20 +4,11 @@ use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error};
 
 /// Errors that can occur during SharedState operations
 #[derive(Error, Debug, Clone)]
 pub enum LockError {
-    /// The lock operation timed out
-    #[error("Lock operation timed out after {duration:?}: {context}")]
-    Timeout {
-        /// Duration after which the operation timed out
-        duration: Duration,
-        /// Additional context about what was being locked
-        context: String,
-    },
-
     /// Attempted to access a value that wasn't initialized
     #[error("Cannot access uninitialized value")]
     Uninitialized,
@@ -32,73 +23,43 @@ pub enum LockError {
     },
 }
 
-/// A thread-safe wrapper around shared state
+/// A simplified thread-safe wrapper around shared state
 #[derive(Clone)]
-pub struct SharedState<T>
-where
-    T: Send + Sync + 'static
-{
+pub struct SharedState<T: Send + Sync + 'static> {
     /// The underlying shared state
     inner: Arc<RwLock<T>>,
-    /// Debug name for this shared state (used in logging)
-    name: String,
 }
 
-impl<T> SharedState<T>
-where
-    T: Send + Sync + 'static
-{
+impl<T: Send + Sync + 'static> SharedState<T> {
     /// Create a new SharedState with the given initial value
     pub fn new(value: T) -> Self {
-        Self::with_name(value, "unnamed")
-    }
-    
-    /// Create a new SharedState with the given name
-    pub fn with_name(value: T, name: impl Into<String>) -> Self {
-        let name = name.into();
-        debug!(name = %name, "Creating new SharedState");
-        
         Self {
             inner: Arc::new(RwLock::new(value)),
-            name,
         }
     }
     
-    /// Get the name of this SharedState
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-    
     /// Read the value, apply a function to produce a result, and return the result
-    pub async fn read<F, R>(&self, f: F) -> Result<R, LockError>
-    where
+    pub async fn read<F, R>(&self, f: F) -> R 
+    where 
         F: FnOnce(&T) -> R,
         R: Send + 'static,
     {
-        trace!(name = %self.name, "Acquiring read lock for function");
-        
         let guard = self.inner.read().await;
-        trace!(name = %self.name, "Read lock acquired for function");
-        let result = f(&guard);
-        Ok(result)
+        f(&*guard)
     }
     
     /// Write to the value, apply a function to it, and return a result
-    pub async fn write<F, R>(&self, f: F) -> Result<R, LockError>
-    where
+    pub async fn write<F, R>(&self, f: F) -> R 
+    where 
         F: FnOnce(&mut T) -> R,
         R: Send + 'static,
     {
-        trace!(name = %self.name, "Acquiring write lock for function");
-        
         let mut guard = self.inner.write().await;
-        trace!(name = %self.name, "Write lock acquired for function");
-        let result = f(&mut guard);
-        Ok(result)
+        f(&mut *guard)
     }
     
     /// Get a clone of the inner value
-    pub async fn get_cloned(&self) -> Result<T, LockError>
+    pub async fn get_cloned(&self) -> T
     where
         T: Clone,
     {
@@ -106,12 +67,12 @@ where
     }
     
     /// Set the inner value
-    pub async fn set(&self, value: T) -> Result<(), LockError> {
+    pub async fn set(&self, value: T) {
         self.write(|inner| *inner = value).await
     }
     
     /// Update the inner value using a function
-    pub async fn update<F>(&self, f: F) -> Result<(), LockError>
+    pub async fn update<F>(&self, f: F)
     where
         F: FnOnce(&mut T),
     {
@@ -126,7 +87,6 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SharedState")
-            .field("name", &self.name)
             .field("inner", &format!("Arc<RwLock<{}>>", std::any::type_name::<T>()))
             .finish()
     }
@@ -149,33 +109,19 @@ where
     /// Create a new uninitialized OptionalSharedState
     pub fn new() -> Self {
         Self {
-            inner: SharedState::with_name(None, "optional")
-        }
-    }
-    
-    /// Create a new OptionalSharedState with a name
-    pub fn with_name(name: impl Into<String>) -> Self {
-        Self {
-            inner: SharedState::with_name(None, name)
+            inner: SharedState::new(None)
         }
     }
     
     /// Create a new initialized OptionalSharedState
     pub fn with_value(value: T) -> Self {
         Self {
-            inner: SharedState::with_name(Some(value), "optional")
-        }
-    }
-    
-    /// Create a new initialized OptionalSharedState with a name
-    pub fn with_name_and_value(name: impl Into<String>, value: T) -> Self {
-        Self {
-            inner: SharedState::with_name(Some(value), name)
+            inner: SharedState::new(Some(value))
         }
     }
     
     /// Check if the state is initialized
-    pub async fn is_initialized(&self) -> Result<bool, LockError> {
+    pub async fn is_initialized(&self) -> bool {
         self.inner.read(|opt| opt.is_some()).await
     }
     
@@ -191,7 +137,7 @@ where
                 Some(value) => Ok(f(value)),
                 None => Err(LockError::Uninitialized),
             }
-        }).await?
+        }).await
     }
     
     /// Write to the value, apply a function to it, and return a result
@@ -206,18 +152,18 @@ where
                 Some(value) => Ok(f(value)),
                 None => Err(LockError::Uninitialized),
             }
-        }).await?
+        }).await
     }
     
     /// Initialize the state with a value
-    pub async fn initialize(&self, value: T) -> Result<(), LockError> {
+    pub async fn initialize(&self, value: T) {
         self.inner.write(|opt| {
             *opt = Some(value);
         }).await
     }
     
     /// Initialize the state with a value if it's not already initialized
-    pub async fn initialize_if_empty(&self, value: T) -> Result<bool, LockError> {
+    pub async fn initialize_if_empty(&self, value: T) -> bool {
         self.inner.write(|opt| {
             if opt.is_none() {
                 *opt = Some(value);
@@ -238,7 +184,7 @@ where
     }
     
     /// Clear the state
-    pub async fn clear(&self) -> Result<(), LockError> {
+    pub async fn clear(&self) {
         self.inner.write(|opt| {
             *opt = None;
         }).await
@@ -249,7 +195,7 @@ where
     pub async fn take(&self) -> Result<T, LockError> {
         self.inner.write(|opt| {
             opt.take().ok_or(LockError::Uninitialized)
-        }).await?
+        }).await
     }
 }
 
@@ -275,19 +221,8 @@ where
 {
     /// Create a new RefreshableState with the given initial value and factory function
     pub fn new(initial_value: T, factory: impl Fn() -> T + Send + Sync + 'static, max_age: Duration) -> Self {
-        Self::with_name(initial_value, "refreshable", factory, max_age)
-    }
-    
-    /// Create a new RefreshableState with the given name
-    pub fn with_name(
-        initial_value: T, 
-        name: impl Into<String>, 
-        factory: impl Fn() -> T + Send + Sync + 'static, 
-        max_age: Duration
-    ) -> Self {
-        let name = name.into();
-        let inner = SharedState::with_name(initial_value, &name);
-        let last_refreshed = SharedState::with_name(Some(std::time::Instant::now()), format!("{}_last_refreshed", name));
+        let inner = SharedState::new(initial_value);
+        let last_refreshed = SharedState::new(Some(std::time::Instant::now()));
         
         Self {
             inner,
@@ -298,7 +233,7 @@ where
     }
     
     /// Check if the value is stale and needs to be refreshed
-    pub async fn is_stale(&self) -> Result<bool, LockError> {
+    pub async fn is_stale(&self) -> bool {
         self.last_refreshed.read(|last| {
             match last {
                 Some(instant) => instant.elapsed() > self.max_age,
@@ -308,43 +243,35 @@ where
     }
     
     /// Force a refresh of the value
-    pub async fn refresh(&self) -> Result<(), LockError> {
+    pub async fn refresh(&self) {
         let new_value = (self.factory)();
         
         // Update the value and last_refreshed timestamp
-        self.inner.set(new_value).await?;
-        self.last_refreshed.set(Some(std::time::Instant::now())).await?;
-        
-        Ok(())
+        self.inner.set(new_value).await;
+        self.last_refreshed.set(Some(std::time::Instant::now())).await;
     }
     
     /// Refresh the value if it's stale
-    pub async fn ensure_fresh(&self) -> Result<bool, LockError> {
+    pub async fn ensure_fresh(&self) -> bool {
         // Fast path: check if we need to refresh
-        let needs_refresh = match self.is_stale().await {
-            Ok(stale) => stale,
-            Err(e) => {
-                warn!(name = %self.inner.name(), error = %e, "Failed to check if value is stale");
-                true // Refresh anyway if we can't check
-            }
-        };
+        let needs_refresh = self.is_stale().await;
         
         if needs_refresh {
-            debug!(name = %self.inner.name(), "Refreshing stale value");
-            self.refresh().await?;
-            Ok(true)
+            debug!("Refreshing stale value");
+            self.refresh().await;
+            true
         } else {
-            Ok(false)
+            false
         }
     }
     
     /// Read the value, apply a function to produce a result, and return the result
-    pub async fn with_read<F, R>(&self, f: F) -> Result<R, LockError>
+    pub async fn with_read<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
         R: Send + 'static,
     {
-        self.ensure_fresh().await?;
+        self.ensure_fresh().await;
         self.inner.read(f).await
     }
     
@@ -359,11 +286,11 @@ where
     }
     
     /// Get a clone of the inner value, refreshing it if needed
-    pub async fn get_cloned(&self) -> Result<T, LockError>
+    pub async fn get_cloned(&self) -> T
     where
         T: Clone,
     {
-        self.ensure_fresh().await?;
+        self.ensure_fresh().await;
         self.inner.get_cloned().await
     }
 }
@@ -375,6 +302,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RefreshableState")
             .field("inner", &self.inner)
+            .field("last_refreshed", &self.last_refreshed)
             .field("max_age", &format!("{:?}", self.max_age))
             .finish()
     }
@@ -390,14 +318,14 @@ mod tests {
         let state = SharedState::new(42);
         
         // Read
-        let value = state.read(|v| *v).await.unwrap();
+        let value = state.read(|v| *v).await;
         assert_eq!(value, 42);
         
         // Write
-        state.write(|v| *v = 99).await.unwrap();
+        state.write(|v| *v = 99).await;
         
         // Read again
-        let value = state.read(|v| *v).await.unwrap();
+        let value = state.read(|v| *v).await;
         assert_eq!(value, 99);
     }
     
@@ -406,7 +334,7 @@ mod tests {
         let state = OptionalSharedState::<String>::new();
         
         // Check uninitialized
-        assert!(!state.is_initialized().await.unwrap());
+        assert!(!state.is_initialized().await);
         
         // Try to read uninitialized
         let result = state.with_read(|_| ()).await;
@@ -414,10 +342,10 @@ mod tests {
         assert!(matches!(result.unwrap_err(), LockError::Uninitialized));
         
         // Initialize
-        state.initialize(String::from("hello")).await.unwrap();
+        state.initialize(String::from("hello")).await;
         
         // Check initialized
-        assert!(state.is_initialized().await.unwrap());
+        assert!(state.is_initialized().await);
         
         // Read
         let value = state.get_cloned().await.unwrap();
@@ -438,19 +366,19 @@ mod tests {
         );
         
         // Initial value
-        let value = refreshable.with_read(|v| *v).await.unwrap();
+        let value = refreshable.with_read(|v| *v).await;
         assert_eq!(value, 0);
         
         // Wait for it to become stale
         tokio::time::sleep(Duration::from_millis(100)).await;
         
         // Read again (should refresh)
-        let value = refreshable.with_read(|v| *v).await.unwrap();
+        let value = refreshable.with_read(|v| *v).await;
         assert_eq!(value, 100);
         
         // Force refresh
-        refreshable.refresh().await.unwrap();
-        let value = refreshable.with_read(|v| *v).await.unwrap();
+        refreshable.refresh().await;
+        let value = refreshable.with_read(|v| *v).await;
         assert_eq!(value, 101);
     }
 }

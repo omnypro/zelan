@@ -12,14 +12,14 @@ mod shared_state_tests {
         let state = SharedState::new(42);
         
         // Read
-        let value = state.read(|v| *v).await.unwrap();
+        let value = state.read(|v| *v).await;
         assert_eq!(value, 42);
         
         // Write
-        state.write(|v| *v = 99).await.unwrap();
+        state.write(|v| *v = 99).await;
         
         // Read again
-        let value = state.read(|v| *v).await.unwrap();
+        let value = state.read(|v| *v).await;
         assert_eq!(value, 99);
     }
     
@@ -28,13 +28,13 @@ mod shared_state_tests {
         let state = OptionalSharedState::<String>::new();
         
         // Check uninitialized
-        assert!(!state.is_initialized().await.unwrap());
+        assert!(!state.is_initialized().await);
         
         // Initialize
-        state.initialize(String::from("hello")).await.unwrap();
+        state.initialize(String::from("hello")).await;
         
         // Check initialized
-        assert!(state.is_initialized().await.unwrap());
+        assert!(state.is_initialized().await);
         
         // Read using with_read
         let value = state.with_read(|v| v.clone()).await.unwrap();
@@ -55,19 +55,19 @@ mod shared_state_tests {
         );
         
         // Initial value
-        let value = refreshable.with_read(|v| *v).await.unwrap();
+        let value = refreshable.with_read(|v| *v).await;
         assert_eq!(value, 0);
         
         // Wait for it to become stale
         sleep(Duration::from_millis(100)).await;
         
         // Read again (should refresh)
-        let value = refreshable.with_read(|v| *v).await.unwrap();
+        let value = refreshable.with_read(|v| *v).await;
         assert_eq!(value, 100);
         
         // Force refresh
-        refreshable.refresh().await.unwrap();
-        let value = refreshable.with_read(|v| *v).await.unwrap();
+        refreshable.refresh().await;
+        let value = refreshable.with_read(|v| *v).await;
         assert_eq!(value, 101);
     }
 }
