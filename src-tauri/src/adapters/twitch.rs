@@ -1410,14 +1410,38 @@ impl TwitchAdapter {
                     let access_token = config.access_token.unwrap();
                     let refresh_token = config.refresh_token.clone();
 
-                    // Try to restore auth from the saved tokens
-                    match self
-                        .auth_manager
-                        .write()
-                        .await
-                        .restore_from_saved_tokens(access_token, refresh_token)
-                        .await
-                    {
+                    // Try to restore auth from the saved tokens using the common TokenHelper
+                    let operation_name = "restore_authentication";
+                    let adapter_name = "twitch";
+                    let self_clone = self.clone();
+                    
+                    // Create retry options with custom settings
+                    let retry_options = super::common::RetryOptions::new(
+                        2, // Only try twice for auth restoration
+                        super::common::BackoffStrategy::Constant(Duration::from_secs(2)),
+                        true
+                    );
+                    
+                    match super::common::TokenHelper::refresh_token(
+                        adapter_name,
+                        move |_attempt| async move {
+                            let result = self_clone
+                                .auth_manager
+                                .write()
+                                .await
+                                .restore_from_saved_tokens(access_token.clone(), refresh_token.clone())
+                                .await;
+                            
+                            match result {
+                                Ok(token) => Ok(token),
+                                Err(e) => Err(super::common::AdapterError::auth_with_source(
+                                    format!("Failed to restore auth from saved tokens: {}", e),
+                                    e
+                                )),
+                            }
+                        },
+                        Some(retry_options),
+                    ).await {
                         Ok(_) => {
                             info!("Successfully restored authentication from saved tokens");
                             // Continue the flow - this will now find us authenticated
@@ -1425,6 +1449,17 @@ impl TwitchAdapter {
                         }
                         Err(e) => {
                             warn!("Failed to restore authentication from saved tokens: {}", e);
+                            
+                            // Record the operation in trace
+                            super::common::TraceHelper::record_adapter_operation(
+                                adapter_name,
+                                operation_name,
+                                Some(serde_json::json!({
+                                    "success": false,
+                                    "error": e.to_string(),
+                                })),
+                            ).await;
+                            
                             // Fall through to regular auth flow
                         }
                     }
@@ -1466,14 +1501,45 @@ impl TwitchAdapter {
                     // Need to authenticate for the first time
                     info!("Twitch adapter is not authenticated, starting authentication...");
 
+                    // Record the operation in trace
+                    super::common::TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "start_authentication",
+                        Some(serde_json::json!({
+                            "method": "device_code",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+
                     match self.authenticate().await {
                         Ok(_) => {
                             info!("Successfully started Twitch authentication process");
                             auth_started.store(true, std::sync::atomic::Ordering::Relaxed);
                             auth_started_time.store(now, std::sync::atomic::Ordering::Relaxed);
+                            
+                            // Record successful authentication start in trace
+                            super::common::TraceHelper::record_adapter_operation(
+                                "twitch",
+                                "authentication_started",
+                                Some(serde_json::json!({
+                                    "success": true,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
                         }
                         Err(e) => {
                             error!("Failed to start Twitch authentication: {}", e);
+                            
+                            // Record failed authentication in trace
+                            super::common::TraceHelper::record_adapter_operation(
+                                "twitch",
+                                "authentication_start_failed",
+                                Some(serde_json::json!({
+                                    "error": e.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
+                            
                             tokio::time::sleep(Duration::from_secs(30)).await;
                         }
                     }
@@ -1485,6 +1551,16 @@ impl TwitchAdapter {
             }
 
             // Get the auth manager first, then check if token needs refresh
+            // Create trace context for token refresh operation
+            let operation_name = "token_refresh_check";
+            super::common::TraceHelper::record_adapter_operation(
+                "twitch",
+                operation_name,
+                Some(serde_json::json!({
+                    "check_time": chrono::Utc::now().to_rfc3339(),
+                })),
+            ).await;
+            
             // IMPORTANT: Need to use a write lock when refreshing tokens
             let auth_manager = self.auth_manager.write().await;
             
@@ -1499,6 +1575,17 @@ impl TwitchAdapter {
                     // This shouldn't happen as we just checked is_authenticated
                     error!("No token available despite being authenticated");
                     drop(auth_manager); // Release the write lock
+                    
+                    // Record error in trace
+                    super::common::TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "token_unavailable_error",
+                        Some(serde_json::json!({
+                            "error": "No token available despite being authenticated",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     continue;
                 }
@@ -1524,7 +1611,7 @@ impl TwitchAdapter {
                         if token_changed {
                             debug!("Token was refreshed, updating TokenManager");
 
-                            // Update in TokenManager
+                            // Update in TokenManager using the standardized token helper
                             if let Some(tm) = &self.token_manager {
                                 // Extract tokens
                                 let access_token = new_token.access_token.secret().to_string();
@@ -1558,11 +1645,32 @@ impl TwitchAdapter {
 
                                 // Store in token manager
                                 match tm.store_tokens("twitch", token_data).await {
-                                    Ok(_) => debug!(
-                                        "Successfully updated tokens in TokenManager after refresh"
-                                    ),
+                                    Ok(_) => {
+                                        info!("Successfully updated tokens in TokenManager after refresh");
+                                        
+                                        // Record successful token refresh in trace
+                                        super::common::TraceHelper::record_adapter_operation(
+                                            "twitch",
+                                            "token_stored_after_refresh",
+                                            Some(serde_json::json!({
+                                                "success": true,
+                                                "expires_in_seconds": expires_to_use,
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            })),
+                                        ).await;
+                                    },
                                     Err(e) => {
-                                        warn!("Failed to update tokens in TokenManager: {}", e)
+                                        warn!("Failed to update tokens in TokenManager: {}", e);
+                                        
+                                        // Record failure in trace
+                                        super::common::TraceHelper::record_adapter_operation(
+                                            "twitch",
+                                            "token_store_failed",
+                                            Some(serde_json::json!({
+                                                "error": e.to_string(),
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            })),
+                                        ).await;
                                     }
                                 }
 
@@ -1603,8 +1711,30 @@ impl TwitchAdapter {
                     info!(
                         "Not authenticated or token expired, will restart authentication process"
                     );
+                    
+                    // Record in trace
+                    super::common::TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "token_refresh_not_authenticated",
+                        Some(serde_json::json!({
+                            "error": e.to_string(),
+                            "action": "restart_authentication",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
                 } else if e.to_string().contains("30-day expiry limit") {
                     info!("Refresh token has reached its 30-day expiry limit, need to re-authenticate");
+
+                    // Record in trace
+                    super::common::TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "refresh_token_expired",
+                        Some(serde_json::json!({
+                            "error": "30-day expiry limit reached",
+                            "action": "remove_tokens_and_reauthenticate",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
 
                     // Clear any stored tokens since they're now invalid
                     if let Some(tm) = &self.token_manager {
@@ -1624,6 +1754,16 @@ impl TwitchAdapter {
                     info!("Will automatically begin reauthorization in the next polling cycle");
                 } else {
                     error!("Failed to refresh token: {}", e);
+                    
+                    // Record in trace
+                    super::common::TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "token_refresh_error",
+                        Some(serde_json::json!({
+                            "error": e.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
                 }
 
                 // Continue to next iteration to authenticate again
@@ -1652,7 +1792,24 @@ impl TwitchAdapter {
                                 state.last_channel_info = Some(channel_info.clone());
 
                                 // Convert to json value for event
-                                let channel_json = serde_json::to_value(&channel_info)?;
+                                let channel_json = match serde_json::to_value(&channel_info) {
+                                    Ok(json) => json,
+                                    Err(e) => {
+                                        error!("Failed to serialize channel info: {}", e);
+                                        
+                                        // Record error in trace
+                                        super::common::TraceHelper::record_adapter_operation(
+                                            "twitch",
+                                            "channel_info_serialization_error",
+                                            Some(serde_json::json!({
+                                                "error": e.to_string(),
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            })),
+                                        ).await;
+                                        
+                                        continue;
+                                    }
+                                };
 
                                 // Publish event
                                 let payload = json!({
@@ -1660,7 +1817,20 @@ impl TwitchAdapter {
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 });
 
-                                self.base.publish_event("channel.updated", payload).await?;
+                                if let Err(e) = self.base.publish_event("channel.updated", payload).await {
+                                    error!("Failed to publish channel updated event: {}", e);
+                                    
+                                    // Record error in trace
+                                    super::common::TraceHelper::record_adapter_operation(
+                                        "twitch",
+                                        "channel_event_publish_error",
+                                        Some(serde_json::json!({
+                                            "event": "channel.updated",
+                                            "error": e.to_string(),
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })),
+                                    ).await;
+                                }
                             }
                         }
                         Ok(None) => {
@@ -1668,11 +1838,33 @@ impl TwitchAdapter {
                         }
                         Err(e) => {
                             error!(error = %e, "Failed to fetch channel info");
+                            
+                            // Record error in trace
+                            super::common::TraceHelper::record_adapter_operation(
+                                "twitch",
+                                "channel_info_fetch_error",
+                                Some(serde_json::json!({
+                                    "error": e.to_string(),
+                                    "channel_id": channel_id,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            ).await;
                         }
                     }
-                } else if let Some(_login) = &config.channel_login {
+                } else if let Some(login) = &config.channel_login {
+                    // Record that we're using login instead of ID
+                    super::common::TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "channel_lookup_by_login",
+                        Some(serde_json::json!({
+                            "login": login,
+                            "message": "Lookup by channel login not fully implemented yet",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    ).await;
+                    
                     // TODO: Implement lookup by login - variable is unused until implementation
-                    warn!("Lookup by channel login not implemented yet");
+                    warn!("Lookup by channel login not fully implemented yet");
                 }
             }
 
@@ -1697,7 +1889,24 @@ impl TwitchAdapter {
                             info!("Stream went online, publishing event");
 
                             // Convert to json value for event
-                            let stream_json = serde_json::to_value(&stream_info)?;
+                            let stream_json = match serde_json::to_value(&stream_info) {
+                                Ok(json) => json,
+                                Err(e) => {
+                                    error!("Failed to serialize stream info: {}", e);
+                                    
+                                    // Record error in trace
+                                    super::common::TraceHelper::record_adapter_operation(
+                                        "twitch",
+                                        "stream_info_serialization_error",
+                                        Some(serde_json::json!({
+                                            "error": e.to_string(),
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })),
+                                    ).await;
+                                    
+                                    continue;
+                                }
+                            };
 
                             // Publish stream online event
                             let payload = json!({
@@ -1705,7 +1914,23 @@ impl TwitchAdapter {
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             });
 
-                            self.base.publish_event("stream.online", payload).await?;
+                            if let Err(e) = self.base.publish_event("stream.online", payload).await {
+                                error!("Failed to publish stream online event: {}", e);
+                                
+                                // Record error in trace
+                                super::common::TraceHelper::record_adapter_operation(
+                                    "twitch",
+                                    "stream_event_publish_error",
+                                    Some(serde_json::json!({
+                                        "event": "stream.online",
+                                        "error": e.to_string(),
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                                
+                                continue;
+                            }
+                            
                             state.was_live = true;
                         }
 
@@ -1718,7 +1943,25 @@ impl TwitchAdapter {
                             state.last_stream_info = Some(stream_info.clone());
 
                             // Convert to json value for event
-                            let stream_json = serde_json::to_value(&stream_info)?;
+                            let stream_json = match serde_json::to_value(&stream_info) {
+                                Ok(json) => json,
+                                Err(e) => {
+                                    error!("Failed to serialize stream info: {}", e);
+                                    
+                                    // Record error in trace
+                                    super::common::TraceHelper::record_adapter_operation(
+                                        "twitch",
+                                        "stream_info_serialization_error",
+                                        Some(serde_json::json!({
+                                            "error": e.to_string(),
+                                            "event": "stream.updated",
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })),
+                                    ).await;
+                                    
+                                    continue;
+                                }
+                            };
 
                             // Publish event
                             let payload = json!({
@@ -1726,7 +1969,20 @@ impl TwitchAdapter {
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             });
 
-                            self.base.publish_event("stream.updated", payload).await?;
+                            if let Err(e) = self.base.publish_event("stream.updated", payload).await {
+                                error!("Failed to publish stream updated event: {}", e);
+                                
+                                // Record error in trace
+                                super::common::TraceHelper::record_adapter_operation(
+                                    "twitch",
+                                    "stream_event_publish_error",
+                                    Some(serde_json::json!({
+                                        "event": "stream.updated",
+                                        "error": e.to_string(),
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                            }
                         }
                     }
                     Ok(None) => {
@@ -1743,13 +1999,41 @@ impl TwitchAdapter {
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             });
 
-                            self.base.publish_event("stream.offline", payload).await?;
+                            if let Err(e) = self.base.publish_event("stream.offline", payload).await {
+                                error!("Failed to publish stream offline event: {}", e);
+                                
+                                // Record error in trace
+                                super::common::TraceHelper::record_adapter_operation(
+                                    "twitch",
+                                    "stream_event_publish_error",
+                                    Some(serde_json::json!({
+                                        "event": "stream.offline",
+                                        "error": e.to_string(),
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                                
+                                continue;
+                            }
+                            
                             state.was_live = false;
                             state.last_stream_info = None;
                         }
                     }
                     Err(e) => {
                         error!(error = %e, "Failed to fetch stream info");
+                        
+                        // Record error in trace
+                        super::common::TraceHelper::record_adapter_operation(
+                            "twitch",
+                            "stream_info_fetch_error",
+                            Some(serde_json::json!({
+                                "error": e.to_string(),
+                                "channel_id": config.channel_id,
+                                "channel_login": config.channel_login,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        ).await;
                     }
                 }
             }

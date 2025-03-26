@@ -3,11 +3,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, error, info, warn};
 use twitch_api::helix::{channels::ChannelInformation, streams::Stream};
 use twitch_oauth2::{ClientId, UserToken};
 
-use crate::adapters::http_client::{HttpClient, ReqwestHttpClient};
+use crate::adapters::{
+    common::{AdapterError, RetryOptions, TraceHelper, with_retry},
+    http_client::{HttpClient, ReqwestHttpClient}
+};
 
 /// Environment variable name for Twitch Client ID
 const TWITCH_CLIENT_ID_ENV: &str = "TWITCH_CLIENT_ID";
@@ -164,55 +167,121 @@ impl TwitchApiClient {
         &self,
         token: &UserToken,
         broadcaster_id: &str,
-    ) -> Result<Option<ChannelInformation>> {
-        debug!(
+    ) -> Result<Option<ChannelInformation>, AdapterError> {
+        info!(
             "Fetching channel info for broadcaster ID: {}",
             broadcaster_id
         );
 
-        // Get client ID from environment
-        let client_id = get_client_id()?;
+        // Create retry options for robust error handling
+        let retry_options = RetryOptions::default();
+        
+        // Use the standardized retry mechanism
+        with_retry("fetch_channel_info", retry_options, |attempt| async move {
+            // Record trace context for this operation
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "fetch_channel_info",
+                Some(serde_json::json!({
+                    "broadcaster_id": broadcaster_id,
+                    "attempt": attempt,
+                })),
+            ).await;
+            
+            // Get client ID from environment
+            let client_id = match get_client_id() {
+                Ok(id) => id,
+                Err(e) => {
+                    return Err(AdapterError::config_with_source(
+                        format!("Failed to get client ID: {}", e),
+                        e
+                    ));
+                }
+            };
 
-        // Define the API endpoint
-        let url = format!(
-            "https://api.twitch.tv/helix/channels?broadcaster_id={}",
-            broadcaster_id
-        );
+            // Define the API endpoint
+            let url = format!(
+                "https://api.twitch.tv/helix/channels?broadcaster_id={}",
+                broadcaster_id
+            );
 
-        // Prepare headers
-        let mut headers = HashMap::new();
-        headers.insert("Client-ID".to_string(), client_id.as_str().to_string());
-        headers.insert(
-            "Authorization".to_string(),
-            format!("Bearer {}", token.access_token.secret()),
-        );
+            // Prepare headers
+            let mut headers = HashMap::new();
+            headers.insert("Client-ID".to_string(), client_id.as_str().to_string());
+            headers.insert(
+                "Authorization".to_string(),
+                format!("Bearer {}", token.access_token.secret()),
+            );
 
-        // Make the request using our abstracted HTTP client
-        let response = self.http_client.get(&url, headers).await?;
+            // Make the request using our abstracted HTTP client
+            let response = match self.http_client.get(&url, headers).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    warn!(
+                        error = %e, 
+                        attempt = attempt,
+                        "HTTP request failed when fetching channel info"
+                    );
+                    return Err(AdapterError::connection_with_source(
+                        format!("Failed to connect to Twitch API: {}", e),
+                        e
+                    ));
+                }
+            };
 
-        // Check status
-        if !(response.status() >= 200 && response.status() < 300) {
-            return Err(anyhow!(
-                "Failed to fetch channel info: HTTP {} - {}",
-                response.status(),
-                response.body()
-            ));
-        }
-
-        // Parse JSON from the response body
-        let response_json: Value = serde_json::from_str(response.body())?;
-
-        // Check if we have data
-        if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
-            if let Some(channel) = data.first() {
-                // Convert to ChannelInformation
-                let channel_info = serde_json::from_value(channel.clone())?;
-                return Ok(Some(channel_info));
+            // Check status
+            if !(response.status() >= 200 && response.status() < 300) {
+                warn!(
+                    status = response.status(),
+                    body = response.body(),
+                    attempt = attempt,
+                    "Received error status from Twitch API"
+                );
+                
+                return Err(AdapterError::api_with_status_and_source(
+                    format!("Twitch API error: {}", response.body()),
+                    response.status(),
+                    anyhow!("API request failed with status {}", response.status())
+                ));
             }
-        }
 
-        // No channel found
-        Ok(None)
+            // Parse JSON from the response body
+            let response_json: Value = match serde_json::from_str(response.body()) {
+                Ok(json) => json,
+                Err(e) => {
+                    return Err(AdapterError::api_with_source(
+                        "Failed to parse Twitch API response",
+                        e
+                    ));
+                }
+            };
+
+            // Check if we have data
+            if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
+                if let Some(channel) = data.first() {
+                    // Convert to ChannelInformation
+                    match serde_json::from_value(channel.clone()) {
+                        Ok(channel_info) => {
+                            info!(
+                                broadcaster_id = %broadcaster_id,
+                                "Successfully fetched channel information"
+                            );
+                            return Ok(Some(channel_info));
+                        }
+                        Err(e) => {
+                            return Err(AdapterError::api_with_source(
+                                "Failed to deserialize channel information",
+                                e
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // No channel found - not an error, just no data
+            debug!("No channel information found for broadcaster ID: {}", broadcaster_id);
+            Ok(None)
+        }).await
     }
 
     /// Fetch stream information
@@ -221,59 +290,135 @@ impl TwitchApiClient {
         token: &UserToken,
         user_id: Option<&str>,
         user_login: Option<&str>,
-    ) -> Result<Option<Stream>> {
-        debug!(
+    ) -> Result<Option<Stream>, AdapterError> {
+        info!(
             "Fetching stream info for user_id: {:?}, user_login: {:?}",
             user_id, user_login
         );
 
-        // Get client ID from environment
-        let client_id = get_client_id()?;
+        // Create retry options for robust error handling
+        let retry_options = RetryOptions::default();
+        
+        // Use the standardized retry mechanism
+        with_retry("fetch_stream_info", retry_options, |attempt| async move {
+            // Record trace context for this operation
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "fetch_stream_info",
+                Some(serde_json::json!({
+                    "user_id": user_id,
+                    "user_login": user_login,
+                    "attempt": attempt,
+                })),
+            ).await;
+            
+            // Need either user_id or user_login
+            let query_param = match (user_id, user_login) {
+                (Some(id), _) => format!("user_id={}", id),
+                (_, Some(login)) => format!("user_login={}", login),
+                _ => {
+                    return Err(AdapterError::api(
+                        "Either user_id or user_login must be provided"
+                    ));
+                }
+            };
+            
+            // Get client ID from environment
+            let client_id = match get_client_id() {
+                Ok(id) => id,
+                Err(e) => {
+                    return Err(AdapterError::config_with_source(
+                        format!("Failed to get client ID: {}", e),
+                        e
+                    ));
+                }
+            };
 
-        // Need either user_id or user_login
-        let query_param = match (user_id, user_login) {
-            (Some(id), _) => format!("user_id={}", id),
-            (_, Some(login)) => format!("user_login={}", login),
-            _ => return Err(anyhow!("Either user_id or user_login must be provided")),
-        };
+            // Define the API endpoint
+            let url = format!("https://api.twitch.tv/helix/streams?{}", query_param);
 
-        // Define the API endpoint
-        let url = format!("https://api.twitch.tv/helix/streams?{}", query_param);
+            // Prepare headers
+            let mut headers = HashMap::new();
+            headers.insert("Client-ID".to_string(), client_id.as_str().to_string());
+            headers.insert(
+                "Authorization".to_string(),
+                format!("Bearer {}", token.access_token.secret()),
+            );
 
-        // Prepare headers
-        let mut headers = HashMap::new();
-        headers.insert("Client-ID".to_string(), client_id.as_str().to_string());
-        headers.insert(
-            "Authorization".to_string(),
-            format!("Bearer {}", token.access_token.secret()),
-        );
+            // Make the request using our abstracted HTTP client
+            let response = match self.http_client.get(&url, headers).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    warn!(
+                        error = %e, 
+                        attempt = attempt,
+                        "HTTP request failed when fetching stream info"
+                    );
+                    return Err(AdapterError::connection_with_source(
+                        format!("Failed to connect to Twitch API: {}", e),
+                        e
+                    ));
+                }
+            };
 
-        // Make the request using our abstracted HTTP client
-        let response = self.http_client.get(&url, headers).await?;
-
-        // Check status
-        if !(response.status() >= 200 && response.status() < 300) {
-            return Err(anyhow!(
-                "Failed to fetch stream info: HTTP {} - {}",
-                response.status(),
-                response.body()
-            ));
-        }
-
-        // Parse JSON from the response body
-        let response_json: Value = serde_json::from_str(response.body())?;
-
-        // Check if we have data
-        if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
-            if let Some(stream) = data.first() {
-                // Convert to Stream
-                let stream_info = serde_json::from_value(stream.clone())?;
-                return Ok(Some(stream_info));
+            // Check status
+            if !(response.status() >= 200 && response.status() < 300) {
+                warn!(
+                    status = response.status(),
+                    body = response.body(),
+                    attempt = attempt,
+                    "Received error status from Twitch API"
+                );
+                
+                return Err(AdapterError::api_with_status_and_source(
+                    format!("Twitch API error: {}", response.body()),
+                    response.status(),
+                    anyhow!("API request failed with status {}", response.status())
+                ));
             }
-        }
 
-        // No stream found (user is offline)
-        Ok(None)
+            // Parse JSON from the response body
+            let response_json: Value = match serde_json::from_str(response.body()) {
+                Ok(json) => json,
+                Err(e) => {
+                    return Err(AdapterError::api_with_source(
+                        "Failed to parse Twitch API response",
+                        e
+                    ));
+                }
+            };
+
+            // Check if we have data
+            if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
+                if let Some(stream) = data.first() {
+                    // Convert to Stream
+                    match serde_json::from_value(stream.clone()) {
+                        Ok(stream_info) => {
+                            info!(
+                                user_id = ?user_id,
+                                user_login = ?user_login,
+                                "Successfully fetched stream information"
+                            );
+                            return Ok(Some(stream_info));
+                        }
+                        Err(e) => {
+                            return Err(AdapterError::api_with_source(
+                                "Failed to deserialize stream information",
+                                e
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // No stream found (user is offline) - not an error
+            debug!(
+                user_id = ?user_id,
+                user_login = ?user_login,
+                "No stream information found (user likely offline)"
+            );
+            Ok(None)
+        }).await
     }
 
     // Add more API methods as needed...
