@@ -1,5 +1,5 @@
 use crate::{
-    adapters::base::{AdapterConfig, BaseAdapter},
+    adapters::base::{AdapterConfig, BaseAdapter, ServiceAdapterHelper},
     adapters::common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper, execute_with_retry},
     adapters::twitch_eventsub::EventSubClient,
     auth::token_manager::{TokenData, TokenManager},
@@ -2903,156 +2903,18 @@ impl ServiceAdapter for TwitchAdapter {
 
     #[instrument(skip(self), level = "debug")]
     async fn disconnect(&self) -> Result<()> {
-        // Record disconnect operation start
-        TraceHelper::record_adapter_operation(
-            "twitch",
-            "disconnect_start",
-            None,
-        ).await;
-        
-        // Only disconnect if connected
-        if !self.base.is_connected() {
-            debug!("Twitch adapter is already disconnected");
-            
-            // Record early return
-            TraceHelper::record_adapter_operation(
-                "twitch",
-                "disconnect_already_disconnected",
-                None,
-            ).await;
-            
-            return Ok(());
-        }
-
-        info!("Disconnecting Twitch adapter");
-
-        // Set disconnected state to stop event generation
-        self.base.set_connected(false);
-
-        // Record connected state change
-        TraceHelper::record_adapter_operation(
-            "twitch",
-            "disconnect_state_changed",
-            None,
-        ).await;
-
-        // Check if we're using EventSub
-        let config = self.config.read().await;
-        let use_eventsub = config.use_eventsub;
-        drop(config);
-
-        // Define retry options for disconnect operations
-        let retry_options = RetryOptions::new(
-            2, // Max 2 attempts
-            BackoffStrategy::Constant(Duration::from_millis(500)),
-            true, // Add jitter
-        );
-
-        if use_eventsub {
-            // Record EventSub usage
-            TraceHelper::record_adapter_operation(
-                "twitch",
-                "disconnect_with_eventsub",
-                None,
-            ).await;
-            
-            // Stop EventSub client with retry pattern
-            match self.stop_eventsub().await {
-                Ok(_) => {
-                    info!("Successfully stopped EventSub client");
-                    
-                    // Record successful EventSub stop
-                    TraceHelper::record_adapter_operation(
-                        "twitch",
-                        "eventsub_stopped",
-                        None,
-                    ).await;
-                },
-                Err(e) => {
-                    warn!("Error stopping EventSub client: {}", e);
-                    
-                    // Record EventSub stop failure
-                    TraceHelper::record_adapter_operation(
-                        "twitch",
-                        "eventsub_stop_failed",
-                        Some(serde_json::json!({
-                            "error": e.to_string(),
-                        })),
-                    ).await;
-                    
-                    // Continue with disconnect regardless
-                }
-            }
-        }
-
-        // Stop the event handler (this will stop the polling task if running)
-        // Use execute_with_retry for stopping event handler
-        let stop_result = execute_with_retry("stop_event_handler", retry_options, |attempt| {
-            let self_clone = self.clone();
-            
-            async move {
-                debug!(attempt = attempt, "Attempting to stop event handler");
-                
-                match self_clone.base.stop_event_handler().await {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        // Convert to AdapterError for consistent error handling
-                        Err(AdapterError::from_anyhow_error(
-                            "shutdown",
-                            format!("Failed to stop event handler (attempt {})", attempt),
-                            e
-                        ))
-                    }
-                }
-            }
-        }).await;
-        
-        match stop_result {
-            Ok(_) => {
-                info!("Successfully stopped event handler");
-                
-                // Record successful event handler stop
-                TraceHelper::record_adapter_operation(
-                    "twitch",
-                    "event_handler_stopped",
-                    None,
-                ).await;
-            },
-            Err(e) => {
-                warn!("Failed to stop event handler cleanly: {}", e);
-                
-                // Record event handler stop failure
-                TraceHelper::record_adapter_operation(
-                    "twitch",
-                    "event_handler_stop_failed",
-                    Some(serde_json::json!({
-                        "error": e.to_string(),
-                    })),
-                ).await;
-                
-                // Return early with the error
-                return Err(anyhow::anyhow!("Failed to disconnect Twitch adapter: {}", e));
-            }
-        }
-
-        info!("Twitch adapter disconnected");
-        
-        // Record successful disconnect
-        TraceHelper::record_adapter_operation(
-            "twitch",
-            "disconnected",
-            None,
-        ).await;
-        
-        Ok(())
+        // Use the default implementation from ServiceAdapterHelper
+        // The cleanup logic for stopping EventSub is implemented
+        // in the clean_up_on_disconnect hook method
+        self.disconnect_default().await
     }
 
     fn is_connected(&self) -> bool {
-        self.base.is_connected()
+        self.is_connected_default()
     }
 
     fn get_name(&self) -> &str {
-        self.base.name()
+        self.get_name_default()
     }
 
     #[instrument(skip(self, config), level = "debug")]
@@ -3603,6 +3465,59 @@ impl Clone for TwitchAdapter {
             eventsub_client: Arc::clone(&self.eventsub_client),
             recovery_manager: self.recovery_manager.clone(),
         }
+    }
+}
+
+#[async_trait]
+impl ServiceAdapterHelper for TwitchAdapter {
+    fn base(&self) -> &BaseAdapter {
+        &self.base
+    }
+    
+    async fn clean_up_on_disconnect(&self) -> Result<()> {
+        // Check if we're using EventSub
+        let config = self.config.read().await;
+        let use_eventsub = config.use_eventsub;
+        drop(config);
+
+        if use_eventsub {
+            // Record EventSub usage
+            TraceHelper::record_adapter_operation(
+                "twitch",
+                "disconnect_with_eventsub",
+                None,
+            ).await;
+            
+            // Stop EventSub client with retry pattern
+            match self.stop_eventsub().await {
+                Ok(_) => {
+                    info!("Successfully stopped EventSub client");
+                    
+                    // Record successful EventSub stop
+                    TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "eventsub_stopped",
+                        None,
+                    ).await;
+                },
+                Err(e) => {
+                    warn!("Error stopping EventSub client: {}", e);
+                    
+                    // Record EventSub stop failure
+                    TraceHelper::record_adapter_operation(
+                        "twitch",
+                        "eventsub_stop_failed",
+                        Some(serde_json::json!({
+                            "error": e.to_string(),
+                        })),
+                    ).await;
+                    
+                    // Continue with disconnect regardless
+                }
+            }
+        }
+        
+        Ok(())
     }
 }
 

@@ -1,7 +1,7 @@
 // src/adapters/obs.rs
 use crate::{
     adapters::{
-        base::{AdapterConfig, BaseAdapter},
+        base::{AdapterConfig, BaseAdapter, ServiceAdapterHelper},
         common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper},
     },
     EventBus, ServiceAdapter, StreamEvent,
@@ -1854,273 +1854,18 @@ impl ServiceAdapter for ObsAdapter {
 
     #[instrument(skip(self), fields(adapter = "obs"), level = "debug")]
     async fn disconnect(&self) -> Result<()> {
-        // Record the disconnect operation in trace
-        TraceHelper::record_adapter_operation(
-            "obs",
-            "disconnect",
-            Some(json!({
-                "currently_connected": self.base.is_connected(),
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            })),
-        ).await;
-        
-        // Only disconnect if currently connected
-        if !self.base.is_connected() {
-            debug!("OBS adapter already disconnected");
-            return Ok(());
-        }
-
-        info!("Disconnecting OBS adapter");
-
-        // Set disconnected state using BaseAdapter
-        self.base.set_connected(false);
-
-        // Stop the event handler (send shutdown signal and abort the task)
-        match self.base.stop_event_handler().await {
-            Ok(_) => debug!("Successfully stopped OBS event handler"),
-            Err(e) => warn!(error = %e, "Issues while stopping OBS event handler"),
-        }
-
-        // Clear the client
-        *self.client.lock().await = None;
-        debug!("Cleared OBS client reference");
-
-        // Use direct sequential retry logic for publishing disconnection event
-        let event_payload = json!({
-            "message": "Disconnected from OBS WebSocket",
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        });
-        
-        let publish_retry_options = RetryOptions::default();
-        let mut attempt = 0;
-        let mut publish_error: Option<AdapterError> = None;
-        let mut publish_success = false;
-        let mut receivers_count = 0;
-        
-        // Record that we're starting event publication
-        TraceHelper::record_adapter_operation(
-            "obs",
-            "publish_disconnection_event_start",
-            Some(json!({
-                "max_attempts": publish_retry_options.max_attempts,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            })),
-        ).await;
-        
-        while attempt < publish_retry_options.max_attempts {
-            attempt += 1;
-            debug!(attempt, "Attempting to publish disconnection event");
-            
-            // Record the attempt in trace
-            TraceHelper::record_adapter_operation(
-                "obs",
-                "publish_disconnection_event_attempt",
-                Some(json!({
-                    "attempt": attempt,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                })),
-            ).await;
-            
-            // Create the event and attempt to publish
-            let stream_event = StreamEvent::new("obs", "connection.closed", event_payload.clone());
-            match self.base.event_bus().publish(stream_event).await {
-                Ok(receivers) => {
-                    // Publication successful
-                    publish_success = true;
-                    receivers_count = receivers;
-                    
-                    // Record success in trace
-                    TraceHelper::record_adapter_operation(
-                        "obs",
-                        "publish_disconnection_event_success",
-                        Some(json!({
-                            "attempt": attempt,
-                            "receivers": receivers,
-                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                        })),
-                    ).await;
-                    
-                    debug!(receivers, "Published OBS disconnection event successfully");
-                    break;
-                },
-                Err(e) => {
-                    // Publication failed
-                    let error = AdapterError::from_anyhow_error(
-                        "event",
-                        format!("Failed to publish disconnection event: {}", e),
-                        anyhow::anyhow!("{}", e)
-                    );
-                    publish_error = Some(error.clone());
-                    
-                    // Record failure in trace
-                    TraceHelper::record_adapter_operation(
-                        "obs",
-                        "publish_disconnection_event_attempt_failure",
-                        Some(json!({
-                            "attempt": attempt,
-                            "error": error.to_string(),
-                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                        })),
-                    ).await;
-                    
-                    // If this wasn't the last attempt, calculate delay and retry
-                    if attempt < publish_retry_options.max_attempts {
-                        let delay = publish_retry_options.get_delay(attempt);
-                        warn!(
-                            error = %error,
-                            attempt = attempt,
-                            next_delay_ms = %delay.as_millis(),
-                            "Disconnection event publication failed, retrying after delay"
-                        );
-                        sleep(delay).await;
-                    } else {
-                        error!(
-                            error = %error,
-                            attempts = attempt,
-                            "Failed to publish disconnection event after maximum attempts"
-                        );
-                    }
-                }
-            }
-        }
-        
-        // Process final result of event publication
-        if !publish_success && publish_error.is_some() {
-            error!(
-                error = %publish_error.unwrap(),
-                "Failed to publish OBS disconnection event after retries"
-            );
-        } else if publish_success {
-            debug!(receivers = receivers_count, "Published OBS disconnection event");
-        }
-        
-        // Now trigger disconnection callbacks with direct sequential retry logic
-        let callback_event = ObsEvent::ConnectionChanged {
-            connected: false,
-            data: event_payload.clone(),
-        };
-        
-        let trigger_retry_options = RetryOptions::default();
-        let mut attempt = 0;
-        let mut trigger_error: Option<AdapterError> = None;
-        let mut trigger_success = false;
-        let mut callbacks_triggered = 0;
-        
-        // Record that we're starting callback trigger
-        TraceHelper::record_adapter_operation(
-            "obs",
-            "trigger_disconnection_callbacks_start",
-            Some(json!({
-                "max_attempts": trigger_retry_options.max_attempts,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            })),
-        ).await;
-        
-        while attempt < trigger_retry_options.max_attempts {
-            attempt += 1;
-            debug!(attempt, "Attempting to trigger disconnection callbacks");
-            
-            // Record the attempt in trace
-            TraceHelper::record_adapter_operation(
-                "obs",
-                "trigger_disconnection_callbacks_attempt",
-                Some(json!({
-                    "attempt": attempt,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                })),
-            ).await;
-            
-            // Attempt to trigger callbacks
-            match self.callbacks.trigger(callback_event.clone()).await {
-                Ok(count) => {
-                    // Trigger successful
-                    trigger_success = true;
-                    callbacks_triggered = count;
-                    
-                    // Record success in trace
-                    TraceHelper::record_adapter_operation(
-                        "obs",
-                        "trigger_disconnection_callbacks_success",
-                        Some(json!({
-                            "attempt": attempt,
-                            "callbacks_triggered": count,
-                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                        })),
-                    ).await;
-                    
-                    debug!(callbacks = count, "Triggered OBS disconnection callbacks successfully");
-                    break;
-                },
-                Err(e) => {
-                    // Trigger failed
-                    let error = AdapterError::from_anyhow_error(
-                        "event",
-                        format!("Failed to trigger disconnection callbacks: {}", e),
-                        e
-                    );
-                    trigger_error = Some(error.clone());
-                    
-                    // Record failure in trace
-                    TraceHelper::record_adapter_operation(
-                        "obs",
-                        "trigger_disconnection_callbacks_attempt_failure",
-                        Some(json!({
-                            "attempt": attempt,
-                            "error": error.to_string(),
-                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                        })),
-                    ).await;
-                    
-                    // If this wasn't the last attempt, calculate delay and retry
-                    if attempt < trigger_retry_options.max_attempts {
-                        let delay = trigger_retry_options.get_delay(attempt);
-                        warn!(
-                            error = %error,
-                            attempt = attempt,
-                            next_delay_ms = %delay.as_millis(),
-                            "Disconnection callbacks trigger failed, retrying after delay"
-                        );
-                        sleep(delay).await;
-                    } else {
-                        error!(
-                            error = %error,
-                            attempts = attempt,
-                            "Failed to trigger disconnection callbacks after maximum attempts"
-                        );
-                    }
-                }
-            }
-        }
-        
-        // Process final result of trigger
-        if !trigger_success && trigger_error.is_some() {
-            error!(
-                error = %trigger_error.unwrap(),
-                "Failed to trigger OBS disconnection callbacks after retries"
-            );
-        } else if trigger_success {
-            debug!(callbacks = callbacks_triggered, "Triggered OBS disconnection callbacks");
-        }
-        
-        // Record successful disconnection in trace
-        TraceHelper::record_adapter_operation(
-            "obs",
-            "disconnect_success",
-            Some(json!({
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            })),
-        ).await;
-
-        info!("Disconnected from OBS WebSocket");
-        Ok(())
+        // Use the default implementation from ServiceAdapterHelper
+        // The cleanup logic for clearing the client reference is implemented
+        // in the clean_up_on_disconnect hook method
+        self.disconnect_default().await
     }
 
     fn is_connected(&self) -> bool {
-        self.base.is_connected()
+        self.is_connected_default()
     }
 
     fn get_name(&self) -> &str {
-        self.base.name()
+        self.get_name_default()
     }
 
     #[instrument(skip(self, config), fields(adapter = "obs"), level = "debug")]
@@ -2253,5 +1998,19 @@ impl Clone for ObsAdapter {
             config: Arc::clone(&self.config), // Share the same config
             callbacks: Arc::clone(&self.callbacks), // Share the same callback registry
         }
+    }
+}
+
+#[async_trait]
+impl ServiceAdapterHelper for ObsAdapter {
+    fn base(&self) -> &BaseAdapter {
+        &self.base
+    }
+    
+    async fn clean_up_on_disconnect(&self) -> Result<()> {
+        // OBS-specific cleanup: clear the client reference
+        debug!("Clearing OBS client reference");
+        *self.client.lock().await = None;
+        Ok(())
     }
 }

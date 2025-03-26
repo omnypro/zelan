@@ -407,6 +407,18 @@ pub trait ServiceAdapterHelper: ServiceAdapter {
     }
     
     /// Default implementation for disconnect method
+    /// 
+    /// This method handles the standard disconnection flow:
+    /// 1. Records the operation start in trace
+    /// 2. Checks if already disconnected
+    /// 3. Sets the disconnected state
+    /// 4. Stops the event handler
+    /// 5. Runs adapter-specific cleanup via the clean_up_on_disconnect hook
+    /// 6. Publishes a disconnection event
+    /// 7. Records disconnect success in trace
+    ///
+    /// Adapters can override the clean_up_on_disconnect method to add
+    /// custom cleanup logic specific to their implementation.
     async fn disconnect_default(&self) -> Result<()> {
         // Record the disconnect operation in trace
         self.base().record_operation_start("disconnect", Some(serde_json::json!({
@@ -430,6 +442,11 @@ pub trait ServiceAdapterHelper: ServiceAdapter {
             Ok(_) => debug!("Successfully stopped event handler for {}", self.base().name()),
             Err(e) => warn!(error = %e, "Issues while stopping event handler for {}", self.base().name()),
         }
+        
+        // Run adapter-specific cleanup
+        if let Err(e) = self.clean_up_on_disconnect().await {
+            warn!(error = %e, "Error during cleanup for {}", self.base().name());
+        }
 
         // Publish disconnection event
         let event_payload = serde_json::json!({
@@ -447,6 +464,14 @@ pub trait ServiceAdapterHelper: ServiceAdapter {
         }))).await;
 
         info!("Disconnected from {} adapter", self.base().name());
+        Ok(())
+    }
+    
+    /// Hook method for adapter-specific cleanup on disconnect
+    /// 
+    /// Override this method to add custom cleanup logic specific to your adapter.
+    /// The default implementation does nothing.
+    async fn clean_up_on_disconnect(&self) -> Result<()> {
         Ok(())
     }
 }
