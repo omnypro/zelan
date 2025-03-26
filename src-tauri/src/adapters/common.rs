@@ -4,7 +4,6 @@
 //! helping to reduce duplication and standardize patterns.
 
 use anyhow::Result;
-use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;

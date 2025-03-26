@@ -558,7 +558,7 @@ impl ZelanState {
                 
                 // Create the adapter with the loaded configuration
                 info!("Initializing Twitch adapter");
-                let mut twitch_adapter = TwitchAdapter::with_config(service_guard.event_bus(), config);
+                let mut twitch_adapter = TwitchAdapter::with_config(service_guard.event_bus(), config).await;
                 
                 // Set token manager on the adapter - IMPORTANT: This must happen before registering
                 // to ensure the token manager is available when connect() is called
@@ -576,7 +576,7 @@ impl ZelanState {
                 info!("Registered Twitch adapter with saved settings");
             } else {
                 info!("No saved Twitch settings found, using defaults");
-                let mut twitch_adapter = TwitchAdapter::new(service_guard.event_bus());
+                let mut twitch_adapter = TwitchAdapter::new(service_guard.event_bus()).await;
                 
                 // Set token manager on the adapter - IMPORTANT: This must happen before registering
                 // to ensure the token manager is available when connect() is called

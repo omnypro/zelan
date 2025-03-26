@@ -6,7 +6,7 @@ use crate::{
     recovery::{AdapterRecovery, RecoveryManager},
     EventBus, ServiceAdapter, StreamEvent,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -448,7 +448,7 @@ impl TwitchAdapter {
 
         // Use a retry pattern for EventSub client creation
         let event_bus = self.base.event_bus();
-        let self_clone = self.clone();
+        // self_clone is not needed here
         
         // Define retry options
         let retry_options = RetryOptions::new(
@@ -460,7 +460,7 @@ impl TwitchAdapter {
         // Use with_retry for client creation
         let result = with_retry("init_eventsub_client", retry_options, |attempt| {
             let event_bus_clone = event_bus.clone();
-            let self_inner = self_clone.clone();
+            // No need for self_clone here since it's not used
             
             async move {
                 debug!(attempt = attempt, "Attempting to initialize EventSub client");
@@ -732,7 +732,6 @@ impl TwitchAdapter {
                         2, // Try twice
                         BackoffStrategy::Exponential {
                             base_delay: Duration::from_millis(500),
-                            factor: 2.0,
                             max_delay: Duration::from_secs(2),
                         },
                         true, // Add jitter
@@ -1402,7 +1401,7 @@ impl TwitchAdapter {
             Ok(id) => id,
             Err(e) => {
                 error!("Failed to get Twitch client ID: {}", e);
-                return Err(e);
+                return Err(anyhow!("Failed to get Twitch client ID: {}", e));
             }
         };
 
