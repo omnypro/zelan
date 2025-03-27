@@ -103,7 +103,7 @@ mod concurrent_map_tests {
         assert!(err.is_key_not_found());
         
         // Remove
-        let removed = map.remove(&"one".to_string());
+        let removed = map.remove(&"one".to_string()).map(|(_, v)| v);
         assert_eq!(removed, Some(11));
         assert!(!map.contains_key(&"one".to_string()));
     }
@@ -125,7 +125,7 @@ mod concurrent_map_tests {
         assert_eq!(set.len(), 2);
         
         // Remove
-        assert!(set.remove(&"one".to_string()));
+        assert!(set.remove(&"one".to_string()).is_some());
         assert!(!set.contains(&"one".to_string()));
         
         // Values
