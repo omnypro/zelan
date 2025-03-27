@@ -4,7 +4,7 @@
 //! and event handling capabilities.
 
 use super::test_helpers::{cleanup_twitch_env_vars, setup_twitch_env_vars};
-use crate::adapters::twitch_eventsub::*;
+use crate::adapters::twitch::eventsub::*;
 use crate::adapters::BackoffStrategy;
 use crate::EventBus;
 use std::sync::Arc;

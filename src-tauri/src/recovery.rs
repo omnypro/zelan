@@ -264,9 +264,3 @@ pub trait AdapterRecovery {
     /// Get the adapter name for error registration
     fn adapter_name(&self) -> &str;
 }
-
-#[cfg(test)]
-mod tests {
-    // Tests for this module have been moved to src/tests/recovery_test.rs
-    pub use crate::tests::recovery_test::*;
-}

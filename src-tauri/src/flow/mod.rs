@@ -260,9 +260,3 @@ pub fn get_trace_registry() -> Arc<TraceRegistry> {
         })
         .clone()
 }
-
-#[cfg(test)]
-mod tests {
-    // Re-export tests from dedicated test file
-    pub use crate::tests::flow_test::*;
-}

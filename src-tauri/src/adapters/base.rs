@@ -1,9 +1,9 @@
 // Base adapter implementation with common functionality
-use crate::{EventBus, ServiceAdapter, StreamEvent};
+use crate::{EventBus, StreamEvent};
 use anyhow::Result;
-use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::async_runtime::Mutex;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, warn};
@@ -34,6 +34,8 @@ pub trait AdapterConfig: Clone + Send + Sync + std::fmt::Debug {
 pub struct BaseAdapter {
     /// Name of the adapter
     name: String,
+    /// Unique identifier for the adapter
+    id: String,
     /// Event bus for publishing events
     event_bus: Arc<EventBus>,
     /// Whether the adapter is currently connected
@@ -44,6 +46,10 @@ pub struct BaseAdapter {
     event_handler: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     /// Last error that occurred
     last_error: Mutex<Option<String>>,
+    /// Adapter configuration as raw JSON
+    config: Mutex<serde_json::Value>,
+    /// Token manager for authentication
+    token_manager: Arc<crate::auth::TokenManager>,
 }
 
 impl Clone for BaseAdapter {
@@ -51,29 +57,69 @@ impl Clone for BaseAdapter {
         // Create a new instance with the same name and event bus
         // IMPORTANT: We must maintain the proper pattern of sharing immutable state
         // through Arc and using atomic operations for shared mutable state.
+        // Attempt to get the configuration safely without blocking
+        let config_value = match self.config.try_lock() {
+            Ok(guard) => guard.clone(),
+            // If we can't get the lock immediately, log the issue and use a fallback
+            Err(e) => {
+                // Log the lock acquisition failure as a warning to make it more visible
+                tracing::warn!(
+                    adapter = %self.name,
+                    id = %self.id,
+                    error = %e,
+                    "Failed to acquire configuration lock during clone operation. Using fallback configuration.",
+                );
+                
+                // Create an empty configuration as fallback
+                let fallback = serde_json::Value::Object(serde_json::Map::new());
+                
+                // Record the fallback in our metrics or trace system
+                if let Ok(mut error_guard) = self.last_error.try_lock() {
+                    *error_guard = Some(format!(
+                        "Configuration lock contention detected during clone at {}",
+                        chrono::Utc::now().to_rfc3339()
+                    ));
+                }
+                
+                fallback
+            },
+        };
+
         Self {
             name: self.name.clone(),
+            id: self.id.clone(),
             event_bus: Arc::clone(&self.event_bus),
             connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
             shutdown_signal: Mutex::new(None), // Don't clone the shutdown channel - each clone manages its own tasks
             event_handler: Mutex::new(None), // Don't clone the task handle - each clone manages its own tasks
             last_error: Mutex::new(None), // Don't clone the last error - each clone tracks its own errors
+            config: Mutex::new(config_value), // Clone the config JSON without blocking
+            token_manager: Arc::clone(&self.token_manager), // Share the token manager
         }
     }
 }
 
 impl BaseAdapter {
     /// Create a new base adapter
-    #[instrument(skip(event_bus), level = "debug")]
-    pub fn new(name: &str, event_bus: Arc<EventBus>) -> Self {
-        info!(adapter = %name, "Creating new adapter");
+    #[instrument(skip(event_bus, config_value, token_manager), level = "debug")]
+    pub fn new(
+        name: &str,
+        id: &str,
+        event_bus: Arc<EventBus>,
+        config_value: serde_json::Value,
+        token_manager: Arc<crate::auth::TokenManager>,
+    ) -> Self {
+        info!(adapter = %name, id = %id, "Creating new adapter");
         Self {
             name: name.to_string(),
+            id: id.to_string(),
             event_bus,
             connected: AtomicBool::new(false),
             shutdown_signal: Mutex::new(None),
             event_handler: Mutex::new(None),
             last_error: Mutex::new(None),
+            config: Mutex::new(config_value),
+            token_manager,
         }
     }
 
@@ -82,9 +128,22 @@ impl BaseAdapter {
         &self.name
     }
 
+    /// Get the ID of the adapter
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
     /// Get a reference to the event bus
     pub fn event_bus(&self) -> Arc<EventBus> {
         Arc::clone(&self.event_bus)
+    }
+
+    /// Save the adapter configuration
+    #[instrument(skip(self), level = "debug")]
+    pub async fn save_config(&self) -> Result<(), crate::adapters::common::AdapterError> {
+        debug!(adapter = %self.name, "Saving adapter configuration");
+        // For now, just a stub implementation
+        Ok(())
     }
 
     /// Check if the adapter is connected
@@ -118,6 +177,80 @@ impl BaseAdapter {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(SHUTDOWN_CHANNEL_SIZE);
         self.set_shutdown_signal(shutdown_tx.clone()).await;
         (shutdown_tx, shutdown_rx)
+    }
+
+    /// Start a periodic polling operation
+    #[instrument(skip(self, poll_fn), fields(adapter = %self.name), level = "debug")]
+    pub async fn start_polling<F, Fut>(
+        &self,
+        poll_fn: Box<F>,
+        interval: Duration,
+    ) -> Result<(), crate::adapters::common::AdapterError>
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<(), crate::adapters::common::AdapterError>>
+            + Send
+            + 'static,
+    {
+        debug!(adapter = %self.name, interval_ms = %interval.as_millis(), "Starting polling operation");
+
+        // Create shutdown channel
+        let (_, mut shutdown_rx) = self.create_shutdown_channel().await;
+
+        // Clone what we need for the task
+        let name = self.name.clone();
+
+        // Create a task for polling
+        let handle = tauri::async_runtime::spawn(async move {
+            debug!(adapter = %name, "Polling task started");
+
+            // Create the interval timer
+            let mut interval_timer = tokio::time::interval(interval);
+
+            // Run until shutdown
+            loop {
+                tokio::select! {
+                    // Check for shutdown signal
+                    _ = shutdown_rx.recv() => {
+                        debug!(adapter = %name, "Polling task received shutdown signal");
+                        break;
+                    }
+
+                    // Wait for interval tick
+                    _ = interval_timer.tick() => {
+                        // Execute the poll function
+                        match poll_fn().await {
+                            Ok(_) => {
+                                debug!(adapter = %name, "Poll operation completed successfully");
+                            }
+                            Err(e) => {
+                                warn!(adapter = %name, error = %e, "Error during poll operation");
+                            }
+                        }
+                    }
+                }
+            }
+
+            debug!(adapter = %name, "Polling task exiting");
+        });
+
+        // Store the task handle
+        self.set_event_handler(handle).await;
+
+        debug!(adapter = %self.name, "Polling operation started");
+        Ok(())
+    }
+
+    /// Stop polling operation
+    #[instrument(skip(self), level = "debug")]
+    pub async fn stop_polling(&self) -> Result<(), crate::adapters::common::AdapterError> {
+        debug!(adapter = %self.name, "Stopping polling operation");
+        self.stop_event_handler().await.map_err(|e| {
+            crate::adapters::common::AdapterError::internal(format!(
+                "Failed to stop event handler: {}",
+                e
+            ))
+        })
     }
 
     /// Send shutdown signal and stop event handler
@@ -444,22 +577,65 @@ impl BaseAdapter {
     }
 }
 
-/// Helper trait that provides default implementations for ServiceAdapter methods
-/// This trait is meant to be used as a companion to the ServiceAdapter trait
-/// and provides default implementations based on the BaseAdapter functionality
-#[async_trait]
-pub trait ServiceAdapterHelper: ServiceAdapter {
-    /// Get a reference to the base adapter
-    fn base(&self) -> &BaseAdapter;
+/// Helper struct that provides default implementations for ServiceAdapter methods
+/// This is designed to be used as a field in adapter implementations
+#[derive(Clone)]
+pub struct ServiceHelperImpl {
+    /// Base adapter reference
+    base: Arc<BaseAdapter>,
+    /// Features supported by this helper
+    features: Vec<String>,
+}
 
-    /// Default implementation for checking connection status
-    fn is_connected_default(&self) -> bool {
-        self.base().is_connected()
+impl ServiceHelperImpl {
+    /// Create a new service helper
+    pub fn new(base: Arc<BaseAdapter>) -> Self {
+        Self {
+            base,
+            features: vec![],
+        }
     }
 
-    /// Default implementation for getting adapter name
-    fn get_name_default(&self) -> &str {
-        self.base().name()
+    /// Get a reference to the base adapter
+    pub fn base(&self) -> &BaseAdapter {
+        &self.base
+    }
+
+    /// Get features supported by this helper
+    pub async fn get_features(&self) -> Vec<String> {
+        self.features.clone()
+    }
+
+    /// Add a feature to this helper
+    pub fn add_feature(&mut self, feature: &str) {
+        self.features.push(feature.to_string());
+    }
+
+    /// Check if a feature is supported
+    pub async fn has_feature(&self, feature: &str) -> bool {
+        self.features.contains(&feature.to_string())
+    }
+
+    /// Get a feature by key - default implementation
+    pub async fn get_feature(
+        &self,
+        _key: &str,
+    ) -> Result<Option<String>, crate::adapters::common::AdapterError> {
+        Ok(None)
+    }
+
+    /// Default implementation for checking connection
+    pub async fn check_connection(&self) -> Result<bool, crate::adapters::common::AdapterError> {
+        Ok(self.base.is_connected())
+    }
+
+    /// Register for recovery with the recovery manager
+    pub async fn register_for_recovery(
+        &self,
+        _recovery_data: serde_json::Value,
+    ) -> Result<(), crate::adapters::common::AdapterError> {
+        // TODO: Implementation to register with recovery manager
+        Ok(())
     }
 
     /// Default implementation for disconnect method
@@ -469,67 +645,79 @@ pub trait ServiceAdapterHelper: ServiceAdapter {
     /// 2. Checks if already disconnected
     /// 3. Sets the disconnected state
     /// 4. Stops the event handler
-    /// 5. Runs adapter-specific cleanup via the clean_up_on_disconnect hook
-    /// 6. Publishes a disconnection event
-    /// 7. Records disconnect success in trace
-    ///
-    /// Adapters can override the clean_up_on_disconnect method to add
-    /// custom cleanup logic specific to their implementation.
-    async fn disconnect_default(&self) -> Result<()> {
+    /// 5. Publishes a disconnection event
+    /// 6. Records disconnect success in trace
+    pub async fn disconnect(
+        &self,
+        cleanup_fn: Option<
+            Box<
+                dyn Fn() -> std::pin::Pin<
+                        Box<
+                            dyn std::future::Future<
+                                    Output = Result<(), crate::adapters::common::AdapterError>,
+                                > + Send,
+                        >,
+                    > + Send
+                    + Sync,
+            >,
+        >,
+    ) -> Result<(), crate::adapters::common::AdapterError> {
         // Record the disconnect operation in trace
-        self.base()
+        self.base
             .record_operation_start(
                 "disconnect",
                 Some(serde_json::json!({
-                    "currently_connected": self.base().is_connected(),
+                    "currently_connected": self.base.is_connected(),
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
             )
             .await;
 
         // Only disconnect if currently connected
-        if !self.base().is_connected() {
-            debug!("Adapter {} already disconnected", self.base().name());
+        if !self.base.is_connected() {
+            debug!("Adapter {} already disconnected", self.base.name());
             return Ok(());
         }
 
-        info!("Disconnecting {} adapter", self.base().name());
+        info!("Disconnecting {} adapter", self.base.name());
 
         // Set disconnected state
-        self.base().set_connected(false);
+        self.base.set_connected(false);
 
         // Stop the event handler
-        match self.base().stop_event_handler().await {
+        match self.base.stop_event_handler().await {
             Ok(_) => debug!(
                 "Successfully stopped event handler for {}",
-                self.base().name()
+                self.base.name()
             ),
             Err(e) => {
-                warn!(error = %e, "Issues while stopping event handler for {}", self.base().name())
+                warn!(error = %e, "Issues while stopping event handler for {}", self.base.name())
             }
         }
 
-        // Run adapter-specific cleanup
-        if let Err(e) = self.clean_up_on_disconnect().await {
-            warn!(error = %e, "Error during cleanup for {}", self.base().name());
+        // Run adapter-specific cleanup if provided
+        if let Some(cleanup) = cleanup_fn {
+            if let Err(e) = cleanup().await {
+                warn!(error = %e, "Error during cleanup for {}", self.base.name());
+            }
         }
 
         // Publish disconnection event
         let event_payload = serde_json::json!({
-            "message": format!("Disconnected from {} adapter", self.base().name()),
+            "message": format!("Disconnected from {} adapter", self.base.name()),
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
 
         if let Err(e) = self
-            .base()
+            .base
             .publish_connection_closed(Some(event_payload.clone()))
             .await
         {
-            warn!(error = %e, "Failed to publish disconnection event for {}", self.base().name());
+            warn!(error = %e, "Failed to publish disconnection event for {}", self.base.name());
         }
 
         // Record disconnect success
-        self.base()
+        self.base
             .record_operation_success(
                 "disconnect",
                 Some(serde_json::json!({
@@ -538,15 +726,44 @@ pub trait ServiceAdapterHelper: ServiceAdapter {
             )
             .await;
 
-        info!("Disconnected from {} adapter", self.base().name());
+        info!("Disconnected from {} adapter", self.base.name());
         Ok(())
     }
 
-    /// Hook method for adapter-specific cleanup on disconnect
-    ///
-    /// Override this method to add custom cleanup logic specific to your adapter.
-    /// The default implementation does nothing.
-    async fn clean_up_on_disconnect(&self) -> Result<()> {
+    /// Default implementation for get_status method
+    pub async fn get_status(
+        &self,
+        adapter_type: &str,
+    ) -> Result<serde_json::Value, crate::adapters::common::AdapterError> {
+        Ok(serde_json::json!({
+            "adapter_type": adapter_type,
+            "name": self.base.name(),
+            "is_connected": self.base.is_connected(),
+        }))
+    }
+
+    /// Default implementation for handle_lifecycle_event method
+    pub async fn handle_lifecycle_event(
+        &self,
+        event: &str,
+        _data: Option<&serde_json::Value>,
+    ) -> Result<(), crate::adapters::common::AdapterError> {
+        debug!("Ignoring lifecycle event: {}", event);
         Ok(())
+    }
+
+    /// Default implementation for execute_command method
+    pub async fn execute_command(
+        &self,
+        command: &str,
+        _args: Option<&serde_json::Value>,
+        adapter_type: &str,
+    ) -> Result<serde_json::Value, crate::adapters::common::AdapterError> {
+        match command {
+            "status" => self.get_status(adapter_type).await,
+            _ => Err(crate::adapters::common::AdapterError::invalid_command(
+                format!("Unknown command: {}", command),
+            )),
+        }
     }
 }

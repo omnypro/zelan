@@ -29,27 +29,26 @@ pub enum ObsEvent {
     /// OBS streaming state changed
     StreamStateChanged {
         /// Whether streaming is active
-        active: bool,
-        /// Any additional stream data
+        streaming: bool,
+        /// Any additional streaming data
         data: Value,
     },
     /// OBS recording state changed
     RecordingStateChanged {
         /// Whether recording is active
-        active: bool,
+        recording: bool,
         /// Any additional recording data
         data: Value,
     },
-    /// Generic OBS event for any other event types
-    Generic {
-        /// The specific type/name of the event
+    /// Generic OBS event
+    GenericEvent {
+        /// Event type
         event_type: String,
-        /// The full event data
+        /// Event data
         data: Value,
     },
 }
 
-/// Helper method to get a string identifying the event type
 impl ObsEvent {
     /// Get a string representation of the event type
     pub fn event_type(&self) -> &'static str {
@@ -58,7 +57,7 @@ impl ObsEvent {
             ObsEvent::ConnectionChanged { .. } => "connection_changed",
             ObsEvent::StreamStateChanged { .. } => "stream_state_changed",
             ObsEvent::RecordingStateChanged { .. } => "recording_state_changed",
-            ObsEvent::Generic { .. } => "generic_event",
+            ObsEvent::GenericEvent { .. } => "generic_event",
         }
     }
 }
@@ -66,7 +65,7 @@ impl ObsEvent {
 /// Dedicated registry for OBS event callbacks
 #[derive(Clone)]
 pub struct ObsCallbackRegistry {
-    /// The callback registry for OBS events
+    /// The callback registry
     registry: CallbackRegistry<ObsEvent>,
 }
 
@@ -74,25 +73,25 @@ impl ObsCallbackRegistry {
     /// Create a new OBS callback registry
     pub fn new() -> Self {
         Self {
-            registry: CallbackRegistry::with_group("obs_events"),
+            registry: CallbackRegistry::with_group("obs"),
         }
     }
 
-    /// Register an OBS event callback function
+    /// Register a callback function
     pub async fn register<F>(&self, callback: F) -> crate::callback_system::CallbackId
     where
         F: Fn(ObsEvent) -> Result<()> + Send + Sync + 'static,
     {
         let id = self.registry.register(callback).await;
-        debug!(callback_id = %id, "Registered OBS event callback");
+        debug!(callback_id = %id, "Registered OBS callback");
         id
     }
 
-    /// Trigger all registered callbacks with the provided OBS event
+    /// Trigger all registered callbacks with the provided event
     pub async fn trigger(&self, event: ObsEvent) -> Result<usize> {
         debug!(
             event_type = %event.event_type(),
-            "Triggering OBS event callbacks"
+            "Triggering OBS callbacks"
         );
 
         match self.registry.trigger(event.clone()).await {
@@ -100,7 +99,7 @@ impl ObsCallbackRegistry {
                 debug!(
                     event_type = %event.event_type(),
                     callbacks_executed = count,
-                    "Successfully triggered OBS event callbacks"
+                    "Successfully triggered OBS callbacks"
                 );
                 Ok(count)
             }
@@ -108,7 +107,7 @@ impl ObsCallbackRegistry {
                 error!(
                     event_type = %event.event_type(),
                     error = %e,
-                    "Error triggering OBS event callbacks"
+                    "Error triggering OBS callbacks"
                 );
                 Err(e)
             }

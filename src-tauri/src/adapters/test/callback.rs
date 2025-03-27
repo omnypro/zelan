@@ -30,13 +30,16 @@ pub enum TestEvent {
         /// Additional event data
         data: Value,
     },
-    /// Initial test event (generated at startup)
-    Initial {
-        /// Counter value
+    /// Error test event (represents an error condition in the test adapter)
+    /// This was previously named 'Initial' but renamed to 'Error' to better reflect
+    /// its purpose as a simulated error condition that occurs periodically (every 7 counts)
+    /// when error simulation is enabled.
+    Error {
+        /// Counter value when the error occurred
         counter: u64,
-        /// Event message
+        /// Error description message
         message: String,
-        /// Additional event data
+        /// Additional error details and context
         data: Value,
     },
 }
@@ -47,7 +50,7 @@ impl TestEvent {
         match self {
             TestEvent::Standard { .. } => "standard",
             TestEvent::Special { .. } => "special",
-            TestEvent::Initial { .. } => "initial",
+            TestEvent::Error { .. } => "error",
         }
     }
 }
@@ -55,33 +58,33 @@ impl TestEvent {
 /// Dedicated registry for test event callbacks
 #[derive(Clone)]
 pub struct TestCallbackRegistry {
-    /// The callback registry for test events
+    /// The callback registry
     registry: CallbackRegistry<TestEvent>,
 }
 
 impl TestCallbackRegistry {
-    /// Create a new test event callback registry
+    /// Create a new test callback registry
     pub fn new() -> Self {
         Self {
-            registry: CallbackRegistry::with_group("test_events"),
+            registry: CallbackRegistry::with_group("test"),
         }
     }
 
-    /// Register a test event callback function
+    /// Register a callback function
     pub async fn register<F>(&self, callback: F) -> crate::callback_system::CallbackId
     where
         F: Fn(TestEvent) -> Result<()> + Send + Sync + 'static,
     {
         let id = self.registry.register(callback).await;
-        debug!(callback_id = %id, "Registered test event callback");
+        debug!(callback_id = %id, "Registered test callback");
         id
     }
 
-    /// Trigger all registered callbacks with the provided test event
+    /// Trigger all registered callbacks with the provided event
     pub async fn trigger(&self, event: TestEvent) -> Result<usize> {
         debug!(
             event_type = %event.event_type(),
-            "Triggering test event callbacks"
+            "Triggering test callbacks"
         );
 
         match self.registry.trigger(event.clone()).await {
@@ -89,7 +92,7 @@ impl TestCallbackRegistry {
                 debug!(
                     event_type = %event.event_type(),
                     callbacks_executed = count,
-                    "Successfully triggered test event callbacks"
+                    "Successfully triggered test callbacks"
                 );
                 Ok(count)
             }
@@ -97,7 +100,7 @@ impl TestCallbackRegistry {
                 error!(
                     event_type = %event.event_type(),
                     error = %e,
-                    "Error triggering test event callbacks"
+                    "Error triggering test callbacks"
                 );
                 Err(e)
             }

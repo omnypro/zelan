@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tracing::error;
-use tracing::{debug, info, trace, warn};
+use tracing::{info, trace, warn};
 
 use crate::flow::TraceContext;
 use crate::ZelanResult;
@@ -153,7 +153,7 @@ impl EventBus {
 
     /// Get a receiver to subscribe to events
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
-        debug!("New subscriber registered to event bus");
+        trace!("New subscriber registered to event bus");
         self.sender.subscribe()
     }
 
@@ -163,7 +163,7 @@ impl EventBus {
         let source = event.source.clone();
         let event_type = event.event_type.clone();
 
-        debug!(
+        trace!(
             source = %source,
             event_type = %event_type,
             "Publishing event to bus"
@@ -188,7 +188,7 @@ impl EventBus {
                 *stats_guard.source_counts.entry(source).or_insert(0) += 1;
                 *stats_guard.type_counts.entry(event_type).or_insert(0) += 1;
 
-                debug!(receivers, "Event published successfully");
+                trace!(receivers, "Event published successfully");
                 Ok(receivers)
             }
             Err(err) => {
@@ -248,10 +248,4 @@ impl Clone for EventBus {
             stats: Arc::clone(&self.stats),
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    // Tests for this module have been moved to src/tests/event_bus_test.rs
-    pub use crate::tests::event_bus_test::*;
 }

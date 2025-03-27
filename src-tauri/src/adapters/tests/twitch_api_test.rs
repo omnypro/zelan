@@ -10,7 +10,7 @@ use twitch_oauth2::{AccessToken, ClientId, UserToken};
 
 use super::test_helpers::{cleanup_twitch_env_vars, setup_twitch_env_vars};
 use crate::adapters::http_client::mock::MockHttpClient;
-use crate::adapters::twitch_api::TwitchApiClient;
+use crate::adapters::twitch::api::TwitchApiClient;
 
 // Set up environment variables for all tests
 fn setup_env_vars() {

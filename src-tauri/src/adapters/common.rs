@@ -3,6 +3,7 @@
 //! This module contains shared code used across different adapters,
 //! helping to reduce duplication and standardize patterns.
 
+use crate::error::{ErrorCategory, ZelanError};
 use anyhow::Result;
 use std::time::Duration;
 use thiserror::Error;
@@ -72,6 +73,26 @@ pub enum AdapterError {
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
+
+    /// Invalid command error
+    #[error("Invalid command: {message}")]
+    InvalidCommand {
+        /// Error message
+        message: String,
+        /// Optional context
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+
+    /// Recovery error
+    #[error("Recovery error: {message}")]
+    Recovery {
+        /// Error message
+        message: String,
+        /// Optional context
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
 }
 
 // Implement Clone manually since we can't derive it due to the error trait object
@@ -107,6 +128,31 @@ impl Clone for AdapterError {
                 message: message.clone(),
                 source: None,
             },
+            Self::InvalidCommand { message, source: _ } => Self::InvalidCommand {
+                message: message.clone(),
+                source: None,
+            },
+            Self::Recovery { message, source: _ } => Self::Recovery {
+                message: message.clone(),
+                source: None,
+            },
+        }
+    }
+}
+
+impl From<ZelanError> for AdapterError {
+    fn from(error: ZelanError) -> Self {
+        match error.category {
+            Some(ErrorCategory::Authentication) => Self::auth(error.message),
+            Some(ErrorCategory::Network) => Self::connection(error.message),
+            Some(ErrorCategory::Configuration) => Self::config(error.message),
+            Some(ErrorCategory::RateLimit) => Self::api_with_status(error.message, 429),
+            Some(ErrorCategory::Permission) => Self::api_with_status(error.message, 403),
+            Some(ErrorCategory::NotFound) => Self::api_with_status(error.message, 404),
+            Some(ErrorCategory::ServiceUnavailable) => Self::api_with_status(error.message, 503),
+            Some(ErrorCategory::Validation) => Self::api(error.message),
+            Some(ErrorCategory::Internal) => Self::internal(error.message),
+            None => Self::internal(error.message),
         }
     }
 }
@@ -315,6 +361,44 @@ impl AdapterError {
         }
     }
 
+    /// Create a new invalid command error
+    pub fn invalid_command(message: impl Into<String>) -> Self {
+        Self::InvalidCommand {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Create a new invalid command error with source
+    pub fn invalid_command_with_source<E>(message: impl Into<String>, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::InvalidCommand {
+            message: message.into(),
+            source: Some(Box::new(source)),
+        }
+    }
+
+    /// Create a new recovery error
+    pub fn recovery(message: impl Into<String>) -> Self {
+        Self::Recovery {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Create a new recovery error with source
+    pub fn recovery_with_source<E>(message: impl Into<String>, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Recovery {
+            message: message.into(),
+            source: Some(Box::new(source)),
+        }
+    }
+
     /// Check if this is an authentication error
     pub fn is_auth(&self) -> bool {
         matches!(self, Self::Auth { .. })
@@ -343,6 +427,16 @@ impl AdapterError {
     /// Check if this is an internal error
     pub fn is_internal(&self) -> bool {
         matches!(self, Self::Internal { .. })
+    }
+
+    /// Check if this is an invalid command error
+    pub fn is_invalid_command(&self) -> bool {
+        matches!(self, Self::InvalidCommand { .. })
+    }
+
+    /// Check if this is a recovery error
+    pub fn is_recovery(&self) -> bool {
+        matches!(self, Self::Recovery { .. })
     }
 }
 
@@ -449,28 +543,36 @@ impl RetryOptions {
 ///
 /// Instead, use the following pattern:
 ///
-/// ```rust
-/// let retry_options = RetryOptions::new(...);
+/// ```ignore
+/// // Using tokio's sleep for async retry
+/// use tokio::time::sleep;
+///
+/// // Define your retry options
+/// let max_attempts = 3;
+/// let base_delay_ms = 50;
 /// let mut attempt = 0;
 /// let mut last_error = None;
 /// let mut success = false;
 ///
-/// while attempt < retry_options.max_attempts {
-///     attempt += 1;
-///     match operation().await {
-///         Ok(result) => {
-///             success = true;
-///             // Handle success...
-///             break;
-///         },
-///         Err(e) => {
-///             // Handle error...
-///             if attempt < retry_options.max_attempts {
-///                 let delay = retry_options.get_delay(attempt);
-///                 sleep(delay).await;
+/// // Create an async function to perform the retry
+/// async fn retry_operation() -> Result<String, String> {
+///     while attempt < max_attempts {
+///         attempt += 1;
+///         match your_operation().await {
+///             Ok(result) => {
+///                 success = true;
+///                 return Ok(result);
+///             },
+///             Err(e) => {
+///                 last_error = Some(e);
+///                 if attempt < max_attempts {
+///                     let delay = base_delay_ms * attempt;
+///                     sleep(std::time::Duration::from_millis(delay)).await;
+///                 }
 ///             }
 ///         }
 ///     }
+///     Err(last_error.unwrap_or_else(|| "Unknown error".to_string()))
 /// }
 /// ```
 /// Perform an operation with retries
@@ -482,28 +584,36 @@ impl RetryOptions {
 ///
 /// Instead, use the following pattern:
 ///
-/// ```rust
-/// let retry_options = RetryOptions::new(...);
+/// ```ignore
+/// // Using tokio's sleep for async retry
+/// use tokio::time::sleep;
+///
+/// // Define your retry options
+/// let max_attempts = 3;
+/// let base_delay_ms = 50;
 /// let mut attempt = 0;
 /// let mut last_error = None;
 /// let mut success = false;
 ///
-/// while attempt < retry_options.max_attempts {
-///     attempt += 1;
-///     match operation().await {
-///         Ok(result) => {
-///             success = true;
-///             // Handle success...
-///             break;
-///         },
-///         Err(e) => {
-///             // Handle error...
-///             if attempt < retry_options.max_attempts {
-///                 let delay = retry_options.get_delay(attempt);
-///                 sleep(delay).await;
+/// // Create an async function to perform the retry
+/// async fn retry_operation() -> Result<String, String> {
+///     while attempt < max_attempts {
+///         attempt += 1;
+///         match your_operation().await {
+///             Ok(result) => {
+///                 success = true;
+///                 return Ok(result);
+///             },
+///             Err(e) => {
+///                 last_error = Some(e);
+///                 if attempt < max_attempts {
+///                     let delay = base_delay_ms * attempt;
+///                     sleep(std::time::Duration::from_millis(delay)).await;
+///                 }
 ///             }
 ///         }
 ///     }
+///     Err(last_error.unwrap_or_else(|| "Unknown error".to_string()))
 /// }
 /// ```
 pub async fn with_retry<T, F, Fut, E>(

@@ -6,7 +6,7 @@
 //! - Token refresh and validation
 
 use super::test_helpers::{cleanup_twitch_env_vars, setup_twitch_env_vars};
-use crate::adapters::twitch_auth::{AuthEvent, TwitchAuthManager};
+use crate::adapters::twitch::auth::{AuthEvent, TwitchAuthManager};
 
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
@@ -64,14 +64,17 @@ async fn test_device_auth_state() {
 
     // Set device code and verify state change
     let device_code = create_mock_device_code();
-    auth_manager.set_device_code(device_code.clone()).unwrap();
+    auth_manager
+        .set_device_code(device_code.clone())
+        .await
+        .unwrap();
 
     // Now in pending state
     assert!(!auth_manager.is_authenticated().await);
     assert!(auth_manager.is_pending_device_auth().await);
 
     // Reset auth state
-    auth_manager.reset_auth_state().unwrap();
+    auth_manager.reset_auth_state().await.unwrap();
 
     // Back to not authenticated
     assert!(!auth_manager.is_authenticated().await);
@@ -115,7 +118,7 @@ async fn test_token_refresh_mock_simulation() -> Result<()> {
     );
 
     // Set the token directly
-    auth_manager.set_token(token.clone())?;
+    auth_manager.set_token(token.clone()).await?;
 
     // Create event capture
     let event_capture = AuthEventCapture::new();
@@ -145,7 +148,7 @@ async fn test_token_refresh_mock_simulation() -> Result<()> {
     );
 
     // Set the refreshed token
-    auth_manager.set_token(refreshed_token.clone())?;
+    auth_manager.set_token(refreshed_token.clone()).await?;
 
     // Manually trigger a token refreshed event
     auth_manager

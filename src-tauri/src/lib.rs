@@ -38,16 +38,8 @@ pub mod recovery;
 #[cfg(test)]
 pub mod tests;
 
-#[cfg(test)]
-mod simple_tests {
-    // Tests for this module have been moved to src/tests/lib_test.rs
-    pub use crate::tests::lib_test::*;
-}
-
 pub use callback_system::{CallbackData, CallbackId, CallbackManager, CallbackRegistry};
-pub use common::{
-    ConcurrentMap, ConcurrentSet, OptionalSharedState, RefreshableState, SharedState,
-};
+pub use dashmap::{DashMap, DashSet};
 pub use error::{ErrorCategory, ErrorCode, ErrorSeverity, RetryPolicy, ZelanError, ZelanResult};
 pub use event_bus::{EventBus, EventBusStats, StreamEvent};
 pub use flow::TraceContext;
@@ -105,20 +97,40 @@ pub fn default_ping_interval() -> u64 {
 #[async_trait]
 pub trait ServiceAdapter: Send + Sync {
     /// Connect to the service
-    async fn connect(&self) -> Result<()>;
+    async fn connect(&self) -> Result<(), adapters::common::AdapterError>;
 
     /// Disconnect from the service
-    async fn disconnect(&self) -> Result<()>;
+    async fn disconnect(&self) -> Result<(), adapters::common::AdapterError>;
 
-    /// Check if the adapter is currently connected
-    fn is_connected(&self) -> bool;
+    /// Get the adapter type (e.g., "twitch", "obs", "test")
+    fn adapter_type(&self) -> &'static str;
 
-    /// Get the adapter's name
-    fn get_name(&self) -> &str;
+    /// Check the connection status
+    async fn check_connection(&self) -> Result<bool, adapters::common::AdapterError>;
 
-    /// Set configuration for the adapter (optional)
-    async fn configure(&self, _config: serde_json::Value) -> Result<()> {
-        Ok(()) // Default implementation does nothing
+    /// Get the adapter status as JSON
+    async fn get_status(&self) -> Result<serde_json::Value, adapters::common::AdapterError>;
+
+    /// Handle lifecycle events from the manager
+    async fn handle_lifecycle_event(
+        &self,
+        event: &str,
+        data: Option<&serde_json::Value>,
+    ) -> Result<(), adapters::common::AdapterError>;
+
+    /// Execute a command
+    async fn execute_command(
+        &self,
+        command: &str,
+        args: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value, adapters::common::AdapterError>;
+
+    /// Get a feature by key (optional)
+    async fn get_feature(
+        &self,
+        _key: &str,
+    ) -> Result<Option<String>, adapters::common::AdapterError> {
+        Ok(None) // Default implementation returns None
     }
 }
 
@@ -300,7 +312,7 @@ impl StreamService {
     where
         A: ServiceAdapter + 'static,
     {
-        let name = adapter.get_name().to_string();
+        let name = adapter.adapter_type().to_string();
 
         // Box and store the adapter first
         let adapter_box = Arc::new(Box::new(adapter) as Box<dyn ServiceAdapter>);
@@ -445,7 +457,11 @@ impl StreamService {
         // If settings contains configuration, apply it to the adapter
         if !settings.config.is_null() {
             if let Some(adapter) = self.adapters.read().await.get(name) {
-                if let Err(e) = adapter.configure(settings.config.clone()).await {
+                // Execute a command to configure the adapter
+                if let Err(e) = adapter
+                    .execute_command("configure", Some(&settings.config))
+                    .await
+                {
                     return Err(ZelanError {
                         code: ErrorCode::ConfigInvalid,
                         message: format!("Failed to configure adapter '{}'", name),
@@ -463,24 +479,30 @@ impl StreamService {
 
     /// Connect all registered adapters that are enabled
     pub async fn connect_all_adapters(&self) -> Result<()> {
+        // Get all adapter names
         let adapter_names: Vec<String> = { self.adapters.read().await.keys().cloned().collect() };
 
-        for name in adapter_names {
-            // Skip disabled adapters
-            let is_enabled = match self.adapter_settings.read().await.get(&name) {
-                Some(settings) => settings.enabled,
-                None => true, // Default to enabled if no settings
-            };
+        // Process each adapter in sequence, filtering for enabled adapters
+        futures::future::join_all(adapter_names.into_iter().map(|name| async move {
+            // Check if adapter is enabled
+            let is_enabled = self
+                .adapter_settings
+                .read()
+                .await
+                .get(&name)
+                .map_or(true, |settings| settings.enabled);
 
             if is_enabled {
-                // Don't fail on individual adapter connection failures
-                if let Err(e) = self.connect_adapter(&name).await {
-                    eprintln!("Failed to connect adapter '{}': {}", name, e);
+                // Try to connect and log errors but don't fail completely
+                match self.connect_adapter(&name).await {
+                    Ok(_) => (),
+                    Err(e) => eprintln!("Failed to connect adapter '{}': {}", name, e),
                 }
             } else {
                 println!("Skipping disabled adapter: {}", name);
             }
-        }
+        }))
+        .await;
 
         Ok(())
     }
@@ -540,10 +562,26 @@ impl StreamService {
                             debug!(adapter = %name, "Successfully connected adapter");
                             Ok(())
                         }
-                        Err(e) => {
-                            // Convert anyhow::Error to ZelanError with appropriate category
-                            let zelan_err = error::adapter_connection_failed(&name, &e);
-                            // Ensure category is set for retryable errors
+                        Err(adapter_error) => {
+                            // Convert AdapterError to ZelanError with appropriate category
+                            let category = if adapter_error.is_auth() {
+                                ErrorCategory::Authentication
+                            } else if adapter_error.is_connection() {
+                                ErrorCategory::Network
+                            } else if adapter_error.is_config() {
+                                ErrorCategory::Configuration
+                            } else {
+                                ErrorCategory::Internal
+                            };
+
+                            let zelan_err = ZelanError {
+                                code: ErrorCode::AdapterConnectionFailed,
+                                message: format!("Failed to connect adapter '{}'", name),
+                                context: Some(adapter_error.to_string()),
+                                severity: ErrorSeverity::Error,
+                                category: Some(category),
+                                error_id: None,
+                            };
                             Err(zelan_err)
                         }
                     }
@@ -600,14 +638,23 @@ impl StreamService {
         // Then attempt the disconnect
         match adapter.disconnect().await {
             Ok(()) => Ok(()),
-            Err(e) => Err(ZelanError {
-                code: ErrorCode::AdapterDisconnectFailed,
-                message: format!("Failed to disconnect adapter '{}'", name),
-                context: Some(e.to_string()),
-                severity: ErrorSeverity::Warning,
-                category: Some(ErrorCategory::Network),
-                error_id: None,
-            }),
+            Err(adapter_error) => {
+                // Convert AdapterError to ZelanError with appropriate category
+                let category = if adapter_error.is_connection() {
+                    ErrorCategory::Network
+                } else {
+                    ErrorCategory::Internal
+                };
+
+                Err(ZelanError {
+                    code: ErrorCode::AdapterDisconnectFailed,
+                    message: format!("Failed to disconnect adapter '{}'", name),
+                    context: Some(adapter_error.to_string()),
+                    severity: ErrorSeverity::Warning,
+                    category: Some(category),
+                    error_id: None,
+                })
+            }
         }
     }
 
@@ -1073,7 +1120,7 @@ async fn handle_websocket_client(
                     Ok(event) => {
                         // Check if this client should receive this event based on filters
                         if !preferences.should_receive_event(&event) {
-                            debug!(
+                            trace!(
                                 client = %peer_addr,
                                 event_source = %event.source(),
                                 event_type = %event.event_type(),
@@ -1084,7 +1131,7 @@ async fn handle_websocket_client(
 
                         // We no longer need to create a cache key as we serialize each event
 
-                        debug!(
+                        trace!(
                             client = %peer_addr,
                             event_source = %event.source(),
                             event_type = %event.event_type(),
@@ -1151,7 +1198,7 @@ async fn handle_websocket_client(
                         // Handle client messages
                         match msg {
                             Message::Text(text) => {
-                                debug!(client = %peer_addr, message = %text, "Received text message");
+                                trace!(client = %peer_addr, message = %text, "Received text message");
 
                                 // Process client commands
                                 if text == "ping" {
@@ -1270,7 +1317,7 @@ async fn handle_websocket_client(
                                         },
                                         Err(_) => {
                                             // Not JSON, ignore non-standard messages
-                                            debug!(client = %peer_addr, "Ignoring non-JSON message");
+                                            trace!(client = %peer_addr, "Ignoring non-JSON message");
                                         }
                                     }
                                 }
@@ -1288,7 +1335,7 @@ async fn handle_websocket_client(
                                 }
                             },
                             _ => {
-                                debug!(client = %peer_addr, message_type = ?msg, "Received other message type");
+                                trace!(client = %peer_addr, message_type = ?msg, "Received other message type");
                             } // Ignore other message types
                         }
                     }
@@ -1305,7 +1352,7 @@ async fn handle_websocket_client(
 
             // Add a timeout to check client activity periodically
             _ = tokio::time::sleep(std::time::Duration::from_secs(config.ping_interval)) => {
-                debug!(
+                trace!(
                     client = %peer_addr,
                     ping_interval = config.ping_interval,
                     "Sending ping to check if client is alive"
