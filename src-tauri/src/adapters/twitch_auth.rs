@@ -125,7 +125,7 @@ use crate::adapters::twitch_auth_callback::TwitchAuthCallbackRegistry;
 /// Manages Twitch API authentication
 pub struct TwitchAuthManager {
     /// Current authentication state
-    auth_state: RwLock<AuthState>,
+    auth_state: Arc<RwLock<AuthState>>,
     /// Event callbacks for auth state changes using the improved callback system
     auth_callbacks: Arc<TwitchAuthCallbackRegistry>,
     /// HTTP client for API requests
@@ -135,9 +135,9 @@ pub struct TwitchAuthManager {
 impl Clone for TwitchAuthManager {
     fn clone(&self) -> Self {
         Self {
-            auth_state: RwLock::new(AuthState::NotAuthenticated), // State not shared
-            auth_callbacks: Arc::clone(&self.auth_callbacks),     // Callbacks properly shared
-            http_client: Arc::clone(&self.http_client),           // HTTP client properly shared
+            auth_state: Arc::clone(&self.auth_state), // Properly share auth state
+            auth_callbacks: Arc::clone(&self.auth_callbacks), // Callbacks properly shared
+            http_client: Arc::clone(&self.http_client), // HTTP client properly shared
         }
     }
 }
@@ -149,7 +149,7 @@ impl TwitchAuthManager {
         // Client ID is now retrieved from environment variables when needed
 
         Self {
-            auth_state: RwLock::new(AuthState::NotAuthenticated),
+            auth_state: Arc::new(RwLock::new(AuthState::NotAuthenticated)),
             auth_callbacks: Arc::new(TwitchAuthCallbackRegistry::new()),
             http_client: Arc::new(ReqwestHttpClient::new()),
         }
@@ -158,7 +158,7 @@ impl TwitchAuthManager {
     /// Create a new auth manager with a custom HTTP client
     pub fn with_http_client(http_client: Arc<dyn HttpClient + Send + Sync>) -> Self {
         Self {
-            auth_state: RwLock::new(AuthState::NotAuthenticated),
+            auth_state: Arc::new(RwLock::new(AuthState::NotAuthenticated)),
             auth_callbacks: Arc::new(TwitchAuthCallbackRegistry::new()),
             http_client,
         }
@@ -205,20 +205,20 @@ impl TwitchAuthManager {
     }
 
     /// Set the device code in the auth state
-    pub fn set_device_code(&mut self, device_code: DeviceCodeResponse) -> Result<()> {
-        *self.auth_state.get_mut() = AuthState::PendingDeviceAuth(device_code);
+    pub async fn set_device_code(&mut self, device_code: DeviceCodeResponse) -> Result<()> {
+        *self.auth_state.write().await = AuthState::PendingDeviceAuth(device_code);
         Ok(())
     }
 
     /// Set a token in the auth state
-    pub fn set_token(&mut self, token: UserToken) -> Result<()> {
-        *self.auth_state.get_mut() = AuthState::Authenticated(token);
+    pub async fn set_token(&mut self, token: UserToken) -> Result<()> {
+        *self.auth_state.write().await = AuthState::Authenticated(token);
         Ok(())
     }
 
     /// Reset the auth state to NotAuthenticated
-    pub fn reset_auth_state(&mut self) -> Result<()> {
-        *self.auth_state.get_mut() = AuthState::NotAuthenticated;
+    pub async fn reset_auth_state(&mut self) -> Result<()> {
+        *self.auth_state.write().await = AuthState::NotAuthenticated;
         Ok(())
     }
 

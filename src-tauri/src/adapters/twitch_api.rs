@@ -34,7 +34,7 @@ impl Clone for TwitchApiClient {
     fn clone(&self) -> Self {
         // Clone the Arc, not the client itself
         Self {
-            http_client: self.http_client.clone(),
+            http_client: Arc::clone(&self.http_client),
         }
     }
 }

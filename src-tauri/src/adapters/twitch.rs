@@ -1470,6 +1470,7 @@ impl TwitchAdapter {
                 .write()
                 .await
                 .set_device_code(device_code.clone())
+                .await
             {
                 error!("Failed to store device code: {}", e);
                 return;
@@ -1515,7 +1516,13 @@ impl TwitchAdapter {
                     );
 
                     // Reset auth state
-                    if let Err(e) = self_clone.auth_manager.write().await.reset_auth_state() {
+                    if let Err(e) = self_clone
+                        .auth_manager
+                        .write()
+                        .await
+                        .reset_auth_state()
+                        .await
+                    {
                         error!("Failed to reset auth state: {}", e);
                     }
 
@@ -1546,7 +1553,7 @@ impl TwitchAdapter {
 
                         // Store the token in the auth manager
                         let mut auth_manager = self_clone.auth_manager.write().await;
-                        if let Err(e) = auth_manager.set_token(token.clone()) {
+                        if let Err(e) = auth_manager.set_token(token.clone()).await {
                             error!("Failed to store token: {}", e);
                             return;
                         }
@@ -1812,8 +1819,12 @@ impl TwitchAdapter {
                             error!("Device code has expired: {}", e);
 
                             // Reset auth state
-                            if let Err(reset_err) =
-                                self_clone.auth_manager.write().await.reset_auth_state()
+                            if let Err(reset_err) = self_clone
+                                .auth_manager
+                                .write()
+                                .await
+                                .reset_auth_state()
+                                .await
                             {
                                 error!("Failed to reset auth state: {}", reset_err);
                             }
