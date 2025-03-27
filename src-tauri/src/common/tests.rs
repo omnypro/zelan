@@ -72,37 +72,32 @@ mod shared_state_tests {
 
 #[cfg(test)]
 mod concurrent_map_tests {
-    use super::super::concurrent_map::*;
+    use dashmap::{DashMap, DashSet};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_concurrent_map() {
-        let map = ConcurrentMap::<String, i32>::new();
+        let map = Arc::new(DashMap::<String, i32>::new());
 
         // Insert
         map.insert("one".to_string(), 1);
         map.insert("two".to_string(), 2);
 
         // Get
-        assert_eq!(map.get_cloned(&"one".to_string()), Some(1));
-        assert_eq!(map.get_cloned(&"three".to_string()), None::<i32>);
+        assert_eq!(map.get(&"one".to_string()).map(|r| *r), Some(1));
+        assert_eq!(map.get(&"three".to_string()).map(|r| *r), None::<i32>);
 
         // Modify
-        let result = map
-            .modify(&"one".to_string(), |v: &mut i32| {
-                *v += 10;
-                *v
-            })
-            .unwrap();
-        assert_eq!(result, 11);
+        if let Some(mut entry) = map.get_mut(&"one".to_string()) {
+            *entry += 10;
+            assert_eq!(*entry, 11);
+        }
 
         // Check after modification
-        assert_eq!(map.get_cloned(&"one".to_string()), Some(11));
+        assert_eq!(map.get(&"one".to_string()).map(|r| *r), Some(11));
 
         // Try to modify missing key
-        let err = map
-            .modify(&"missing".to_string(), |_: &mut i32| ())
-            .unwrap_err();
-        assert!(err.is_key_not_found());
+        assert!(map.get_mut(&"missing".to_string()).is_none());
 
         // Remove
         let removed = map.remove(&"one".to_string()).map(|(_, v)| v);
@@ -112,7 +107,7 @@ mod concurrent_map_tests {
 
     #[tokio::test]
     async fn test_concurrent_set() {
-        let set: ConcurrentSet<String> = ConcurrentSet::new();
+        let set = Arc::new(DashSet::<String>::new());
 
         // Insert
         assert!(set.insert("one".to_string()));
@@ -131,30 +126,8 @@ mod concurrent_map_tests {
         assert!(!set.contains(&"one".to_string()));
 
         // Values
-        let values: Vec<String> = set.values();
+        let values: Vec<String> = set.iter().map(|item| item.clone()).collect();
         assert_eq!(values.len(), 1);
         assert!(values.contains(&"two".to_string()));
     }
-
-    // BatchOperation is planned for future implementation
-    // Commenting out this test until implemented
-    /*
-    #[tokio::test]
-    async fn test_batch_operation() {
-        let map = ConcurrentMap::<String, i32>::new();
-
-        // Create a batch operation
-        let result = BatchOperation::new(map.clone())
-            .insert("a".to_string(), 1)
-            .insert("b".to_string(), 2)
-            .modify("a".to_string(), |v: &mut i32| *v += 10)
-            .execute();
-
-        assert!(result.is_ok());
-
-        // Check results
-        assert_eq!(map.get_cloned(&"a".to_string()), Some(11));
-        assert_eq!(map.get_cloned(&"b".to_string()), Some(2));
-    }
-    */
 }

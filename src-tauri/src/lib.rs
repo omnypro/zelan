@@ -45,9 +45,7 @@ mod simple_tests {
 }
 
 pub use callback_system::{CallbackData, CallbackId, CallbackManager, CallbackRegistry};
-pub use common::{
-    ConcurrentMap, ConcurrentSet, OptionalSharedState, RefreshableState, SharedState,
-};
+pub use common::{DashMap, DashSet, OptionalSharedState, RefreshableState, SharedState};
 pub use error::{ErrorCategory, ErrorCode, ErrorSeverity, RetryPolicy, ZelanError, ZelanResult};
 pub use event_bus::{EventBus, EventBusStats, StreamEvent};
 pub use flow::TraceContext;
