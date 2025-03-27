@@ -485,25 +485,34 @@ impl StreamService {
 
     /// Connect all registered adapters that are enabled
     pub async fn connect_all_adapters(&self) -> Result<()> {
+        // Get all adapter names
         let adapter_names: Vec<String> = { self.adapters.read().await.keys().cloned().collect() };
-
-        for name in adapter_names {
-            // Skip disabled adapters
-            let is_enabled = match self.adapter_settings.read().await.get(&name) {
-                Some(settings) => settings.enabled,
-                None => true, // Default to enabled if no settings
-            };
-
-            if is_enabled {
-                // Don't fail on individual adapter connection failures
-                if let Err(e) = self.connect_adapter(&name).await {
-                    eprintln!("Failed to connect adapter '{}': {}", name, e);
-                }
-            } else {
-                println!("Skipping disabled adapter: {}", name);
-            }
-        }
-
+        
+        // Process each adapter in sequence, filtering for enabled adapters
+        futures::future::join_all(
+            adapter_names
+                .into_iter()
+                .map(|name| async move {
+                    // Check if adapter is enabled
+                    let is_enabled = self.adapter_settings
+                        .read()
+                        .await
+                        .get(&name)
+                        .map_or(true, |settings| settings.enabled);
+                    
+                    if is_enabled {
+                        // Try to connect and log errors but don't fail completely
+                        match self.connect_adapter(&name).await {
+                            Ok(_) => (),
+                            Err(e) => eprintln!("Failed to connect adapter '{}': {}", name, e),
+                        }
+                    } else {
+                        println!("Skipping disabled adapter: {}", name);
+                    }
+                })
+        )
+        .await;
+        
         Ok(())
     }
 

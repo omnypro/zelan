@@ -124,22 +124,24 @@ impl<T: CallbackData> CallbackRegistry<T> {
             return Ok(0);
         }
 
-        let mut success_count = 0;
-        let mut errors = Vec::new();
-
-        // Call each callback and collect errors
-        for (id, callback) in callbacks.iter() {
-            match callback(data.clone()) {
-                Ok(()) => {
-                    success_count += 1;
+        // Call each callback and collect results using functional patterns
+        let (success_count, errors): (usize, Vec<String>) = callbacks
+            .iter()
+            .map(|(id, callback)| {
+                callback(data.clone())
+                    .map(|_| (1, None))
+                    .unwrap_or_else(|e| {
+                        let error_msg = format!("Callback {} failed: {}", id, e);
+                        tracing::error!(callback_id = %id, error = %e, "Callback execution failed");
+                        (0, Some(error_msg))
+                    })
+            })
+            .fold((0, Vec::new()), |(successes, mut errors), (success, error_opt)| {
+                if let Some(error) = error_opt {
+                    errors.push(error);
                 }
-                Err(e) => {
-                    let error_msg = format!("Callback {} failed: {}", id, e);
-                    tracing::error!(callback_id = %id, error = %e, "Callback execution failed");
-                    errors.push(error_msg);
-                }
-            }
-        }
+                (successes + success, errors)
+            });
 
         // Log summary
         if let Some(group) = &self.group {
@@ -297,13 +299,21 @@ impl CallbackManager {
     /// Get statistics about all registries
     pub async fn stats(&self) -> HashMap<String, usize> {
         let registries = self.registries.read().await;
-        let mut stats = HashMap::new();
-
-        for (name, registry) in registries.iter() {
-            let count = registry.count_async().await;
-            stats.insert(name.clone(), count);
-        }
-
-        stats
+        
+        // Create initial collection of futures for registry counts
+        let count_futures: Vec<_> = registries
+            .iter()
+            .map(|(name, registry)| {
+                let name = name.clone();
+                let future = registry.count_async();
+                async move { (name, future.await) }
+            })
+            .collect();
+        
+        // Execute all futures and collect results into a HashMap
+        futures::future::join_all(count_futures)
+            .await
+            .into_iter()
+            .collect()
     }
 }

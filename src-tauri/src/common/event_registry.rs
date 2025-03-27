@@ -148,28 +148,18 @@ impl<T: Clone + Send + Sync + 'static> Callback<T> {
 
 impl<T: Clone + Send + Sync + 'static> CallbackBase for Callback<T> {
     fn call(&self, event: &dyn EventBase) -> Result<(), EventRegistryError> {
-        // Verify the event is of the expected type
-        if event.type_id() != TypeId::of::<T>() {
-            return Err(EventRegistryError::TypeMismatch {
-                expected: std::any::type_name::<T>().to_string(),
-                actual: event.type_name().to_string(),
-            });
-        }
-
-        // Downcast the event to the expected type
-        let event = match event.as_any().downcast_ref::<T>() {
-            Some(event) => event,
-            None => {
-                // This should never happen if the type check above passed
-                return Err(EventRegistryError::TypeMismatch {
-                    expected: std::any::type_name::<T>().to_string(),
-                    actual: event.type_name().to_string(),
-                });
-            }
+        // Verify the event is of the expected type and downcast in one functional chain
+        let type_mismatch_error = || EventRegistryError::TypeMismatch {
+            expected: std::any::type_name::<T>().to_string(),
+            actual: event.type_name().to_string(),
         };
-
-        // Call the callback with the event
-        (self.func)(event.clone())
+        
+        // Check type_id and then downcast using ? and functional chaining
+        (event.type_id() == TypeId::of::<T>())
+            .then(|| event.as_any().downcast_ref::<T>())
+            .flatten()
+            .ok_or_else(type_mismatch_error)
+            .and_then(|typed_event| (self.func)(typed_event.clone()))
     }
 
     fn expected_type_id(&self) -> TypeId {
@@ -239,44 +229,52 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
             return Ok(0);
         }
 
-        let mut success_count = 0;
-        let mut errors = Vec::new();
-
-        // Call each callback
-        for (id, callback) in callbacks {
-            match callback.call(event_ref) {
-                Ok(()) => {
-                    success_count += 1;
+        // Process all callbacks using a functional approach and fold to accumulate results
+        let (success_count, errors): (usize, Vec<(SubscriptionId, EventRegistryError)>) = callbacks
+            .into_iter()
+            .map(|(id, callback)| {
+                callback.call(event_ref)
+                    .map(|_| (id, true)) // Success
+                    .unwrap_or_else(|e| {
+                        warn!(
+                            subscription_id = %id,
+                            error = %e,
+                            "Error in event callback"
+                        );
+                        (id, false) // Error
+                    })
+            })
+            .fold((0, Vec::new()), |(successes, mut errors), (id, success)| {
+                if success {
+                    (successes + 1, errors)
+                } else {
+                    // Add error to collection without extracting the error message again
+                    errors.push((id, EventRegistryError::CallbackFailed { 
+                        subscription_id: id,
+                        message: format!("Callback {} failed", id) 
+                    }));
+                    (successes, errors)
                 }
-                Err(e) => {
-                    warn!(
-                        subscription_id = %id,
-                        error = %e,
-                        "Error in event callback"
-                    );
-                    errors.push((id, e));
-                }
-            }
-        }
+            });
 
-        // If all callbacks succeeded, return success
+        // Log appropriate message based on results
         if errors.is_empty() {
             trace!(
                 event_type = %self.name,
                 success_count,
                 "All event callbacks succeeded"
             );
-            Ok(success_count)
         } else {
-            // Report the error but don't fail the entire publish operation
             warn!(
                 event_type = %self.name,
                 success_count,
                 error_count = errors.len(),
                 "Some event callbacks failed"
             );
-            Ok(success_count)
         }
+        
+        // Return success count regardless of errors
+        Ok(success_count)
     }
 }
 
@@ -403,20 +401,15 @@ impl EventRegistry {
     /// Get registry statistics
     pub async fn stats(&self) -> HashMap<String, usize> {
         let registries = self.registries.read().await;
-        // Collect stats about each registry
-        let mut stats = HashMap::new();
-
-        for (type_id, _registry) in registries.iter() {
-            let type_name = registries
-                .keys()
-                .find(|&k| k == type_id)
-                .map(|_| format!("{:?}", type_id))
-                .unwrap_or_else(|| "unknown".to_string());
-
-            stats.insert(type_name, 0); // Placeholder
-        }
-
-        stats
+        
+        // Use functional approach to collect stats
+        registries
+            .iter()
+            .map(|(type_id, _)| {
+                let type_name = format!("{:?}", type_id);
+                (type_name, 0) // Placeholder value
+            })
+            .collect()
     }
 }
 

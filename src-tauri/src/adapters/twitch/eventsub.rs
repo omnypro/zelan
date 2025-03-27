@@ -1608,27 +1608,45 @@ impl EventSubClient {
             broadcaster_id
         );
 
-        let mut successful = 0;
-
-        for (name, create_sub_fn) in subscriptions {
+        // Create function to process each subscription with rate limiting
+        async fn create_subscription_with_delay(
+            name: &str, 
+            create_fn: Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AdapterError>> + Send>> + Send>
+        ) -> Result<(), (String, AdapterError)> {
             // Create the subscription
-            match create_sub_fn().await {
+            match create_fn().await {
                 Ok(_) => {
-                    successful += 1;
                     info!("Created subscription for {}", name);
+                    // Add a small delay between requests to respect rate limits
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    Ok(())
                 }
                 Err(e) => {
                     error!("Failed to create subscription for {}: {}", name, e);
+                    Err((name.to_string(), e))
+                }
+            }
+        }
+        
+        // Process subscriptions sequentially, stopping if we encounter a disconnected session
+        let mut successful = 0;
+        let mut subscription_iter = subscriptions.into_iter();
+        
+        // Process subscriptions until we're done or hit a critical error
+        while let Some((name, create_sub_fn)) = subscription_iter.next() {
+            match create_subscription_with_delay(&name, create_sub_fn).await {
+                Ok(_) => {
+                    successful += 1;
+                }
+                Err((_, e)) => {
                     // If the session is disconnected, stop trying to create more
                     if e.to_string().contains("disconnected") {
                         error!("WebSocket session disconnected - subscriptions will be created on reconnection");
                         break;
                     }
+                    // Otherwise continue with the next subscription
                 }
             }
-
-            // Add a small delay between requests to respect rate limits
-            tokio::time::sleep(Duration::from_millis(150)).await;
         }
 
         info!("Successfully created {} EventSub subscriptions", successful);
