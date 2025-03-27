@@ -57,11 +57,32 @@ impl Clone for BaseAdapter {
         // Create a new instance with the same name and event bus
         // IMPORTANT: We must maintain the proper pattern of sharing immutable state
         // through Arc and using atomic operations for shared mutable state.
+        // Attempt to get the configuration safely without blocking
         let config_value = match self.config.try_lock() {
             Ok(guard) => guard.clone(),
-            // If we can't get the lock immediately, use an empty JSON object
-            // This is better than blocking or panicking
-            Err(_) => serde_json::Value::Object(serde_json::Map::new()),
+            // If we can't get the lock immediately, log the issue and use a fallback
+            Err(e) => {
+                // Log the lock acquisition failure as a warning to make it more visible
+                tracing::warn!(
+                    adapter = %self.name,
+                    id = %self.id,
+                    error = %e,
+                    "Failed to acquire configuration lock during clone operation. Using fallback configuration.",
+                );
+                
+                // Create an empty configuration as fallback
+                let fallback = serde_json::Value::Object(serde_json::Map::new());
+                
+                // Record the fallback in our metrics or trace system
+                if let Ok(mut error_guard) = self.last_error.try_lock() {
+                    *error_guard = Some(format!(
+                        "Configuration lock contention detected during clone at {}",
+                        chrono::Utc::now().to_rfc3339()
+                    ));
+                }
+                
+                fallback
+            },
         };
 
         Self {

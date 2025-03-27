@@ -30,13 +30,16 @@ pub enum TestEvent {
         /// Additional event data
         data: Value,
     },
-    /// Error test event (generated every 7 counts if errors enabled)
+    /// Error test event (represents an error condition in the test adapter)
+    /// This was previously named 'Initial' but renamed to 'Error' to better reflect
+    /// its purpose as a simulated error condition that occurs periodically (every 7 counts)
+    /// when error simulation is enabled.
     Error {
-        /// Counter value
+        /// Counter value when the error occurred
         counter: u64,
-        /// Error message
+        /// Error description message
         message: String,
-        /// Additional error data
+        /// Additional error details and context
         data: Value,
     },
 }

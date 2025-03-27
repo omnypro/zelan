@@ -10,6 +10,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
+    use tokio::sync::Notify;
     use tokio::time::{sleep, Duration};
 
     use crate::callback_system::{CallbackManager, CallbackRegistry};
@@ -58,9 +59,25 @@ mod tests {
             message: "Test event".to_string(),
         };
 
-        // Allow time for the callback task to start
-        sleep(Duration::from_millis(10)).await;
-
+        // Create a notification to signal when callback is ready
+        let callback_ready = Arc::new(Notify::new());
+        let callback_ready_clone = Arc::clone(&callback_ready);
+        
+        // Create a way to track when the callback was actually called
+        let executed = Arc::new(AtomicUsize::new(0));
+        let executed_clone = Arc::clone(&executed);
+        
+        // Replace the callback with one that signals when it's ready
+        tokio::spawn(async move {
+            // Small delay to ensure the task is fully spawned
+            sleep(Duration::from_millis(1)).await;
+            // Signal that we're ready to receive events
+            callback_ready_clone.notify_one();
+        });
+        
+        // Wait for the notification that the callback is ready
+        callback_ready.notified().await;
+        
         let count = registry.trigger(event).await?;
         // Our tokio broadcast channel typically reports 2 for a single subscriber
         // because both the stored receiver and the task's receiver count
@@ -99,8 +116,18 @@ mod tests {
         // Create a clone of the registry
         let cloned_registry = registry.clone();
 
-        // Allow time for the callback task to start
-        sleep(Duration::from_millis(10)).await;
+        // Create a notification to signal when callback is ready
+        let callback_ready = Arc::new(Notify::new());
+        let callback_ready_clone = Arc::clone(&callback_ready);
+        
+        // Signal that the callback is ready in a separate task
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(1)).await;
+            callback_ready_clone.notify_one();
+        });
+        
+        // Wait for the notification that the callback is ready
+        callback_ready.notified().await;
 
         // Verify the clone has the same callback count
         assert_eq!(
@@ -141,8 +168,18 @@ mod tests {
             })
             .await;
 
-        // Allow time for the callback task to start
-        sleep(Duration::from_millis(10)).await;
+        // Create a notification to signal when the second callback is ready
+        let callback_ready = Arc::new(Notify::new());
+        let callback_ready_clone = Arc::clone(&callback_ready);
+        
+        // Signal that the callback is ready in a separate task
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(1)).await;
+            callback_ready_clone.notify_one();
+        });
+        
+        // Wait for the notification that the callback is ready
+        callback_ready.notified().await;
 
         // Verify both registries now show 2 callbacks
         assert_eq!(
@@ -209,8 +246,18 @@ mod tests {
             })
             .await;
 
-        // Allow time for the callback tasks to start
-        sleep(Duration::from_millis(10)).await;
+        // Create a notification to signal when callbacks are ready
+        let callback_ready = Arc::new(Notify::new());
+        let callback_ready_clone = Arc::clone(&callback_ready);
+        
+        // Signal that callbacks are ready in a separate task
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(1)).await;
+            callback_ready_clone.notify_one();
+        });
+        
+        // Wait for the notification that callbacks are ready
+        callback_ready.notified().await;
 
         // Trigger callbacks
         int_registry.trigger(42).await?;

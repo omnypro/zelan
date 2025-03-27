@@ -74,6 +74,7 @@ impl<T: CallbackData> CallbackRegistry<T> {
         // Store the receiver so we can drop it later
         self.receivers.insert(id, self.sender.subscribe());
 
+        // Spawn a task to process events for this callback
         tokio::spawn(async move {
             if let Some(group) = &log_group {
                 debug!(
@@ -87,6 +88,8 @@ impl<T: CallbackData> CallbackRegistry<T> {
                     "Started callback listener"
                 );
             }
+            
+            // Task is now fully initialized and ready to receive events
 
             while let Ok(data) = receiver.recv().await {
                 // Call the callback with the received data
