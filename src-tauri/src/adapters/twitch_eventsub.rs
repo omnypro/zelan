@@ -421,27 +421,30 @@ impl EventSubClient {
                         debug!("Attempting to refresh token");
 
                         // Execute the token refresh operation
-                        refresher().await.map_err(|e| {
-                            // Convert anyhow error to AdapterError
-                            let error = AdapterError::from_anyhow_error(
-                                "auth",
-                                "Failed to refresh token",
-                                e,
-                            );
+                        match refresher().await {
+                            Ok(token) => Ok(token),
+                            Err(e) => {
+                                // Convert anyhow error to AdapterError
+                                let error = AdapterError::from_anyhow_error(
+                                    "auth",
+                                    "Failed to refresh token",
+                                    e,
+                                );
 
-                            // Record failure
-                            TraceHelper::record_adapter_operation(
-                                "twitch_eventsub",
-                                &format!("{}_failure", operation_name),
-                                Some(serde_json::json!({
-                                    "error": error.to_string(),
-                                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                                })),
-                            )
-                            .await;
+                                // Record failure
+                                TraceHelper::record_adapter_operation(
+                                    "twitch_eventsub",
+                                    &format!("{}_failure", operation_name),
+                                    Some(serde_json::json!({
+                                        "error": error.to_string(),
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                )
+                                .await;
 
-                            error
-                        })
+                                Err(error)
+                            }
+                        }
                     })
                 },
                 2, // max attempts (same as before)
@@ -938,53 +941,58 @@ impl EventSubClient {
                     debug!("Attempting to connect to EventSub WebSocket");
 
                     // Execute the operation with timeout
-                    let connect_result = timeout(
+                    // Using match instead of map_err to allow await in error handling
+                    let connect_result = match timeout(
                         Duration::from_secs(WEBSOCKET_CONNECT_TIMEOUT_SECS),
                         connect_async(&ws_url),
-                    )
-                    .await
-                    .map_err(|_| {
-                        let error = AdapterError::connection(format!(
-                            "WebSocket connection timed out after {}s",
-                            WEBSOCKET_CONNECT_TIMEOUT_SECS
-                        ));
+                    ).await {
+                        Ok(result) => result,
+                        Err(_) => {
+                            let error = AdapterError::connection(format!(
+                                "WebSocket connection timed out after {}s",
+                                WEBSOCKET_CONNECT_TIMEOUT_SECS
+                            ));
 
-                        // Record timeout
-                        TraceHelper::record_adapter_operation(
-                            "twitch_eventsub",
-                            &format!("{}_timeout", operation_name),
-                            Some(serde_json::json!({
-                                "timeout_seconds": WEBSOCKET_CONNECT_TIMEOUT_SECS,
-                                "websocket_url": ws_url,
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })),
-                        )
-                        .await;
+                            // Record timeout
+                            TraceHelper::record_adapter_operation(
+                                "twitch_eventsub",
+                                &format!("{}_timeout", operation_name),
+                                Some(serde_json::json!({
+                                    "timeout_seconds": WEBSOCKET_CONNECT_TIMEOUT_SECS,
+                                    "websocket_url": ws_url,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            )
+                            .await;
 
-                        error
-                    })?;
+                            return Err(error);
+                        }
+                    };
 
-                    // Handle connection result
-                    let (ws_stream, _) = connect_result.map_err(|e| {
-                        let error = AdapterError::connection_with_source(
-                            format!("WebSocket connection failed: {}", e),
-                            e,
-                        );
+                    // Handle connection result - using match instead of map_err
+                    let (ws_stream, _) = match connect_result {
+                        Ok(ws) => ws,
+                        Err(e) => {
+                            let error = AdapterError::connection_with_source(
+                                format!("WebSocket connection failed: {}", e),
+                                e,
+                            );
 
-                        // Record failure
-                        TraceHelper::record_adapter_operation(
-                            "twitch_eventsub",
-                            &format!("{}_failure", operation_name),
-                            Some(serde_json::json!({
-                                "error": error.to_string(),
-                                "websocket_url": ws_url,
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })),
-                        )
-                        .await;
+                            // Record failure
+                            TraceHelper::record_adapter_operation(
+                                "twitch_eventsub",
+                                &format!("{}_failure", operation_name),
+                                Some(serde_json::json!({
+                                    "error": error.to_string(),
+                                    "websocket_url": ws_url,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            )
+                            .await;
 
-                        error
-                    })?;
+                            return Err(error);
+                        }
+                    };
 
                     // Success! Record and return the stream
                     TraceHelper::record_adapter_operation(
@@ -1007,7 +1015,7 @@ impl EventSubClient {
 
         // Create connection with no session ID yet
         let mut conn = EventSubConnection {
-            ws_stream: ws_stream?,
+            ws_stream,  // ws_stream is already unwrapped by the retry function
             session_id: String::new(),
             last_keepalive: std::time::Instant::now(),
         };

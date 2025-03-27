@@ -177,65 +177,84 @@ impl TestAdapter {
         )
         .await;
 
-        // Set up retry options for triggering
-        let trigger_retry_options = RetryOptions::new(
-            2, // Max attempts
-            BackoffStrategy::Exponential {
-                base_delay: Duration::from_millis(10),
-                max_delay: Duration::from_millis(100),
-            },
-            true, // Add jitter
-        );
+        // Import the retry helper functions
+        use crate::common::retry::{exponential_backoff, with_jitter, with_retry_and_backoff};
 
-        // Implement direct sequential retry logic
-        let mut attempt = 0;
-        let mut last_error: Option<AdapterError> = None;
-        let mut success = false;
-        let mut callback_count = 0;
+        // Set up operation name for tracing
+        let operation_name = "trigger_test_event";
 
-        // Record the beginning of retry attempts in trace
+        // Start tracing the operation
         TraceHelper::record_adapter_operation(
             "test",
-            "trigger_test_event_start",
+            &format!("{}_start", operation_name),
             Some(json!({
                 "event_type": event.event_type(),
-                "max_attempts": trigger_retry_options.max_attempts,
+                "max_attempts": 2,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
         )
         .await;
 
-        while attempt < trigger_retry_options.max_attempts {
-            attempt += 1;
+        // Create a backoff strategy with exponential backoff and jitter
+        let backoff_fn = with_jitter(exponential_backoff(10, Some(100)));
 
-            // Record the current attempt in trace
-            TraceHelper::record_adapter_operation(
-                "test",
-                "trigger_test_event_attempt",
-                Some(json!({
-                    "attempt": attempt,
-                    "event_type": event.event_type(),
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                })),
-            )
-            .await;
+        // Clone values needed for the retry closure
+        let callbacks = self.callbacks.clone();
+        let event_clone = event.clone();
 
-            // Attempt to trigger the event
-            if attempt > 1 {
-                debug!(attempt, "Retrying test event trigger");
-            }
+        // Use our retry helper
+        let result = with_retry_and_backoff(
+            || {
+                // Clone values for use inside the async block
+                let callbacks = callbacks.clone();
+                let event = event_clone.clone();
 
-            match self.callbacks.trigger(event.clone()).await {
-                Ok(count) => {
-                    success = true;
-                    callback_count = count;
-
-                    // Record successful trigger in trace
+                Box::pin(async move {
+                    // Record attempt
                     TraceHelper::record_adapter_operation(
                         "test",
-                        "trigger_test_event_success",
+                        &format!("{}_attempt", operation_name),
                         Some(json!({
-                            "attempt": attempt,
+                            "event_type": event.event_type(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    )
+                    .await;
+
+                    debug!("Attempting to trigger test event");
+
+                    // Attempt to trigger the event - using match instead of map_err to handle await
+                    let count = match callbacks.trigger(event.clone()).await {
+                        Ok(count) => count,
+                        Err(e) => {
+                            // Convert to AdapterError
+                            let error = AdapterError::from_anyhow_error(
+                                "event",
+                                format!("Failed to trigger test event: {}", e),
+                                e,
+                            );
+
+                            // Record failure
+                            TraceHelper::record_adapter_operation(
+                                "test",
+                                &format!("{}_failure", operation_name),
+                                Some(json!({
+                                    "error": error.to_string(),
+                                    "event_type": event.event_type(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            )
+                            .await;
+
+                            return Err(error);
+                        }
+                    };
+
+                    // Record success
+                    TraceHelper::record_adapter_operation(
+                        "test",
+                        &format!("{}_success", operation_name),
+                        Some(json!({
                             "callbacks_triggered": count,
                             "event_type": event.event_type(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -244,62 +263,17 @@ impl TestAdapter {
                     .await;
 
                     debug!(callbacks = count, "Triggered test event successfully");
-                    break;
-                }
-                Err(e) => {
-                    // Convert to AdapterError
-                    let error = AdapterError::from_anyhow_error(
-                        "event",
-                        format!("Failed to trigger test event: {}", e),
-                        e,
-                    );
-                    last_error = Some(error.clone());
-
-                    // Record failure in trace
-                    TraceHelper::record_adapter_operation(
-                        "test",
-                        "trigger_test_event_attempt_failure",
-                        Some(json!({
-                            "attempt": attempt,
-                            "error": error.to_string(),
-                            "event_type": event.event_type(),
-                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                        })),
-                    )
-                    .await;
-
-                    // If not the last attempt, calculate delay and retry
-                    if attempt < trigger_retry_options.max_attempts {
-                        let delay = trigger_retry_options.get_delay(attempt);
-                        warn!(
-                            error = %error,
-                            attempt = attempt,
-                            next_delay_ms = %delay.as_millis(),
-                            "Test event trigger failed, retrying after delay"
-                        );
-                        sleep(delay).await;
-                    } else {
-                        error!(
-                            error = %error,
-                            attempts = attempt,
-                            "Failed to trigger test event after maximum attempts"
-                        );
-                    }
-                }
-            }
-        }
-
-        // Determine result based on success flag
-        let result = if success {
-            Ok(callback_count)
-        } else {
-            Err(last_error.unwrap())
-        };
+                    Ok(count)
+                })
+            },
+            2, // max attempts
+            operation_name,
+            backoff_fn,
+        )
+        .await;
 
         match result {
             Ok(count) => {
-                debug!(callbacks = count, "Triggered test event successfully");
-
                 // Record successful event trigger in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -386,6 +360,9 @@ impl TestAdapter {
             true, // Add jitter
         );
 
+        // Import the retry helper functions
+        use crate::common::retry::{exponential_backoff, with_jitter, with_retry_and_backoff};
+
         // Force publish multiple initial events to make sure something happens
         for i in 0..3 {
             let message = format!("Initial test event #{}", i);
@@ -395,120 +372,101 @@ impl TestAdapter {
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
 
-            // Use direct sequential retry logic for publishing to event bus
+            // Set up operation name for the initial publish operation
+            let operation_name = "publish_initial_event";
+            
+            // Create a backoff strategy with exponential backoff and jitter
+            // Using parameters from the original publish_retry_options
+            let backoff_fn = with_jitter(exponential_backoff(10, Some(200)));
+
+            // Clone values needed for the retry closure
+            let base = self.base.clone();
             let event_type = "test.initial";
             let payload_clone = payload.clone();
+            let counter = i;
 
-            // Implement retry logic
-            let mut attempt = 0;
-            let mut last_error: Option<AdapterError> = None;
-            let mut success = false;
-            let mut receivers_count = 0;
-
-            // Record the beginning of retry attempts in trace
+            // Start tracing the operation
             TraceHelper::record_adapter_operation(
                 "test",
-                "publish_initial_event_start",
+                &format!("{}_start", operation_name),
                 Some(json!({
-                    "counter": i,
-                    "max_attempts": publish_retry_options.max_attempts,
+                    "counter": counter,
+                    "max_attempts": 3,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
             )
             .await;
 
-            while attempt < publish_retry_options.max_attempts {
-                attempt += 1;
+            // Use our retry helper for publishing to event bus
+            let publish_result = with_retry_and_backoff(
+                || {
+                    // Clone values for the async block
+                    let base = base.clone();
+                    let payload = payload_clone.clone();
+                    let counter = counter;
+                    let event_type = event_type;
 
-                // Record the current attempt in trace
-                TraceHelper::record_adapter_operation(
-                    "test",
-                    "publish_initial_event_attempt",
-                    Some(json!({
-                        "attempt": attempt,
-                        "counter": i,
-                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                    })),
-                )
-                .await;
-
-                if attempt > 1 {
-                    debug!(attempt, "Retrying initial event publication");
-                }
-
-                match self
-                    .base
-                    .publish_event(event_type, payload_clone.clone())
-                    .await
-                {
-                    Ok(count) => {
-                        success = true;
-                        receivers_count = count;
-
-                        // Record successful publication in trace
+                    Box::pin(async move {
+                        // Record attempt
                         TraceHelper::record_adapter_operation(
                             "test",
-                            "publish_initial_event_attempt_success",
+                            &format!("{}_attempt", operation_name),
                             Some(json!({
-                                "attempt": attempt,
-                                "receivers": count,
-                                "counter": i,
+                                "counter": counter,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         )
                         .await;
 
-                        break;
-                    }
-                    Err(e) => {
-                        // Convert to AdapterError
-                        let error = AdapterError::from_anyhow_error(
-                            "event",
-                            format!("Failed to publish initial event: {}", e),
-                            e,
-                        );
-                        last_error = Some(error.clone());
+                        debug!(counter, "Attempting to publish initial test event");
 
-                        // Record failure in trace
+                        // Attempt to publish the event - using match instead of map_err to handle await
+                        let receivers = match base.publish_event(event_type, payload).await {
+                            Ok(recv) => recv,
+                            Err(e) => {
+                                // Convert to AdapterError
+                                let error = AdapterError::from_anyhow_error(
+                                    "event",
+                                    format!("Failed to publish initial event: {}", e),
+                                    e,
+                                );
+
+                                // Record failure
+                                TraceHelper::record_adapter_operation(
+                                    "test",
+                                    &format!("{}_attempt_failure", operation_name),
+                                    Some(json!({
+                                        "error": error.to_string(),
+                                        "counter": counter,
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                )
+                                .await;
+
+                                return Err(error);
+                            }
+                        };
+
+                        // Record successful attempt
                         TraceHelper::record_adapter_operation(
                             "test",
-                            "publish_initial_event_attempt_failure",
+                            &format!("{}_attempt_success", operation_name),
                             Some(json!({
-                                "attempt": attempt,
-                                "error": error.to_string(),
-                                "counter": i,
+                                "receivers": receivers,
+                                "counter": counter,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         )
                         .await;
 
-                        // If not the last attempt, calculate delay and retry
-                        if attempt < publish_retry_options.max_attempts {
-                            let delay = publish_retry_options.get_delay(attempt);
-                            warn!(
-                                error = %error,
-                                attempt = attempt,
-                                next_delay_ms = %delay.as_millis(),
-                                "Initial event publication failed, retrying after delay"
-                            );
-                            sleep(delay).await;
-                        } else {
-                            error!(
-                                error = %error,
-                                attempts = attempt,
-                                "Failed to publish initial event after maximum attempts"
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Determine the final result
-            let publish_result = if success {
-                Ok(receivers_count)
-            } else {
-                Err(last_error.unwrap())
-            };
+                        Ok(receivers)
+                    })
+                },
+                3, // max attempts (from publish_retry_options)
+                operation_name,
+                backoff_fn,
+            )
+            .await;
 
             match publish_result {
                 Ok(receivers) => {
@@ -550,120 +508,108 @@ impl TestAdapter {
                 }
             }
 
-            // Also trigger callbacks using direct sequential retry logic
+            // Also trigger callbacks with our retry helper
             let callback_event = TestEvent::Initial {
                 counter: i,
                 message: message.clone(),
                 data: payload,
             };
 
-            // Implement direct sequential retry logic for callbacks
-            let mut attempt = 0;
-            let mut last_error: Option<AdapterError> = None;
-            let mut success = false;
-            let mut callbacks_triggered = 0;
-            let callbacks_clone = self.callbacks.clone();
+            // Set up operation name for the callback trigger
+            let operation_name = "trigger_initial_callback";
+            
+            // We already have the backoff functions imported, so reuse the strategy
+            // using the same parameters from publish_retry_options
+            
+            // Clone values needed for the retry closure
+            let callbacks = self.callbacks.clone();
+            let callback_event_clone = callback_event.clone();
+            let counter = i;
+            
+            // Create a new backoff function for each loop iteration
+            let callback_backoff_fn = with_jitter(exponential_backoff(10, Some(200)));
 
-            // Record the beginning of callback retry attempts in trace
+            // Start tracing the operation
             TraceHelper::record_adapter_operation(
                 "test",
-                "trigger_initial_callback_start",
+                &format!("{}_start", operation_name),
                 Some(json!({
-                    "counter": i,
-                    "max_attempts": publish_retry_options.max_attempts,
+                    "counter": counter,
+                    "max_attempts": 3,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
             )
             .await;
 
-            while attempt < publish_retry_options.max_attempts {
-                attempt += 1;
+            // Use our retry helper for triggering callbacks
+            let trigger_result = with_retry_and_backoff(
+                || {
+                    // Clone values for the async block
+                    let callbacks = callbacks.clone();
+                    let event = callback_event_clone.clone();
+                    let counter = counter;
 
-                // Record the current attempt in trace
-                TraceHelper::record_adapter_operation(
-                    "test",
-                    "trigger_initial_callback_attempt",
-                    Some(json!({
-                        "attempt": attempt,
-                        "counter": i,
-                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                    })),
-                )
-                .await;
-
-                if attempt > 1 {
-                    debug!(attempt, "Retrying initial callback trigger");
-                }
-
-                match callbacks_clone.trigger(callback_event.clone()).await {
-                    Ok(count) => {
-                        success = true;
-                        callbacks_triggered = count;
-
-                        // Record successful trigger in trace
+                    Box::pin(async move {
+                        // Record attempt
                         TraceHelper::record_adapter_operation(
                             "test",
-                            "trigger_initial_callback_attempt_success",
+                            &format!("{}_attempt", operation_name),
                             Some(json!({
-                                "attempt": attempt,
+                                "counter": counter,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        )
+                        .await;
+
+                        debug!(counter, "Attempting to trigger initial test event callback");
+
+                        // Attempt to trigger the callbacks - using match instead of map_err to handle await
+                        let count = match callbacks.trigger(event.clone()).await {
+                            Ok(count) => count,
+                            Err(e) => {
+                                // Convert to AdapterError
+                                let error = AdapterError::from_anyhow_error(
+                                    "event",
+                                    format!("Failed to trigger initial event callback: {}", e),
+                                    e,
+                                );
+
+                                // Record failure
+                                TraceHelper::record_adapter_operation(
+                                    "test",
+                                    &format!("{}_attempt_failure", operation_name),
+                                    Some(json!({
+                                        "error": error.to_string(),
+                                        "counter": counter,
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                )
+                                .await;
+
+                                return Err(error);
+                            }
+                        };
+
+                        // Record successful attempt
+                        TraceHelper::record_adapter_operation(
+                            "test",
+                            &format!("{}_attempt_success", operation_name),
+                            Some(json!({
                                 "callbacks_triggered": count,
-                                "counter": i,
+                                "counter": counter,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         )
                         .await;
 
-                        break;
-                    }
-                    Err(e) => {
-                        // Convert to AdapterError
-                        let error = AdapterError::from_anyhow_error(
-                            "event",
-                            format!("Failed to trigger initial event callback: {}", e),
-                            e,
-                        );
-                        last_error = Some(error.clone());
-
-                        // Record failure in trace
-                        TraceHelper::record_adapter_operation(
-                            "test",
-                            "trigger_initial_callback_attempt_failure",
-                            Some(json!({
-                                "attempt": attempt,
-                                "error": error.to_string(),
-                                "counter": i,
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })),
-                        )
-                        .await;
-
-                        // If not the last attempt, calculate delay and retry
-                        if attempt < publish_retry_options.max_attempts {
-                            let delay = publish_retry_options.get_delay(attempt);
-                            warn!(
-                                error = %error,
-                                attempt = attempt,
-                                next_delay_ms = %delay.as_millis(),
-                                "Initial callback trigger failed, retrying after delay"
-                            );
-                            sleep(delay).await;
-                        } else {
-                            error!(
-                                error = %error,
-                                attempts = attempt,
-                                "Failed to trigger initial callback after maximum attempts"
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Determine the final result
-            let trigger_result = if success {
-                Ok(callbacks_triggered)
-            } else {
-                Err(last_error.unwrap())
-            };
+                        Ok(count)
+                    })
+                },
+                3, // max attempts (from publish_retry_options)
+                operation_name,
+                callback_backoff_fn,
+            )
+            .await;
 
             match trigger_result {
                 Ok(count) => {
