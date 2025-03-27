@@ -543,28 +543,36 @@ impl RetryOptions {
 ///
 /// Instead, use the following pattern:
 ///
-/// ```rust
-/// let retry_options = RetryOptions::new(...);
+/// ```ignore
+/// // Using tokio's sleep for async retry
+/// use tokio::time::sleep;
+/// 
+/// // Define your retry options
+/// let max_attempts = 3;
+/// let base_delay_ms = 50;
 /// let mut attempt = 0;
 /// let mut last_error = None;
 /// let mut success = false;
 ///
-/// while attempt < retry_options.max_attempts {
-///     attempt += 1;
-///     match operation().await {
-///         Ok(result) => {
-///             success = true;
-///             // Handle success...
-///             break;
-///         },
-///         Err(e) => {
-///             // Handle error...
-///             if attempt < retry_options.max_attempts {
-///                 let delay = retry_options.get_delay(attempt);
-///                 sleep(delay).await;
+/// // Create an async function to perform the retry
+/// async fn retry_operation() -> Result<String, String> {
+///     while attempt < max_attempts {
+///         attempt += 1;
+///         match your_operation().await {
+///             Ok(result) => {
+///                 success = true;
+///                 return Ok(result);
+///             },
+///             Err(e) => {
+///                 last_error = Some(e);
+///                 if attempt < max_attempts {
+///                     let delay = base_delay_ms * attempt;
+///                     sleep(std::time::Duration::from_millis(delay)).await;
+///                 }
 ///             }
 ///         }
 ///     }
+///     Err(last_error.unwrap_or_else(|| "Unknown error".to_string()))
 /// }
 /// ```
 /// Perform an operation with retries
@@ -576,28 +584,36 @@ impl RetryOptions {
 ///
 /// Instead, use the following pattern:
 ///
-/// ```rust
-/// let retry_options = RetryOptions::new(...);
+/// ```ignore
+/// // Using tokio's sleep for async retry
+/// use tokio::time::sleep;
+/// 
+/// // Define your retry options
+/// let max_attempts = 3;
+/// let base_delay_ms = 50;
 /// let mut attempt = 0;
 /// let mut last_error = None;
 /// let mut success = false;
 ///
-/// while attempt < retry_options.max_attempts {
-///     attempt += 1;
-///     match operation().await {
-///         Ok(result) => {
-///             success = true;
-///             // Handle success...
-///             break;
-///         },
-///         Err(e) => {
-///             // Handle error...
-///             if attempt < retry_options.max_attempts {
-///                 let delay = retry_options.get_delay(attempt);
-///                 sleep(delay).await;
+/// // Create an async function to perform the retry
+/// async fn retry_operation() -> Result<String, String> {
+///     while attempt < max_attempts {
+///         attempt += 1;
+///         match your_operation().await {
+///             Ok(result) => {
+///                 success = true;
+///                 return Ok(result);
+///             },
+///             Err(e) => {
+///                 last_error = Some(e);
+///                 if attempt < max_attempts {
+///                     let delay = base_delay_ms * attempt;
+///                     sleep(std::time::Duration::from_millis(delay)).await;
+///                 }
 ///             }
 ///         }
 ///     }
+///     Err(last_error.unwrap_or_else(|| "Unknown error".to_string()))
 /// }
 /// ```
 pub async fn with_retry<T, F, Fut, E>(

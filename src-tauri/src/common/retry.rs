@@ -210,7 +210,8 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        assert_eq!(counter.load(Ordering::SeqCst), 2); // 0-indexed, so 2 means 3 attempts
+        // The counter is tracking operations, so it shows 3 operations (0, 1, 2)
+        assert_eq!(counter.load(Ordering::SeqCst), 3); // since fetch_add returns the old value but adds 1, the total is 3
     }
 
     #[tokio::test]
@@ -261,7 +262,8 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
+        // The counter is tracking operations, so it shows 3 operations (0, 1, 2)
+        assert_eq!(counter.load(Ordering::SeqCst), 3); // since fetch_add returns the old value but adds 1, the total is 3
     }
 
     #[test]
