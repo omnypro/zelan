@@ -153,7 +153,7 @@ impl<T: Clone + Send + Sync + 'static> CallbackBase for Callback<T> {
             expected: std::any::type_name::<T>().to_string(),
             actual: event.type_name().to_string(),
         };
-        
+
         // Check type_id and then downcast using ? and functional chaining
         (event.type_id() == TypeId::of::<T>())
             .then(|| event.as_any().downcast_ref::<T>())
@@ -233,7 +233,8 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
         let (success_count, errors): (usize, Vec<(SubscriptionId, EventRegistryError)>) = callbacks
             .into_iter()
             .map(|(id, callback)| {
-                callback.call(event_ref)
+                callback
+                    .call(event_ref)
                     .map(|_| (id, true)) // Success
                     .unwrap_or_else(|e| {
                         warn!(
@@ -249,10 +250,12 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
                     (successes + 1, errors)
                 } else {
                     // Add error to collection without extracting the error message again
-                    errors.push((id, EventRegistryError::CallbackFailed { 
-                        subscription_id: id,
-                        message: format!("Callback {} failed", id) 
-                    }));
+                    errors.push((
+                        id,
+                        EventRegistryError::CallbackError {
+                            message: format!("Callback {} failed", id),
+                        },
+                    ));
                     (successes, errors)
                 }
             });
@@ -272,7 +275,7 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
                 "Some event callbacks failed"
             );
         }
-        
+
         // Return success count regardless of errors
         Ok(success_count)
     }
@@ -401,7 +404,7 @@ impl EventRegistry {
     /// Get registry statistics
     pub async fn stats(&self) -> HashMap<String, usize> {
         let registries = self.registries.read().await;
-        
+
         // Use functional approach to collect stats
         registries
             .iter()

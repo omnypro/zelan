@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tauri::async_runtime::{Mutex, RwLock};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, info, instrument, warn, Instrument};
+use tracing::{debug, error, info, instrument, trace, warn, Instrument};
 
 // Import the callback registry for OBS events
 use super::callback::{ObsCallbackRegistry, ObsEvent};
@@ -737,7 +737,7 @@ impl ServiceAdapter for ObsAdapter {
     async fn handle_lifecycle_event(
         &self,
         event: &str,
-        data: Option<&serde_json::Value>,
+        _data: Option<&serde_json::Value>,
     ) -> Result<(), AdapterError> {
         debug!("Handling lifecycle event: {}", event);
 

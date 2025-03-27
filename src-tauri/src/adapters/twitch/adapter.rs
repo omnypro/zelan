@@ -13,7 +13,7 @@ use std::{collections::HashMap, env, sync::Arc};
 use tauri::async_runtime::RwLock;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use twitch_api::helix::{channels::ChannelInformation, streams::Stream};
 use twitch_oauth2::TwitchToken;
 
@@ -364,7 +364,7 @@ impl ServiceAdapter for TwitchAdapter {
     async fn execute_command(
         &self,
         command: &str,
-        args: Option<&Value>,
+        _args: Option<&Value>,
     ) -> Result<Value, AdapterError> {
         match command {
             "status" => self.get_status().await,
@@ -411,7 +411,7 @@ impl TwitchAdapter {
         id: &str,
         event_bus: Arc<EventBus>,
         token_manager: Arc<TokenManager>,
-        recovery_manager: Arc<RecoveryManager>,
+        _recovery_manager: Arc<RecoveryManager>,
         config: Option<TwitchConfig>,
     ) -> Self {
         // Initialize with either provided config or default

@@ -36,7 +36,7 @@ where
                 }
                 Ok(value)
             }
-            
+
             // Error case - either retry or return error
             Err(e) => {
                 // If we've reached max attempts, log and return error
@@ -50,17 +50,17 @@ where
                         "{} failed (attempt {}/{}): {}",
                         log_context, attempt, max_attempts, e
                     );
-                    
+
                     // Wait for backoff period
                     tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-                    
+
                     // Recursive call for next attempt
                     try_operation(operation, attempt + 1, max_attempts, log_context).await
                 }
             }
         }
     }
-    
+
     // Start with first attempt
     try_operation(&operation, 1, max_attempts, log_context).await
 }
@@ -101,7 +101,7 @@ where
                 }
                 Ok(value)
             }
-            
+
             // Error case - either retry or return error
             Err(e) => {
                 // If we've reached max attempts, log and return error
@@ -115,17 +115,24 @@ where
                         "{} failed (attempt {}/{}): {}. Retrying in {:?}",
                         log_context, attempt, max_attempts, e, delay
                     );
-                    
+
                     // Wait for backoff period
                     tokio::time::sleep(delay).await;
-                    
+
                     // Recursive call for next attempt
-                    try_operation_with_backoff(operation, backoff_fn, attempt + 1, max_attempts, log_context).await
+                    try_operation_with_backoff(
+                        operation,
+                        backoff_fn,
+                        attempt + 1,
+                        max_attempts,
+                        log_context,
+                    )
+                    .await
                 }
             }
         }
     }
-    
+
     // Start with first attempt
     try_operation_with_backoff(&operation, &backoff_fn, 1, max_attempts, log_context).await
 }

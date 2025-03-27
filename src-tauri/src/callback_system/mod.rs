@@ -136,12 +136,15 @@ impl<T: CallbackData> CallbackRegistry<T> {
                         (0, Some(error_msg))
                     })
             })
-            .fold((0, Vec::new()), |(successes, mut errors), (success, error_opt)| {
-                if let Some(error) = error_opt {
-                    errors.push(error);
-                }
-                (successes + success, errors)
-            });
+            .fold(
+                (0, Vec::new()),
+                |(successes, mut errors), (success, error_opt)| {
+                    if let Some(error) = error_opt {
+                        errors.push(error);
+                    }
+                    (successes + success, errors)
+                },
+            );
 
         // Log summary
         if let Some(group) = &self.group {
@@ -299,7 +302,7 @@ impl CallbackManager {
     /// Get statistics about all registries
     pub async fn stats(&self) -> HashMap<String, usize> {
         let registries = self.registries.read().await;
-        
+
         // Create initial collection of futures for registry counts
         let count_futures: Vec<_> = registries
             .iter()
@@ -309,7 +312,7 @@ impl CallbackManager {
                 async move { (name, future.await) }
             })
             .collect();
-        
+
         // Execute all futures and collect results into a HashMap
         futures::future::join_all(count_futures)
             .await

@@ -3,7 +3,7 @@ use serde_json::json;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use twitch_oauth2::{
     id::DeviceCodeResponse, AccessToken, ClientId, DeviceUserTokenBuilder, RefreshToken, Scope,
     TwitchToken, UserToken,

@@ -9,7 +9,7 @@ use tokio::{
 use tokio_tungstenite::{
     connect_async, tungstenite::protocol::Message as WsMessage, MaybeTlsStream, WebSocketStream,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use twitch_api::{
     eventsub::{event::websocket::EventsubWebsocketData, Event},
     types::UserId,
@@ -1610,8 +1610,12 @@ impl EventSubClient {
 
         // Create function to process each subscription with rate limiting
         async fn create_subscription_with_delay(
-            name: &str, 
-            create_fn: Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AdapterError>> + Send>> + Send>
+            name: &str,
+            create_fn: Box<
+                dyn FnOnce() -> std::pin::Pin<
+                        Box<dyn std::future::Future<Output = Result<(), AdapterError>> + Send>,
+                    > + Send,
+            >,
         ) -> Result<(), (String, AdapterError)> {
             // Create the subscription
             match create_fn().await {
@@ -1627,11 +1631,11 @@ impl EventSubClient {
                 }
             }
         }
-        
+
         // Process subscriptions sequentially, stopping if we encounter a disconnected session
         let mut successful = 0;
         let mut subscription_iter = subscriptions.into_iter();
-        
+
         // Process subscriptions until we're done or hit a critical error
         while let Some((name, create_sub_fn)) = subscription_iter.next() {
             match create_subscription_with_delay(&name, create_sub_fn).await {
