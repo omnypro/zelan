@@ -4,7 +4,6 @@
 //! the application, focusing on concurrent safety and error handling.
 
 pub mod event_registry;
-pub mod shared_state;
 #[cfg(test)]
 mod tests;
 
@@ -12,7 +11,9 @@ mod tests;
 pub use event_registry::{
     EventPublisher, EventRegistry, EventRegistryError, EventSubscriber, EventTypeRegistry,
 };
-pub use shared_state::{LockError, OptionalSharedState, RefreshableState, SharedState};
 
-// Re-export dashmap types for direct use (no custom abstractions)
+// Re-export tokio::sync::RwLock for direct use
+pub use tokio::sync::RwLock;
+
+// Re-export dashmap types for direct use
 pub use dashmap::{DashMap, DashSet};

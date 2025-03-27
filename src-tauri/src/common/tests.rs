@@ -1,72 +1,55 @@
 //! Tests for common module components
 
 #[cfg(test)]
-mod shared_state_tests {
-    use super::super::shared_state::*;
+mod rwlock_tests {
     use std::sync::Arc;
-    use std::time::Duration;
-    use tokio::time::sleep;
+    use tokio::sync::RwLock;
 
     #[tokio::test]
-    async fn test_shared_state_basic() {
-        let state = SharedState::new(42);
+    async fn test_rwlock_basic() {
+        let state = Arc::new(RwLock::new(42));
 
         // Read
-        let value = state.read(|v| *v).await;
-        assert_eq!(value, 42);
+        {
+            let value = *state.read().await;
+            assert_eq!(value, 42);
+        }
 
         // Write
-        state.write(|v| *v = 99).await;
+        {
+            let mut write_guard = state.write().await;
+            *write_guard = 99;
+        }
 
         // Read again
-        let value = state.read(|v| *v).await;
-        assert_eq!(value, 99);
+        {
+            let value = *state.read().await;
+            assert_eq!(value, 99);
+        }
     }
 
     #[tokio::test]
-    async fn test_optional_shared_state() {
-        let state = OptionalSharedState::<String>::new();
+    async fn test_optional_value() {
+        let state = Arc::new(RwLock::new(Option::<String>::None));
 
         // Check uninitialized
-        assert!(!state.is_initialized().await);
+        {
+            let value = state.read().await;
+            assert!(value.is_none());
+        }
 
         // Initialize
-        state.initialize(String::from("hello")).await;
+        {
+            let mut value = state.write().await;
+            *value = Some(String::from("hello"));
+        }
 
         // Check initialized
-        assert!(state.is_initialized().await);
-
-        // Read using with_read
-        let value = state.with_read(|v| v.clone()).await.unwrap();
-        assert_eq!(value, "hello");
-    }
-
-    #[tokio::test]
-    async fn test_refreshable_state() {
-        let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let counter_clone = counter.clone();
-
-        let refreshable = RefreshableState::new(
-            0,
-            move || counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 100,
-            Duration::from_millis(50),
-        );
-
-        // Initial value
-        let value = refreshable.with_read(|v| *v).await;
-        assert_eq!(value, 0);
-
-        // Wait for it to become stale
-        sleep(Duration::from_millis(100)).await;
-
-        // Read again (should refresh)
-        let value = refreshable.with_read(|v| *v).await;
-        assert_eq!(value, 100);
-
-        // Force refresh
-        refreshable.refresh().await;
-        let value = refreshable.with_read(|v| *v).await;
-        assert_eq!(value, 101);
+        {
+            let value = state.read().await;
+            assert!(value.is_some());
+            assert_eq!(value.as_ref().unwrap(), "hello");
+        }
     }
 }
 

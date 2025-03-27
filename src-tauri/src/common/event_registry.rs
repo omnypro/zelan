@@ -13,8 +13,7 @@ use thiserror::Error;
 use tracing::{debug, error, trace, warn};
 use uuid::Uuid;
 
-use super::shared_state::LockError;
-use super::shared_state::SharedState;
+use tokio::sync::RwLock;
 
 /// Error type for event registry operations
 #[derive(Error, Debug, Clone)]
@@ -23,9 +22,9 @@ pub enum EventRegistryError {
     #[error("Event type not registered")]
     TypeNotRegistered,
 
-    /// Failed to acquire lock on a shared resource
-    #[error("Lock error: {0}")]
-    LockError(#[from] LockError),
+    /// Value not initialized
+    #[error("Cannot access uninitialized value")]
+    Uninitialized,
 
     /// Error in the callback execution
     #[error("Callback error: {message}")]
@@ -185,7 +184,7 @@ impl<T: Clone + Send + Sync + 'static> CallbackBase for Callback<T> {
 /// A registry for a specific event type
 pub struct EventTypeRegistry<T: Clone + Send + Sync + 'static> {
     /// Callbacks registered with this registry
-    callbacks: SharedState<HashMap<SubscriptionId, Arc<dyn CallbackBase>>>,
+    callbacks: Arc<RwLock<HashMap<SubscriptionId, Arc<dyn CallbackBase>>>>,
 
     /// Phantom data to keep the type parameter
     _marker: PhantomData<T>,
@@ -206,7 +205,7 @@ impl<T: Clone + Send + Sync + 'static> EventTypeRegistry<T> {
         debug!(event_type = %name, "Creating new EventTypeRegistry");
 
         Self {
-            callbacks: SharedState::new(HashMap::new()),
+            callbacks: Arc::new(RwLock::new(HashMap::new())),
             _marker: PhantomData,
             name,
         }
@@ -214,7 +213,8 @@ impl<T: Clone + Send + Sync + 'static> EventTypeRegistry<T> {
 
     /// Get the number of subscribers
     pub async fn subscriber_count(&self) -> usize {
-        self.callbacks.read(|callbacks| callbacks.len()).await
+        let callbacks = self.callbacks.read().await;
+        callbacks.len()
     }
 }
 
@@ -223,15 +223,11 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
         let event_ref = &event as &dyn EventBase;
 
         // Get all callbacks
-        let callbacks = self
-            .callbacks
-            .read(|callbacks| {
-                callbacks
-                    .iter()
-                    .map(|(id, callback)| (*id, Arc::clone(callback)))
-                    .collect::<Vec<_>>()
-            })
-            .await;
+        let callbacks_guard = self.callbacks.read().await;
+        let callbacks = callbacks_guard
+            .iter()
+            .map(|(id, callback)| (*id, Arc::clone(callback)))
+            .collect::<Vec<_>>();
 
         trace!(
             event_type = %self.name,
@@ -293,11 +289,10 @@ impl<T: Clone + Send + Sync + 'static> EventSubscriber<T> for EventTypeRegistry<
         let callback = Arc::new(Callback::new(callback));
 
         // Register the callback
-        self.callbacks
-            .write(|callbacks| {
-                callbacks.insert(id, callback);
-            })
-            .await;
+        {
+            let mut callbacks = self.callbacks.write().await;
+            callbacks.insert(id, callback);
+        }
 
         debug!(
             event_type = %self.name,
@@ -309,10 +304,8 @@ impl<T: Clone + Send + Sync + 'static> EventSubscriber<T> for EventTypeRegistry<
     }
 
     async fn unsubscribe(&self, id: SubscriptionId) -> bool {
-        let removed = self
-            .callbacks
-            .write(|callbacks| callbacks.remove(&id).is_some())
-            .await;
+        let mut callbacks = self.callbacks.write().await;
+        let removed = callbacks.remove(&id).is_some();
 
         if removed {
             debug!(
@@ -348,7 +341,7 @@ pub struct EventRegistry {
     name: String,
 
     /// Registries for different event types
-    registries: SharedState<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
+    registries: Arc<RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>>,
 }
 
 impl EventRegistry {
@@ -364,7 +357,7 @@ impl EventRegistry {
 
         Self {
             name: name.clone(),
-            registries: SharedState::new(HashMap::new()),
+            registries: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -373,63 +366,57 @@ impl EventRegistry {
         let type_id = TypeId::of::<T>();
         let type_name = std::any::type_name::<T>();
 
-        self.registries
-            .write(|registries| {
-                // Check if registry exists
-                if let Some(registry) = registries.get(&type_id) {
-                    // Try to downcast
-                    match registry.downcast_ref::<Arc<EventTypeRegistry<T>>>() {
-                        Some(registry) => Arc::clone(registry),
-                        None => {
-                            // This should never happen - type IDs should be unique
-                            warn!(
-                                registry = %self.name,
-                                event_type = %type_name,
-                                "Type ID collision in event registry"
-                            );
-
-                            // Create a new registry if downcast fails
-                            let registry = Arc::new(EventTypeRegistry::<T>::with_name(type_name));
-                            registries.insert(type_id, Arc::new(registry.clone()));
-                            registry
-                        }
-                    }
-                } else {
-                    // Create a new registry
-                    debug!(
+        let mut registries = self.registries.write().await;
+        // Check if registry exists
+        if let Some(registry) = registries.get(&type_id) {
+            // Try to downcast
+            match registry.downcast_ref::<Arc<EventTypeRegistry<T>>>() {
+                Some(registry) => Arc::clone(registry),
+                None => {
+                    // This should never happen - type IDs should be unique
+                    warn!(
                         registry = %self.name,
                         event_type = %type_name,
-                        "Creating new event type registry"
+                        "Type ID collision in event registry"
                     );
 
+                    // Create a new registry if downcast fails
                     let registry = Arc::new(EventTypeRegistry::<T>::with_name(type_name));
                     registries.insert(type_id, Arc::new(registry.clone()));
                     registry
                 }
-            })
-            .await
+            }
+        } else {
+            // Create a new registry
+            debug!(
+                registry = %self.name,
+                event_type = %type_name,
+                "Creating new event type registry"
+            );
+
+            let registry = Arc::new(EventTypeRegistry::<T>::with_name(type_name));
+            registries.insert(type_id, Arc::new(registry.clone()));
+            registry
+        }
     }
 
     /// Get registry statistics
     pub async fn stats(&self) -> HashMap<String, usize> {
-        self.registries
-            .read(|registries| {
-                // Collect stats about each registry
-                let mut stats = HashMap::new();
+        let registries = self.registries.read().await;
+        // Collect stats about each registry
+        let mut stats = HashMap::new();
 
-                for (type_id, _registry) in registries {
-                    let type_name = registries
-                        .keys()
-                        .find(|&k| k == type_id)
-                        .map(|_| format!("{:?}", type_id))
-                        .unwrap_or_else(|| "unknown".to_string());
+        for (type_id, _registry) in registries.iter() {
+            let type_name = registries
+                .keys()
+                .find(|&k| k == type_id)
+                .map(|_| format!("{:?}", type_id))
+                .unwrap_or_else(|| "unknown".to_string());
 
-                    stats.insert(type_name, 0); // Placeholder
-                }
+            stats.insert(type_name, 0); // Placeholder
+        }
 
-                stats
-            })
-            .await
+        stats
     }
 }
 
