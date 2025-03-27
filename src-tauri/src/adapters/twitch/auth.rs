@@ -408,27 +408,16 @@ impl TwitchAuthManager {
                     let manager = self_clone.clone();
 
                     Box::pin(async move {
-                        // Get client ID from environment - using match instead of map_err
-                        let client_id = match get_client_id() {
-                            Ok(id) => id,
-                            Err(e) => {
-                                return Err(anyhow!(
-                                    "Failed to get client ID for token refresh: {}",
-                                    e
-                                ));
-                            }
-                        };
+                        // Get client ID from environment - using map_err for cleaner error transformation
+                        let client_id = get_client_id().map_err(|e| {
+                            anyhow!("Failed to get client ID for token refresh: {}", e)
+                        })?;
 
-                        // Create HTTP client - using match instead of map_err
-                        let http_client = match reqwest::Client::builder()
+                        // Create HTTP client - using map_err instead of match
+                        let http_client = reqwest::Client::builder()
                             .redirect(reqwest::redirect::Policy::none())
                             .build()
-                        {
-                            Ok(client) => client,
-                            Err(e) => {
-                                return Err(anyhow!("Failed to create HTTP client: {}", e));
-                            }
-                        };
+                            .map_err(|e| anyhow!("Failed to create HTTP client: {}", e))?;
 
                         // Record attempt in trace
                         TraceHelper::record_adapter_operation(
@@ -444,8 +433,8 @@ impl TwitchAuthManager {
 
                         // Check if we have a refresh token
                         if let Some(refresh_token) = token.refresh_token.clone() {
-                            // Use the method that automatically refreshes if needed - using match instead of map_err
-                            let refreshed_token = match UserToken::from_existing_or_refresh_token(
+                            // Use the method that automatically refreshes if needed - using ? operator with map_err
+                            let refreshed_token = UserToken::from_existing_or_refresh_token(
                                 &http_client,
                                 token.access_token.clone(),
                                 refresh_token,
@@ -453,15 +442,7 @@ impl TwitchAuthManager {
                                 None, // client_secret
                             )
                             .await
-                            {
-                                Ok(token) => token,
-                                Err(e) => {
-                                    return Err(anyhow!(
-                                        "Failed to validate or refresh token: {}",
-                                        e
-                                    ));
-                                }
-                            };
+                            .map_err(|e| anyhow!("Failed to validate or refresh token: {}", e))?;
 
                             debug!("Token successfully validated or refreshed");
 
@@ -818,16 +799,17 @@ impl TwitchAuthManager {
 
     /// Get token details for storage
     pub async fn get_token_for_storage(&self) -> Option<(String, Option<String>)> {
+        // Use Option combinators for a more functional approach
         let auth_state = self.auth_state.read().await.clone();
 
-        match auth_state {
-            AuthState::Authenticated(token) => {
-                let access_token = token.access_token.secret().to_string();
-                let refresh_token = token.refresh_token.as_ref().map(|t| t.secret().to_string());
-
-                Some((access_token, refresh_token))
-            }
-            _ => None,
+        // Extract token if authenticated, then map to desired format
+        if let AuthState::Authenticated(token) = auth_state {
+            Some((
+                token.access_token.secret().to_string(),
+                token.refresh_token.as_ref().map(|t| t.secret().to_string()),
+            ))
+        } else {
+            None
         }
     }
 }

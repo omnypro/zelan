@@ -100,12 +100,12 @@ impl ReqwestHttpClient {
 #[async_trait::async_trait]
 impl HttpClient for ReqwestHttpClient {
     async fn get(&self, url: &str, headers: HashMap<String, String>) -> Result<SimpleHttpResponse> {
-        let mut request = self.client.get(url);
-
-        // Add headers
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+        // Build request with headers using functional fold
+        let request = headers
+            .into_iter()
+            .fold(self.client.get(url), |req, (key, value)| {
+                req.header(key, value)
+            });
 
         // Send request
         let response = request.send().await?;
@@ -117,12 +117,15 @@ impl HttpClient for ReqwestHttpClient {
         // Build our response with headers
         let result = SimpleHttpResponse::new(status, body);
 
-        // We could extract headers here if needed
-        // response.headers().iter().for_each(|(k, v)| {
-        //    if let Ok(value_str) = v.to_str() {
-        //        result = result.with_header(k.as_str(), value_str);
-        //    }
-        // });
+        // We could extract headers here if needed using functional approach:
+        // let result = response.headers().iter().fold(
+        //     SimpleHttpResponse::new(status, body),
+        //     |resp, (k, v)| {
+        //         v.to_str().ok().map_or(resp, |value_str| {
+        //             resp.with_header(k.as_str(), value_str)
+        //         })
+        //     }
+        // );
 
         Ok(result)
     }
@@ -133,12 +136,12 @@ impl HttpClient for ReqwestHttpClient {
         headers: HashMap<String, String>,
         body: String,
     ) -> Result<SimpleHttpResponse> {
-        let mut request = self.client.post(url).body(body);
-
-        // Add headers
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+        // Build request with headers using functional fold
+        let request = headers
+            .into_iter()
+            .fold(self.client.post(url).body(body), |req, (key, value)| {
+                req.header(key, value)
+            });
 
         // Send request
         let response = request.send().await?;

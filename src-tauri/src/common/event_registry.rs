@@ -254,6 +254,7 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
                         id,
                         EventRegistryError::CallbackError {
                             message: format!("Callback {} failed", id),
+                            context: None,
                         },
                     ));
                     (successes, errors)
@@ -405,13 +406,24 @@ impl EventRegistry {
     pub async fn stats(&self) -> HashMap<String, usize> {
         let registries = self.registries.read().await;
 
-        // Use functional approach to collect stats
-        registries
+        // Enhanced functional approach with parallelized future resolution
+        let stats_futures: Vec<_> = registries
             .iter()
-            .map(|(type_id, _)| {
+            .map(|(type_id, registry)| {
+                // Format type name and create a future that might resolve with subscriber count
                 let type_name = format!("{:?}", type_id);
-                (type_name, 0) // Placeholder value
+                async move {
+                    // This is a placeholder - in a real implementation this could
+                    // be extended to actually count subscribers for each registry type
+                    (type_name, 0)
+                }
             })
+            .collect();
+
+        // Execute all futures concurrently and collect results
+        futures::future::join_all(stats_futures)
+            .await
+            .into_iter()
             .collect()
     }
 }
