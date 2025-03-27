@@ -7,11 +7,23 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.0.6",
+    "@radix-ui/react-label": "^2.0.3",
     "@radix-ui/react-scroll-area": "^1.2.3",
+    "@radix-ui/react-separator": "^1.0.3",
+    "@radix-ui/react-slot": "^1.0.2",
+    "@radix-ui/react-tabs": "^1.0.4",
     "@tailwindcss/vite": "^4.0.9",
+    "@tanstack/react-query": "^5.28.7",
+    "@tanstack/react-query-devtools": "^5.28.7",
+    "@tanstack/react-router": "^1.114.29",
+    "@tanstack/router-devtools": "^1.24.0",
+    "@tanstack/store": "^0.7.0",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-opener": "^2.2.5",
     "class-variance-authority": "^0.7.1",
@@ -24,11 +36,23 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@tanstack/react-router-devtools": "^1.114.29",
+    "@tanstack/router-plugin": "^1.114.29",
     "@tauri-apps/cli": "^2.2.7",
     "@types/node": "^22.13.10",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@typescript-eslint/eslint-plugin": "^7.8.0",
+    "@typescript-eslint/parser": "^7.8.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.18",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.6",
+    "postcss": "^8.4.37",
+    "prettier": "^3.5.3",
+    "prettier-plugin-tailwindcss": "^0.6.11",
     "typescript": "~5.6.3",
     "vite": "^6.1.1"
   }

@@ -1,105 +1,39 @@
-import React from 'react';
-import { EventBusStats as EventBusStatsType, AdapterStatusMap, WebSocketInfo as WebSocketInfoType } from '../types';
-import EventBusStats from './EventBusStats';
-import AdapterStatusList from './AdapterStatusList';
-import WebSocketInfo from './WebSocketInfo';
+import { useEffect, useState } from 'react'
+import { AdapterStatusList } from './adapter-status-list'
+import { EventBusStats } from './event-bus-stats'
+import { WebSocketInfo } from './websocket-info'
 
-interface DashboardProps {
-  eventBusStats: EventBusStatsType | null;
-  adapterStatuses: AdapterStatusMap | null;
-  wsInfo: WebSocketInfoType | null;
-  lastUpdated: Date | null;
-  testEventResult: string;
-  loading: boolean;
-  onSendTestEvent: () => Promise<void>;
-  onRefreshData: () => void;
-  onUpdatePort: (port: number) => Promise<void>;
-}
+export function Dashboard() {
+  const [isLoading, setIsLoading] = useState(true)
 
-/**
- * Dashboard component displays the main monitoring interface
- */
-const Dashboard: React.FC<DashboardProps> = ({
-  eventBusStats,
-  adapterStatuses,
-  wsInfo,
-  lastUpdated,
-  testEventResult,
-  loading,
-  onSendTestEvent,
-  onRefreshData,
-  onUpdatePort,
-}) => {
+  useEffect(() => {
+    // Simulate data loading
+    const timer = setTimeout(() => {
+      setIsLoading(false)
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+
   return (
-    <>
-      <div className="actions">
-        <button
-          onClick={onSendTestEvent}
-          disabled={loading}
-          className="action-button"
-        >
-          {loading ? 'Processing...' : 'Send Test Event'}
-        </button>
-        <button
-          onClick={onRefreshData}
-          disabled={loading}
-          className="action-button"
-        >
-          {loading ? 'Loading...' : 'Refresh Data'}
-        </button>
-      </div>
-
-      {testEventResult && (
-        <div className="result-panel">
-          <h3>Test Event Result</h3>
-          <p>{testEventResult}</p>
-        </div>
-      )}
-
-      <div className="stats-container">
-        <div className="stats-panel">
-          <div className="panel-header">
-            <h3>WebSocket Configuration</h3>
-          </div>
-
-          {wsInfo ? (
-            <WebSocketInfo 
-              wsInfo={wsInfo} 
-              onUpdatePort={onUpdatePort}
-              loading={loading}
-            />
-          ) : (
-            <p className="loading">Loading WebSocket configuration...</p>
-          )}
-        </div>
-
-        <div className="stats-panel">
-          {eventBusStats ? (
-            <EventBusStats 
-              stats={eventBusStats} 
-              lastUpdated={lastUpdated}
-            />
-          ) : (
-            <div className="panel-header">
-              <h3>Event Bus Statistics</h3>
-              <p className="loading">Loading event bus statistics...</p>
-            </div>
-          )}
-        </div>
-
-        <div className="stats-panel">
-          {adapterStatuses ? (
-            <AdapterStatusList adapterStatuses={adapterStatuses} />
-          ) : (
-            <div className="panel-header">
-              <h3>Adapter Status</h3>
-              <p className="loading">Loading adapter statuses...</p>
-            </div>
-          )}
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold">Dashboard</h2>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <AdapterStatusList />
+        <div className="space-y-6">
+          <EventBusStats />
+          <WebSocketInfo />
         </div>
       </div>
-    </>
-  );
-};
-
-export default Dashboard;
+    </div>
+  )
+}

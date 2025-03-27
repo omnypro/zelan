@@ -1,7 +1,8 @@
-export const Footer = () => {
+export function Footer() {
   return (
-    <footer className="text-sm sticky bottom-0 z-50 p-1.5 bg-[#404060]">
-      <div className="flex items-center w-full gap-2 px-4">footer</div>
+    <footer className="bg-gray-100 p-4 text-center text-gray-500 text-sm">
+      <p>Zelan - Streaming Integration Tool</p>
+      <p>Version: 0.1.0</p>
     </footer>
-  );
+  )
 }
