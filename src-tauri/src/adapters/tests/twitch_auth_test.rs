@@ -6,7 +6,7 @@
 //! - Token refresh and validation
 
 use super::test_helpers::{cleanup_twitch_env_vars, setup_twitch_env_vars};
-use crate::adapters::twitch_auth::{AuthEvent, TwitchAuthManager};
+use crate::adapters::twitch::auth::{AuthEvent, TwitchAuthManager};
 
 use anyhow::Result;
 use std::sync::{Arc, Mutex};

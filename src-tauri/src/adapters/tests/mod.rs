@@ -6,6 +6,7 @@
 // Test modules
 pub mod obs_test;
 pub mod test_helpers;
+pub mod test_test;
 pub mod twitch_api_test;
 pub mod twitch_auth_test;
 pub mod twitch_eventsub_test;
