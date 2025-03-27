@@ -189,7 +189,7 @@ impl TwitchApiClient {
         .await;
 
         // Use our new retry helper
-        use crate::common::retry::{exponential_backoff, with_jitter, with_retry};
+        use crate::common::retry::with_retry;
 
         // Clone token for use in retry operation
         let token_clone = token.clone();
@@ -473,7 +473,7 @@ impl TwitchApiClient {
         };
 
         // Use our new retry helper
-        use crate::common::retry::{exponential_backoff, with_jitter, with_retry};
+        use crate::common::retry::with_retry;
 
         // Clone values for use in retry operation
         let token_clone = token.clone();

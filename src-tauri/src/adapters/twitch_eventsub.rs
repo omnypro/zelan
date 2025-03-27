@@ -904,7 +904,7 @@ impl EventSubClient {
         let ws_url = "wss://eventsub.wss.twitch.tv/ws";
 
         // Use our new retry helper
-        use crate::common::retry::{exponential_backoff, with_jitter, with_retry};
+        use crate::common::retry::with_retry;
 
         // Set up operation name for tracing/logging
         let operation_name = "connect_to_eventsub";
@@ -1152,7 +1152,7 @@ impl EventSubClient {
         info!("Getting user ID from token");
 
         // Use our new retry helper
-        use crate::common::retry::{exponential_backoff, with_jitter, with_retry};
+        use crate::common::retry::with_retry;
 
         // Set up operation name for logging and tracing
         let operation_name = "get_user_id_from_token";
