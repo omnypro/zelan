@@ -6,7 +6,7 @@
 use anyhow::Result;
 use tracing::{debug, error};
 
-use super::twitch_auth::AuthEvent;
+use super::auth::AuthEvent;
 use crate::callback_system::CallbackRegistry;
 
 /// Dedicated registry for auth callbacks with improved callback management

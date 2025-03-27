@@ -120,7 +120,7 @@ enum AuthState {
     Authenticated(UserToken),
 }
 
-use crate::adapters::twitch_auth_callback::TwitchAuthCallbackRegistry;
+use crate::adapters::twitch::auth_callback::TwitchAuthCallbackRegistry;
 
 /// Manages Twitch API authentication
 pub struct TwitchAuthManager {

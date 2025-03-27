@@ -1,6 +1,7 @@
 use crate::{
     adapters::{ObsAdapter, TestAdapter, TwitchAdapter},
     auth::TokenManager,
+    recovery::RecoveryManager,
     AdapterSettings, ErrorCode, ErrorSeverity, StreamService, ZelanError,
 };
 use anyhow::{anyhow, Result};
@@ -343,17 +344,18 @@ impl ZelanState {
                         Ok(config) => {
                             info!(
                                 interval_ms = config.interval_ms,
-                                generate_special = config.generate_special_events,
+                                simulate_stream = config.simulate_stream,
+                                generate_errors = config.generate_errors,
                                 "Using saved Test adapter configuration"
                             );
-                            TestAdapter::with_config(service_guard.event_bus(), config)
+                            TestAdapter::with_config("test", "test", service_guard.event_bus(), config)
                         },
                         Err(e) => {
                             warn!(
                                 error = %e,
                                 "Failed to parse saved Test adapter config, using defaults"
                             );
-                            TestAdapter::new(service_guard.event_bus())
+                            TestAdapter::new("test", "test", service_guard.event_bus(), None)
                         }
                     };
                     
@@ -367,7 +369,7 @@ impl ZelanState {
                     use crate::adapters::{base::AdapterConfig, test::TestConfig};
                     
                     // Create a default test adapter
-                    let test_adapter = TestAdapter::new(service_guard.event_bus());
+                    let test_adapter = TestAdapter::new("test", "test", service_guard.event_bus(), None);
                     
                     // Define default settings with the proper config
                     let default_config = TestConfig::default();
@@ -415,14 +417,9 @@ impl ZelanState {
                         obs_config.password = password.to_string();
                     }
                     
-                    // Extract auto_connect (use default if not present)
-                    if let Some(auto_connect) = config_value.get("auto_connect").and_then(|v| v.as_bool()) {
-                        obs_config.auto_connect = auto_connect;
-                    }
-                    
-                    // Extract include_scene_details (use default if not present)
-                    if let Some(include_details) = config_value.get("include_scene_details").and_then(|v| v.as_bool()) {
-                        obs_config.include_scene_details = include_details;
+                    // Extract auto_reconnect (use default if not present)
+                    if let Some(auto_reconnect) = config_value.get("auto_reconnect").and_then(|v| v.as_bool()) {
+                        obs_config.auto_reconnect = auto_reconnect;
                     }
                     
                     obs_config
@@ -435,14 +432,14 @@ impl ZelanState {
                 
                 // Create the adapter with the loaded configuration
                 info!(host = %config.host, port = config.port, "Initializing OBS adapter");
-                let obs_adapter = ObsAdapter::with_config(service_guard.event_bus(), config);
+                let obs_adapter = ObsAdapter::with_config("obs", "obs", service_guard.event_bus(), config);
                 
                 // Register the adapter with its settings
                 service_guard.register_adapter(obs_adapter, Some(saved_obs_settings.clone())).await;
                 info!("Registered OBS adapter with saved settings");
             } else {
                 info!("No saved OBS settings found, using defaults");
-                let obs_adapter = ObsAdapter::new(service_guard.event_bus());
+                let obs_adapter = ObsAdapter::new("obs", "obs", service_guard.event_bus(), None, None);
                 let obs_settings = AdapterSettings {
                     enabled: true,
                     config: serde_json::json!({
@@ -505,10 +502,7 @@ impl ZelanState {
                         twitch_config.poll_interval_ms = poll_interval;
                     }
                     
-                    // Extract monitor_channel_info (use default if not present)
-                    if let Some(monitor_channel) = config_value.get("monitor_channel_info").and_then(|v| v.as_bool()) {
-                        twitch_config.monitor_channel_info = monitor_channel;
-                    }
+                    // Old monitor_channel_info field is no longer used
                     
                     twitch_config
                 } else {
@@ -558,36 +552,27 @@ impl ZelanState {
                 
                 // Create the adapter with the loaded configuration
                 info!("Initializing Twitch adapter");
-                let mut twitch_adapter = TwitchAdapter::with_config(service_guard.event_bus(), config).await;
+                let twitch_adapter = TwitchAdapter::with_config("twitch", "twitch", service_guard.event_bus(), config);
                 
-                // Set token manager on the adapter - IMPORTANT: This must happen before registering
-                // to ensure the token manager is available when connect() is called
-                info!("Setting TokenManager on Twitch adapter");
-                twitch_adapter.set_token_manager(Arc::clone(&service_guard.token_manager));
-                
-                // Set recovery manager
-                info!("Setting RecoveryManager on Twitch adapter");
-                twitch_adapter.set_recovery_manager(service_guard.recovery_manager.clone());
-                
-                info!("TokenManager successfully set on Twitch adapter");
+                // Token manager and recovery manager are already set in the constructor
+                info!("TokenManager and RecoveryManager already set on Twitch adapter");
                 
                 // Register the adapter with its settings
                 service_guard.register_adapter(twitch_adapter, Some(saved_twitch_settings.clone())).await;
                 info!("Registered Twitch adapter with saved settings");
             } else {
                 info!("No saved Twitch settings found, using defaults");
-                let mut twitch_adapter = TwitchAdapter::new(service_guard.event_bus()).await;
+                let twitch_adapter = TwitchAdapter::new(
+                    "twitch", 
+                    "twitch", 
+                    service_guard.event_bus(),
+                    Arc::clone(&service_guard.token_manager),
+                    Arc::new(RecoveryManager::new()),
+                    None
+                );
                 
-                // Set token manager on the adapter - IMPORTANT: This must happen before registering
-                // to ensure the token manager is available when connect() is called
-                info!("Setting TokenManager on Twitch adapter");
-                twitch_adapter.set_token_manager(Arc::clone(&service_guard.token_manager));
-                
-                // Set recovery manager
-                info!("Setting RecoveryManager on Twitch adapter");
-                twitch_adapter.set_recovery_manager(service_guard.recovery_manager.clone());
-                
-                info!("TokenManager successfully set on Twitch adapter");
+                // Token manager and recovery manager are already set in the constructor
+                info!("TokenManager and RecoveryManager already set on Twitch adapter");
                 
                 let twitch_settings = AdapterSettings {
                     enabled: true,
