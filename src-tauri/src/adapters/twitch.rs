@@ -3555,3 +3555,9 @@ impl AdapterRecovery for TwitchAdapter {
         self.base.name()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // Tests for this module have been moved to src/adapters/tests/twitch_test.rs
+    pub use crate::adapters::tests::twitch_test::*;
+}

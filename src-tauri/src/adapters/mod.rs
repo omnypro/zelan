@@ -11,6 +11,10 @@ pub mod twitch_auth;
 pub mod twitch_auth_callback;
 pub mod twitch_eventsub;
 
+// Tests module - only compiled in test mode
+#[cfg(test)]
+pub mod tests;
+
 pub use base::{AdapterConfig, BaseAdapter};
 pub use common::{AdapterError, RetryOptions, BackoffStrategy};
 pub use http_client::{HttpClient, ReqwestHttpClient};

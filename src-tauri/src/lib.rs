@@ -34,6 +34,16 @@ pub mod plugin;
 pub mod recovery;
 pub mod flow;
 
+// Test modules - only compiled in test mode
+#[cfg(test)]
+pub mod tests;
+
+#[cfg(test)]
+mod simple_tests {
+    // Tests for this module have been moved to src/tests/lib_test.rs
+    pub use crate::tests::lib_test::*;
+}
+
 pub use error::{ErrorCategory, ErrorCode, ErrorSeverity, RetryPolicy, ZelanError, ZelanResult};
 pub use recovery::{AdapterRecovery, RecoveryManager};
 pub use flow::TraceContext;

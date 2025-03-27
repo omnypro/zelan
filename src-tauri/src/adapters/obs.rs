@@ -22,10 +22,10 @@ use tracing::{debug, error, info, instrument, warn, Instrument};
 use crate::adapters::obs_callback::{ObsCallbackRegistry, ObsEvent};
 
 // Default connection settings
-const DEFAULT_HOST: &str = "localhost";
-const DEFAULT_PORT: u16 = 4455;
-const DEFAULT_PASSWORD: &str = "";
-const RECONNECT_DELAY_MS: u64 = 5000;
+pub(crate) const DEFAULT_HOST: &str = "localhost";
+pub(crate) const DEFAULT_PORT: u16 = 4455;
+pub(crate) const DEFAULT_PASSWORD: &str = "";
+pub(crate) const RECONNECT_DELAY_MS: u64 = 5000;
 // SHUTDOWN_CHANNEL_SIZE not needed anymore since we use BaseAdapter
 
 /// Configuration for the OBS adapter
@@ -2013,4 +2013,10 @@ impl ServiceAdapterHelper for ObsAdapter {
         *self.client.lock().await = None;
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    // Tests for this module are in the dedicated tests directory
+    pub use crate::adapters::tests::obs_test::*;
 }
