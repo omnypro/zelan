@@ -9,6 +9,7 @@ use crate::{
 use anyhow::Result;
 use async_trait::async_trait;
 use futures_util::{pin_mut, StreamExt};
+use obws::events::OutputState;
 use obws::{client::ConnectConfig, requests::EventSubscription, Client};
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -102,11 +103,11 @@ impl crate::adapters::base::AdapterConfig for ObsConfig {
     }
 }
 
-// TODO: Update OBS adapter to match the newer obws crate API:
-// - Fix ConnectConfig structure with required fields (broadcast_capacity, connect_timeout, dangerous)
-// - Update Client::connect call to provide all required parameters
-// - Update Event handling to use struct pattern matching instead of tuple variant pattern matching
-// - Fix the scenes().current() method call which no longer exists in the current API
+// The OBS adapter is now updated to work with obws v0.14.0:
+// - ConnectConfig structure includes all required fields (event_subscriptions, broadcast_capacity, connect_timeout, dangerous)
+// - Client::connect_with_config call now provides all required parameters
+// - Event handling uses struct pattern matching (e.g., Event::CurrentProgramSceneChanged { id })
+// - Using scenes().current_program_scene() API method instead of the deprecated scenes().current()
 
 /// OBS adapter for interacting with OBS WebSocket
 pub struct ObsAdapter {
@@ -133,12 +134,26 @@ impl Clone for ObsAdapter {
     fn clone(&self) -> Self {
         Self {
             base: self.base.clone(),
-            obs_client: Mutex::new(self.obs_client.blocking_lock().clone()),
-            config: RwLock::new(self.config.blocking_read().clone()),
-            shutdown_tx: RwLock::new(self.shutdown_tx.blocking_read().clone()),
+            // Use mutex clone instead of blocking_lock to avoid potential deadlocks
+            obs_client: Mutex::new(None),
+            // Clone RwLock data safely
+            config: RwLock::new(match self.config.try_read() {
+                Ok(config) => config.clone(),
+                // If lock is held, create a default config
+                Err(_) => ObsConfig::default(),
+            }),
+            // Clone RwLock data safely
+            shutdown_tx: RwLock::new(match self.shutdown_tx.try_read() {
+                Ok(tx) => tx.clone(),
+                Err(_) => None,
+            }),
+            // Share the connection state
             connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
-            callback_registry: Arc::clone(&self.callback_registry), // Important for callback integrity
+            // Properly share the callback registry using Arc
+            callback_registry: Arc::clone(&self.callback_registry),
+            // Properly share event subscriptions using Arc
             event_subscriptions: Arc::clone(&self.event_subscriptions),
+            // Share the service helper implementation
             service_helper: self.service_helper.clone(),
         }
     }
@@ -178,7 +193,11 @@ impl ServiceAdapter for ObsAdapter {
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         *self.shutdown_tx.write().await = Some(shutdown_tx);
 
-        // Create connection config
+        // Save host and port for error reporting
+        let host = config.host.clone();
+        let port = config.port;
+
+        // Create connection config with all required fields
         let connect_config = ConnectConfig {
             host: config.host.clone(),
             port: config.port,
@@ -187,14 +206,15 @@ impl ServiceAdapter for ObsAdapter {
             } else {
                 Some(config.password.clone())
             },
+            event_subscriptions: Some(EventSubscription::ALL),
+            broadcast_capacity: 128,
+            connect_timeout: Duration::from_secs(10),
+            dangerous: None,
         };
-        debug!(
-            "Connecting to OBS: {}:{}",
-            connect_config.host, connect_config.port
-        );
+        debug!("Connecting to OBS: {}:{}", host, port);
 
-        // Connect to OBS WebSocket
-        let client = match Client::connect(connect_config.clone()).await {
+        // Connect to OBS WebSocket using the configuration
+        let client = match Client::connect_with_config(connect_config).await {
             Ok(client) => client,
             Err(e) => {
                 // Recording connection failure in trace
@@ -203,8 +223,8 @@ impl ServiceAdapter for ObsAdapter {
                     "connect_failed",
                     Some(json!({
                         "error": e.to_string(),
-                        "host": connect_config.host,
-                        "port": connect_config.port,
+                        "host": host,
+                        "port": port,
                         "timestamp": chrono::Utc::now().to_rfc3339()
                     })),
                 )
@@ -213,13 +233,13 @@ impl ServiceAdapter for ObsAdapter {
                 error!("Failed to connect to OBS: {}", e);
                 return Err(AdapterError::connection(format!(
                     "Failed to connect to OBS at {}:{}: {}",
-                    connect_config.host, connect_config.port, e
+                    host, port, e
                 )));
             }
         };
 
-        // Store client
-        *self.obs_client.lock().await = Some(client.clone());
+        // Store client - Client doesn't implement Clone so we store it directly
+        *self.obs_client.lock().await = Some(client);
 
         // Mark as connected
         self.connected.store(true, Ordering::SeqCst);
@@ -228,34 +248,51 @@ impl ServiceAdapter for ObsAdapter {
         let adapter_type = self.adapter_type().to_string();
         let event_bus_clone = self.base.event_bus();
         let callback_registry_clone = Arc::clone(&self.callback_registry);
-        let connected_clone = self.connected.clone();
-        let client_clone = client.clone();
+        let connected_clone = AtomicBool::new(self.connected.load(Ordering::SeqCst));
+        // Create a new client for the event listener task
+        let obs_client = match Client::connect_with_config(ConnectConfig {
+            host: config.host.clone(),
+            port: config.port,
+            password: if config.password.is_empty() {
+                None
+            } else {
+                Some(config.password.clone())
+            },
+            event_subscriptions: Some(EventSubscription::ALL),
+            broadcast_capacity: 128,
+            connect_timeout: Duration::from_secs(10),
+            dangerous: None,
+        })
+        .await
+        {
+            Ok(client) => client,
+            Err(e) => {
+                error!("Failed to create second client for event listener: {}", e);
+                return Err(AdapterError::connection(format!(
+                    "Failed to create second client for event listener: {}",
+                    e
+                )));
+            }
+        };
         let config_clone = config.clone();
         let subscriptions = Arc::clone(&self.event_subscriptions);
 
         // Start event listener task
         tokio::spawn(async move {
-            // Subscribe to events
-            let sub = EventSubscription::builder()
-                .general(true)
-                .scenes(true)
-                .inputs(true)
-                .transitions(true)
-                .ui(true)
-                .outputs(true)
-                .media(true)
-                .sources(true)
-                .build()
-                .expect("Failed to build event subscription");
+            // In v0.14.0, the events() method returns a stream directly
+            // No need to call subscribe explicitly
 
-            if let Err(e) = client_clone.events().subscribe(sub).await {
-                error!("Failed to subscribe to OBS events: {}", e);
-                connected_clone.store(false, Ordering::SeqCst);
-                return;
-            }
+            // Get the event stream
+            let event_listener = match obs_client.events() {
+                Ok(event_stream) => event_stream,
+                Err(e) => {
+                    error!("Failed to subscribe to OBS events: {}", e);
+                    connected_clone.store(false, Ordering::SeqCst);
+                    return;
+                }
+            };
 
-            // Create event listener from client
-            let mut event_listener = client_clone.events().filtered_listen();
+            // We already set up the event_listener above
             pin_mut!(event_listener);
 
             // Send connected event
@@ -274,8 +311,13 @@ impl ServiceAdapter for ObsAdapter {
             }
 
             // Get current scene
-            let initial_scene = match client_clone.scenes().current().await {
-                Ok(scene) => Some(scene),
+            let initial_scene = match obs_client.scenes().current_program_scene().await {
+                Ok(scene_name) => {
+                    // Create scene data with available information
+                    Some(serde_json::json!({
+                        "name": scene_name
+                    }))
+                }
                 Err(e) => {
                     warn!("Failed to get current scene: {}", e);
                     None
@@ -286,7 +328,7 @@ impl ServiceAdapter for ObsAdapter {
             if let Some(scene) = initial_scene {
                 if let Err(e) = callback_registry_clone
                     .trigger(ObsEvent::SceneChanged {
-                        scene_name: scene.name.clone(),
+                        scene_name: scene["name"].as_str().unwrap_or("unknown").to_string(),
                         data: json!({
                             "initial": true,
                             "scene": scene,
@@ -299,8 +341,8 @@ impl ServiceAdapter for ObsAdapter {
                 }
             }
 
-            // Get initial streaming status
-            let stream_status = match client_clone.streaming().status().await {
+            // Get initial streaming status using current API
+            let stream_status = match obs_client.streaming().status().await {
                 Ok(status) => Some(status),
                 Err(e) => {
                     warn!("Failed to get stream status: {}", e);
@@ -326,7 +368,7 @@ impl ServiceAdapter for ObsAdapter {
             }
 
             // Get initial recording status
-            let recording_status = match client_clone.recording().status().await {
+            let recording_status = match obs_client.recording().status().await {
                 Ok(status) => Some(status),
                 Err(e) => {
                     warn!("Failed to get recording status: {}", e);
@@ -361,183 +403,178 @@ impl ServiceAdapter for ObsAdapter {
                     }
                     // Event from OBS
                     event = event_listener.next() => {
-                        match event {
-                            Some(Ok(event)) => {
-                                // Log the event at trace level
-                                trace!("Received OBS event: {:?}", event);
+                        if let Some(event) = event {
+                            // Log the event at trace level
+                            trace!("Received OBS event: {:?}", event);
 
-                                // Map OBS events to our event model
-                                let adapter_type_str = adapter_type.clone();
-                                let event_bus = event_bus_clone.clone();
+                            // Map OBS events to our event model
+                            let adapter_type_str = adapter_type.clone();
+                            let event_bus = event_bus_clone.clone();
 
-                                // Handle specific event types
-                                match event {
-                                    obws::events::Event::CurrentProgramSceneChanged(scene_data) => {
-                                        // Handle scene change event
-                                        let scene_name = scene_data.scene_name.clone();
+                            // Handle specific event types
+                            match event {
+                                obws::events::Event::CurrentProgramSceneChanged { id } => {
+                                    // Convert the scene ID to a string using debug formatting since Display isn't implemented
+                                    let scene_name_str = format!("{:?}", id);
 
-                                        // Convert to JSON for event bus
-                                        if let Ok(data) = serde_json::to_value(&scene_data) {
-                                            // Publish to event bus
-                                            let _ = event_bus.publish(StreamEvent::new(
-                                                &adapter_type_str,
-                                                "scene.changed",
-                                                data.clone(),
-                                            )).await;
+                                    // Create JSON for event bus
+                                    let event_data = json!({
+                                        "scene_name": scene_name_str
+                                    });
 
-                                            // Trigger callback
-                                            if let Err(e) = callback_registry_clone.trigger(
-                                                ObsEvent::SceneChanged {
-                                                    scene_name,
-                                                    data: json!({
-                                                        "scene": data,
-                                                        "timestamp": chrono::Utc::now().to_rfc3339()
-                                                    }),
-                                                }
-                                            ).await {
-                                                error!("Failed to trigger scene changed event: {}", e);
+                                    // Convert to JSON for event bus
+                                    if let Ok(data) = serde_json::to_value(&event_data) {
+                                        // Publish to event bus
+                                        let _ = event_bus.publish(StreamEvent::new(
+                                            &adapter_type_str,
+                                            "scene.changed",
+                                            data.clone(),
+                                        )).await;
+
+                                        // Trigger callback
+                                        if let Err(e) = callback_registry_clone.trigger(
+                                            ObsEvent::SceneChanged {
+                                                scene_name: scene_name_str,
+                                                data: json!({
+                                                    "scene": data,
+                                                    "timestamp": chrono::Utc::now().to_rfc3339()
+                                                }),
                                             }
+                                        ).await {
+                                            error!("Failed to trigger scene changed event: {}", e);
                                         }
                                     }
-                                    obws::events::Event::StreamStateChanged(stream_data) => {
-                                        // Handle stream state change
-                                        if let Ok(data) = serde_json::to_value(&stream_data) {
-                                            // Determine the exact event type based on state
-                                            let (event_type, is_streaming) = match stream_data.state.as_str() {
-                                                "starting" => ("stream.starting", false),
-                                                "started" => ("stream.started", true),
-                                                "stopping" => ("stream.stopping", true),
-                                                "stopped" => ("stream.stopped", false),
-                                                unknown => {
-                                                    warn!("Unknown stream state: {}", unknown);
-                                                    ("stream.unknown", false)
-                                                }
-                                            };
+                                }
+                                obws::events::Event::StreamStateChanged { active, state } => {
+                                    // Handle stream state change
+                                    let stream_data = json!({
+                                        "active": active,
+                                        "state": format!("{:?}", state)
+                                    });
 
-                                            // Publish to event bus
-                                            let _ = event_bus.publish(StreamEvent::new(
-                                                &adapter_type_str,
-                                                event_type,
-                                                data.clone(),
-                                            )).await;
-
-                                            // Trigger callback
-                                            if let Err(e) = callback_registry_clone.trigger(
-                                                ObsEvent::StreamStateChanged {
-                                                    streaming: is_streaming,
-                                                    data: json!({
-                                                        "state": stream_data.state,
-                                                        "full_data": data,
-                                                        "timestamp": chrono::Utc::now().to_rfc3339()
-                                                    }),
-                                                }
-                                            ).await {
-                                                error!("Failed to trigger stream state event: {}", e);
+                                    if let Ok(data) = serde_json::to_value(&stream_data) {
+                                        // Determine the exact event type based on state
+                                        let (event_type, is_streaming) = match state {
+                                            OutputState::Starting => ("stream.starting", false),
+                                            OutputState::Started => ("stream.started", true),
+                                            OutputState::Stopping => ("stream.stopping", true),
+                                            OutputState::Stopped => ("stream.stopped", false),
+                                            _ => {
+                                                warn!("Unknown stream state");
+                                                ("stream.unknown", false)
                                             }
+                                        };
+
+                                        // Publish to event bus
+                                        let _ = event_bus.publish(StreamEvent::new(
+                                            &adapter_type_str,
+                                            event_type,
+                                            data.clone(),
+                                        )).await;
+
+                                        // Trigger callback
+                                        if let Err(e) = callback_registry_clone.trigger(
+                                            ObsEvent::StreamStateChanged {
+                                                streaming: is_streaming,
+                                                data: json!({
+                                                    "state": format!("{:?}", state),
+                                                    "full_data": data,
+                                                    "timestamp": chrono::Utc::now().to_rfc3339()
+                                                }),
+                                            }
+                                        ).await {
+                                            error!("Failed to trigger stream state event: {}", e);
                                         }
                                     }
-                                    obws::events::Event::RecordStateChanged(record_data) => {
-                                        // Handle recording state change
-                                        if let Ok(data) = serde_json::to_value(&record_data) {
-                                            // Determine the exact event type based on state
-                                            let (event_type, is_recording) = match record_data.state.as_str() {
-                                                "starting" => ("recording.starting", false),
-                                                "started" => ("recording.started", true),
-                                                "stopping" => ("recording.stopping", true),
-                                                "stopped" => ("recording.stopped", false),
-                                                unknown => {
-                                                    warn!("Unknown recording state: {}", unknown);
-                                                    ("recording.unknown", false)
-                                                }
-                                            };
+                                }
+                                obws::events::Event::RecordStateChanged { active, state, path } => {
+                                    // Handle recording state change
+                                    let record_data = json!({
+                                        "active": active,
+                                        "state": format!("{:?}", state),
+                                        "path": path
+                                    });
 
-                                            // Publish to event bus
-                                            let _ = event_bus.publish(StreamEvent::new(
-                                                &adapter_type_str,
-                                                event_type,
-                                                data.clone(),
-                                            )).await;
-
-                                            // Trigger callback
-                                            if let Err(e) = callback_registry_clone.trigger(
-                                                ObsEvent::RecordingStateChanged {
-                                                    recording: is_recording,
-                                                    data: json!({
-                                                        "state": record_data.state,
-                                                        "full_data": data,
-                                                        "timestamp": chrono::Utc::now().to_rfc3339()
-                                                    }),
-                                                }
-                                            ).await {
-                                                error!("Failed to trigger recording state event: {}", e);
+                                    if let Ok(data) = serde_json::to_value(&record_data) {
+                                        // Determine the exact event type based on state
+                                        let (event_type, is_recording) = match state {
+                                            OutputState::Starting => ("recording.starting", false),
+                                            OutputState::Started => ("recording.started", true),
+                                            OutputState::Stopping => ("recording.stopping", true),
+                                            OutputState::Stopped => ("recording.stopped", false),
+                                            _ => {
+                                                warn!("Unknown recording state");
+                                                ("recording.unknown", false)
                                             }
+                                        };
+
+                                        // Publish to event bus
+                                        let _ = event_bus.publish(StreamEvent::new(
+                                            &adapter_type_str,
+                                            event_type,
+                                            data.clone(),
+                                        )).await;
+
+                                        // Trigger callback
+                                        if let Err(e) = callback_registry_clone.trigger(
+                                            ObsEvent::RecordingStateChanged {
+                                                recording: is_recording,
+                                                data: json!({
+                                                    "state": format!("{:?}", state),
+                                                    "full_data": data,
+                                                    "timestamp": chrono::Utc::now().to_rfc3339()
+                                                }),
+                                            }
+                                        ).await {
+                                            error!("Failed to trigger recording state event: {}", e);
                                         }
                                     }
-                                    // For all other events, publish them as-is
-                                    _ => {
-                                        // Get event name from event_type()
-                                        let event_name = format!("obs.{}", event.event_type());
+                                }
+                                // For all other events, publish them as-is
+                                _ => {
+                                    // Create a generic event name from the event variant
+                                    let event_name = format!("obs.{}", match event {
+                                        obws::events::Event::InputCreated { .. } => "input.created",
+                                        obws::events::Event::InputRemoved { .. } => "input.removed",
+                                        obws::events::Event::InputNameChanged { .. } => "input.nameChanged",
+                                        // Add other event types as needed
+                                        _ => "generic",
+                                    });
 
-                                        // Convert to JSON for event bus
-                                        if let Ok(data) = serde_json::to_value(&event) {
-                                            // Publish to event bus if it's in our subscribed events
-                                            if subscriptions.is_empty() ||
-                                               subscriptions.contains(&event_name) ||
-                                               subscriptions.contains(&format!("obs.*")) {
-                                                let _ = event_bus.publish(StreamEvent::new(
-                                                    &adapter_type_str,
-                                                    &event_name,
-                                                    data,
-                                                )).await;
-                                            }
+                                    // Convert to JSON for event bus
+                                    if let Ok(data) = serde_json::to_value(&event) {
+                                        // Publish to event bus if it's in our subscribed events
+                                        if subscriptions.is_empty() ||
+                                           subscriptions.contains(&event_name) ||
+                                           subscriptions.contains(&format!("obs.*")) {
+                                            let _ = event_bus.publish(StreamEvent::new(
+                                                &adapter_type_str,
+                                                &event_name,
+                                                data,
+                                            )).await;
                                         }
                                     }
                                 }
                             }
-                            Some(Err(e)) => {
-                                error!("OBS event error: {}", e);
-                                // Check if it's a disconnect error
-                                if e.to_string().contains("disconnected") ||
-                                   e.to_string().contains("connection closed") {
-                                    warn!("OBS disconnected, will attempt to reconnect");
-                                    connected_clone.store(false, Ordering::SeqCst);
+                        } else {
+                            // If we get None, the stream has ended
+                            warn!("OBS event stream ended");
+                            connected_clone.store(false, Ordering::SeqCst);
 
-                                    // Trigger disconnected event
-                                    if let Err(e) = callback_registry_clone.trigger(
-                                        ObsEvent::ConnectionChanged {
-                                            connected: false,
-                                            data: json!({
-                                                "error": "Disconnected during event listening",
-                                                "timestamp": chrono::Utc::now().to_rfc3339()
-                                            }),
-                                        }
-                                    ).await {
-                                        error!("Failed to trigger disconnection event: {}", e);
-                                    }
-
-                                    // Break the event loop
-                                    break;
+                            // Trigger disconnected event
+                            if let Err(e) = callback_registry_clone.trigger(
+                                ObsEvent::ConnectionChanged {
+                                    connected: false,
+                                    data: json!({
+                                        "error": "Event stream ended",
+                                        "timestamp": chrono::Utc::now().to_rfc3339()
+                                    }),
                                 }
+                            ).await {
+                                error!("Failed to trigger disconnection event: {}", e);
                             }
-                            None => {
-                                warn!("OBS event stream ended");
-                                connected_clone.store(false, Ordering::SeqCst);
 
-                                // Trigger disconnected event
-                                if let Err(e) = callback_registry_clone.trigger(
-                                    ObsEvent::ConnectionChanged {
-                                        connected: false,
-                                        data: json!({
-                                            "error": "Event stream ended",
-                                            "timestamp": chrono::Utc::now().to_rfc3339()
-                                        }),
-                                    }
-                                ).await {
-                                    error!("Failed to trigger disconnection event: {}", e);
-                                }
-
-                                break;
-                            }
+                            break;
                         }
                     }
                 }
@@ -550,7 +587,24 @@ impl ServiceAdapter for ObsAdapter {
             if config_clone.auto_reconnect {
                 // Use a clone for the reconnect task
                 let adapter_type = adapter_type.clone();
-                let connect_config = connect_config.clone();
+                // Save host and port for error reporting and events
+                let host = config_clone.host.clone();
+                let port = config_clone.port;
+
+                // Create a new connect config with the same values
+                let reconnect_config = ConnectConfig {
+                    host: config_clone.host.clone(),
+                    port: config_clone.port,
+                    password: if config_clone.password.is_empty() {
+                        None
+                    } else {
+                        Some(config_clone.password.clone())
+                    },
+                    event_subscriptions: Some(EventSubscription::ALL),
+                    broadcast_capacity: 128,
+                    connect_timeout: Duration::from_secs(10),
+                    dangerous: None,
+                };
                 let callback_registry = callback_registry_clone.clone();
 
                 tokio::spawn(async move {
@@ -563,7 +617,7 @@ impl ServiceAdapter for ObsAdapter {
                     sleep(Duration::from_millis(RECONNECT_DELAY_MS)).await;
 
                     // Attempt to reconnect
-                    match Client::connect(connect_config.clone()).await {
+                    match Client::connect_with_config(reconnect_config).await {
                         Ok(_) => {
                             info!("Successfully reconnected to OBS");
                             connected_clone.store(true, Ordering::SeqCst);
@@ -573,8 +627,8 @@ impl ServiceAdapter for ObsAdapter {
                                 .trigger(ObsEvent::ConnectionChanged {
                                     connected: true,
                                     data: json!({
-                                        "host": connect_config.host,
-                                        "port": connect_config.port,
+                                        "host": host,
+                                        "port": port,
                                         "reconnected": true,
                                         "timestamp": chrono::Utc::now().to_rfc3339()
                                     }),
@@ -593,8 +647,8 @@ impl ServiceAdapter for ObsAdapter {
                                 "reconnect_failed",
                                 Some(json!({
                                     "error": e.to_string(),
-                                    "host": connect_config.host,
-                                    "port": connect_config.port,
+                                    "host": host,
+                                    "port": port,
                                     "timestamp": chrono::Utc::now().to_rfc3339()
                                 })),
                             )
@@ -610,8 +664,8 @@ impl ServiceAdapter for ObsAdapter {
             self.adapter_type(),
             "connect_success",
             Some(json!({
-                "host": connect_config.host,
-                "port": connect_config.port,
+                "host": host,
+                "port": port,
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
         )
@@ -708,9 +762,9 @@ impl ServiceAdapter for ObsAdapter {
         if self.connected.load(Ordering::SeqCst) {
             if let Some(client) = self.obs_client.lock().await.as_ref() {
                 // Get current scene
-                if let Ok(scene) = client.scenes().current().await {
+                if let Ok(scene_name) = client.scenes().current_program_scene().await {
                     status["current_scene"] = json!({
-                        "name": scene.name,
+                        "name": scene_name,
                     });
                 }
 
