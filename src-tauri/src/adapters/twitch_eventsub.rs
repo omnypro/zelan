@@ -16,7 +16,7 @@ use twitch_api::{
 };
 use twitch_oauth2::{ClientId, TwitchToken, UserToken};
 
-use crate::adapters::common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper};
+use crate::adapters::common::{AdapterError, TraceHelper};
 use crate::EventBus;
 use crate::StreamEvent;
 
@@ -380,16 +380,10 @@ impl EventSubClient {
                 }
             };
 
-            // Define retry options for refreshing tokens
-            let retry_options = RetryOptions::new(
-                2, // Max attempts
-                BackoffStrategy::Linear {
-                    base_delay: Duration::from_millis(500),
-                },
-                true, // Add jitter
-            );
+            // Use our new retry helper for token refreshing
+            use crate::common::retry::{linear_backoff, with_jitter, with_retry_and_backoff};
 
-            // Implement direct sequential retry logic for token refresh
+            // Set up operation name and clone refresher for retry usage
             let operation_name = "token_refresh";
             let refresher_clone = refresher.clone();
 
@@ -398,144 +392,105 @@ impl EventSubClient {
                 "twitch_eventsub",
                 &format!("{}_start", operation_name),
                 Some(serde_json::json!({
-                    "max_attempts": retry_options.max_attempts,
-                    "backoff": format!("{:?}", retry_options.backoff),
+                    "max_attempts": 2, // Using 2 attempts like before
+                    "operation": operation_name,
                 })),
             )
             .await;
 
-            // Initialize result
-            let mut token_result = None;
+            // Create a linear backoff strategy with jitter
+            let backoff_fn = with_jitter(linear_backoff(500));
 
-            // Retry loop
-            for attempt in 1..=retry_options.max_attempts {
-                // Record attempt
-                TraceHelper::record_adapter_operation(
-                    "twitch_eventsub",
-                    &format!("{}_attempt", operation_name),
-                    Some(serde_json::json!({
-                        "attempt": attempt,
-                        "max_attempts": retry_options.max_attempts,
-                    })),
-                )
-                .await;
+            // Use the retry helper with our custom backoff strategy
+            let new_token = with_retry_and_backoff(
+                || {
+                    // Clone the closure to satisfy borrowing requirements
+                    let refresher = refresher_clone.clone();
 
-                debug!(attempt = attempt, "Attempting to refresh token");
-
-                // Execute the operation
-                match refresher_clone().await {
-                    Ok(token) => {
-                        // Success! Record and return
+                    Box::pin(async move {
+                        // Record attempt
                         TraceHelper::record_adapter_operation(
                             "twitch_eventsub",
-                            &format!("{}_success", operation_name),
+                            &format!("{}_attempt", operation_name),
                             Some(serde_json::json!({
-                                "attempt": attempt,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         )
                         .await;
 
-                        token_result = Some(token);
-                        break;
-                    }
-                    Err(e) => {
-                        // Convert anyhow error to AdapterError
-                        let error = AdapterError::from_anyhow_error(
-                            "auth",
-                            format!("Failed to refresh token (attempt {})", attempt),
-                            e,
-                        );
+                        debug!("Attempting to refresh token");
 
-                        // Record failure
-                        TraceHelper::record_adapter_operation(
-                            "twitch_eventsub",
-                            &format!("{}_failure", operation_name),
-                            Some(serde_json::json!({
-                                "attempt": attempt,
-                                "max_attempts": retry_options.max_attempts,
-                                "error": error.to_string(),
-                            })),
-                        )
-                        .await;
+                        // Execute the token refresh operation
+                        refresher().await.map_err(|e| {
+                            // Convert anyhow error to AdapterError
+                            let error = AdapterError::from_anyhow_error(
+                                "auth",
+                                "Failed to refresh token",
+                                e,
+                            );
 
-                        // If this is the last attempt, we're done with errors
-                        if attempt == retry_options.max_attempts {
-                            // Record final failure
+                            // Record failure
                             TraceHelper::record_adapter_operation(
                                 "twitch_eventsub",
-                                &format!("{}_all_attempts_failed", operation_name),
+                                &format!("{}_failure", operation_name),
                                 Some(serde_json::json!({
-                                    "max_attempts": retry_options.max_attempts,
                                     "error": error.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
                             )
                             .await;
 
-                            error!("Failed to refresh token after all retries: {}", error);
-                            return Err(error);
-                        }
+                            error
+                        })
+                    })
+                },
+                2, // max attempts (same as before)
+                operation_name,
+                backoff_fn,
+            )
+            .await?;
 
-                        // Calculate delay for the next attempt
-                        let delay = retry_options.get_delay(attempt);
-                        debug!(
-                            attempt = attempt,
-                            delay_ms = delay.as_millis(),
-                            "Retrying after delay"
-                        );
+            // Record success
+            TraceHelper::record_adapter_operation(
+                "twitch_eventsub",
+                &format!("{}_success", operation_name),
+                Some(serde_json::json!({
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            )
+            .await;
 
-                        // Wait before next attempt
-                        tokio::time::sleep(delay).await;
-                    }
-                }
+            // Calculate token hash for the new token
+            let token_hash = self.hash_token(&new_token);
+            let current_hash = {
+                let hash_guard = self.token_hash.read().await;
+                hash_guard.clone()
+            };
+
+            // Update token if hash is different (token has changed)
+            if current_hash.is_none() || current_hash.unwrap() != token_hash {
+                info!("Token has changed, updating stored token");
+
+                // Record token change
+                TraceHelper::record_adapter_operation(
+                    "twitch_eventsub",
+                    "token_changed",
+                    Some(serde_json::json!({
+                        "expires_in_seconds": new_token.expires_in().as_secs(),
+                    })),
+                )
+                .await;
+
+                self.update_token(new_token).await?;
+            } else {
+                info!("Token is unchanged after refresh");
+
+                // Record no change
+                TraceHelper::record_adapter_operation("twitch_eventsub", "token_unchanged", None)
+                    .await;
             }
 
-            // Process the successful result
-            match token_result {
-                Some(new_token) => {
-                    // Calculate token hash
-                    let token_hash = self.hash_token(&new_token);
-                    let current_hash = {
-                        let hash_guard = self.token_hash.read().await;
-                        hash_guard.clone()
-                    };
-
-                    // Update token if hash is different (token has changed)
-                    if current_hash.is_none() || current_hash.unwrap() != token_hash {
-                        info!("Token has changed, updating stored token");
-
-                        // Record token change
-                        TraceHelper::record_adapter_operation(
-                            "twitch_eventsub",
-                            "token_changed",
-                            Some(serde_json::json!({
-                                "expires_in_seconds": new_token.expires_in().as_secs(),
-                            })),
-                        )
-                        .await;
-
-                        self.update_token(new_token).await?;
-                    } else {
-                        info!("Token is unchanged after refresh");
-
-                        // Record no change
-                        TraceHelper::record_adapter_operation(
-                            "twitch_eventsub",
-                            "token_unchanged",
-                            None,
-                        )
-                        .await;
-                    }
-
-                    Ok(())
-                }
-                None => {
-                    // This shouldn't happen because we already handled errors in the loop
-                    // But just in case, handle it here
-                    let error = AdapterError::auth("No token returned after retry attempts");
-                    error!("No token returned after retry attempts");
-                    Err(error)
-                }
-            }
+            Ok(())
         } else {
             // Token is still valid
             debug!("Token is still valid for {} seconds", expires_in.as_secs());
@@ -706,21 +661,21 @@ impl EventSubClient {
                     }
                 }
 
-                // Calculate reconnect delay with exponential backoff using our common utility
-                let retry_options = RetryOptions::new(
-                    u32::MAX, // We're manually handling the loop, so this won't be used
-                    BackoffStrategy::Exponential {
-                        base_delay: Duration::from_secs(DEFAULT_RECONNECT_DELAY_SECS),
-                        max_delay: Duration::from_secs(MAX_RECONNECT_DELAY_SECS),
-                    },
-                    true, // Add jitter to prevent thundering herd
-                );
+                // Calculate reconnect delay with exponential backoff using our new retry helper
+                use crate::common::retry::{exponential_backoff, with_jitter};
 
                 // No delay for first attempt
                 let reconnect_delay = if reconnect_attempts == 0 {
                     Duration::ZERO
                 } else {
-                    retry_options.get_delay(reconnect_attempts as u32)
+                    // Create an exponential backoff with jitter function
+                    let backoff_fn = with_jitter(exponential_backoff(
+                        DEFAULT_RECONNECT_DELAY_SECS * 1000,   // base delay in ms
+                        Some(MAX_RECONNECT_DELAY_SECS * 1000), // max delay in ms
+                    ));
+
+                    // Calculate delay based on attempt number
+                    backoff_fn(reconnect_attempts)
                 };
 
                 // Wait for reconnect delay if needed
@@ -945,17 +900,10 @@ impl EventSubClient {
         // EventSub WebSocket URL
         let ws_url = "wss://eventsub.wss.twitch.tv/ws";
 
-        // Use a retry pattern for the connection
-        let retry_options = RetryOptions::new(
-            3, // Max attempts
-            BackoffStrategy::Exponential {
-                base_delay: Duration::from_millis(500),
-                max_delay: Duration::from_secs(5),
-            },
-            true, // Add jitter
-        );
+        // Use our new retry helper
+        use crate::common::retry::{exponential_backoff, with_jitter, with_retry};
 
-        // Implement direct sequential retry logic for WebSocket connection
+        // Set up operation name for tracing/logging
         let operation_name = "connect_to_eventsub";
 
         // Start tracing the operation
@@ -963,60 +911,63 @@ impl EventSubClient {
             "twitch_eventsub",
             &format!("{}_start", operation_name),
             Some(serde_json::json!({
-                "max_attempts": retry_options.max_attempts,
-                "backoff": format!("{:?}", retry_options.backoff),
+                "max_attempts": 3,
                 "websocket_url": ws_url,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
         )
         .await;
 
-        // Initialize result
-        let mut result = None;
-        let mut last_error = None;
+        // Use the retry helper for WebSocket connection
+        let ws_stream = with_retry(
+            || {
+                let ws_url = ws_url.to_string();
 
-        // Retry loop
-        for attempt in 1..=retry_options.max_attempts {
-            // Record attempt
-            TraceHelper::record_adapter_operation(
-                "twitch_eventsub",
-                &format!("{}_attempt", operation_name),
-                Some(serde_json::json!({
-                    "attempt": attempt,
-                    "max_attempts": retry_options.max_attempts,
-                })),
-            )
-            .await;
+                Box::pin(async move {
+                    // Record attempt
+                    TraceHelper::record_adapter_operation(
+                        "twitch_eventsub",
+                        &format!("{}_attempt", operation_name),
+                        Some(serde_json::json!({
+                            "websocket_url": ws_url,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    )
+                    .await;
 
-            debug!(
-                attempt = attempt,
-                "Attempting to connect to EventSub WebSocket"
-            );
+                    debug!("Attempting to connect to EventSub WebSocket");
 
-            // Execute the operation
-            match timeout(
-                Duration::from_secs(WEBSOCKET_CONNECT_TIMEOUT_SECS),
-                connect_async(ws_url),
-            )
-            .await
-            {
-                Ok(result_inner) => match result_inner {
-                    Ok((stream, _)) => {
-                        // Success! Record and set result
+                    // Execute the operation with timeout
+                    let connect_result = timeout(
+                        Duration::from_secs(WEBSOCKET_CONNECT_TIMEOUT_SECS),
+                        connect_async(&ws_url),
+                    )
+                    .await
+                    .map_err(|_| {
+                        let error = AdapterError::connection(format!(
+                            "WebSocket connection timed out after {}s",
+                            WEBSOCKET_CONNECT_TIMEOUT_SECS
+                        ));
+
+                        // Record timeout
                         TraceHelper::record_adapter_operation(
                             "twitch_eventsub",
-                            &format!("{}_success", operation_name),
+                            &format!("{}_timeout", operation_name),
                             Some(serde_json::json!({
-                                "attempt": attempt,
+                                "timeout_seconds": WEBSOCKET_CONNECT_TIMEOUT_SECS,
+                                "websocket_url": ws_url,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         )
                         .await;
 
-                        result = Some(Ok(stream));
-                        break;
-                    }
-                    Err(e) => {
+                        error
+                    })?;
+
+                    // Handle connection result
+                    let (ws_stream, _) = connect_result.map_err(|e| {
                         let error = AdapterError::connection_with_source(
-                            format!("WebSocket connection failed (attempt {}): {}", attempt, e),
+                            format!("WebSocket connection failed: {}", e),
                             e,
                         );
 
@@ -1025,83 +976,34 @@ impl EventSubClient {
                             "twitch_eventsub",
                             &format!("{}_failure", operation_name),
                             Some(serde_json::json!({
-                                "attempt": attempt,
-                                "max_attempts": retry_options.max_attempts,
                                 "error": error.to_string(),
+                                "websocket_url": ws_url,
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         )
                         .await;
 
-                        // Store last error for return if all attempts fail
-                        last_error = Some(error);
-                    }
-                },
-                Err(_) => {
-                    let error = AdapterError::connection(format!(
-                        "WebSocket connection timed out after {}s (attempt {})",
-                        WEBSOCKET_CONNECT_TIMEOUT_SECS, attempt
-                    ));
+                        error
+                    })?;
 
-                    // Record timeout
+                    // Success! Record and return the stream
                     TraceHelper::record_adapter_operation(
                         "twitch_eventsub",
-                        &format!("{}_timeout", operation_name),
+                        &format!("{}_success", operation_name),
                         Some(serde_json::json!({
-                            "attempt": attempt,
-                            "max_attempts": retry_options.max_attempts,
-                            "timeout_seconds": WEBSOCKET_CONNECT_TIMEOUT_SECS,
+                            "websocket_url": ws_url,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
                     )
                     .await;
 
-                    // Store last error for return if all attempts fail
-                    last_error = Some(error);
-                }
-            }
-
-            // If this is the last attempt, we're done with errors
-            if attempt == retry_options.max_attempts {
-                break;
-            }
-
-            // Calculate delay for the next attempt
-            let delay = retry_options.get_delay(attempt);
-            debug!(
-                attempt = attempt,
-                delay_ms = delay.as_millis(),
-                "Retrying connection after delay"
-            );
-
-            // Wait before next attempt
-            tokio::time::sleep(delay).await;
-        }
-
-        // Process the final result
-        let ws_stream = match result {
-            Some(ok_result) => ok_result,
-            None => {
-                // Record final failure
-                let error_msg = match last_error {
-                    Some(ref e) => e.to_string(),
-                    None => "Unknown error".to_string(),
-                };
-
-                TraceHelper::record_adapter_operation(
-                    "twitch_eventsub",
-                    &format!("{}_all_attempts_failed", operation_name),
-                    Some(serde_json::json!({
-                        "max_attempts": retry_options.max_attempts,
-                        "error": error_msg,
-                    })),
-                )
-                .await;
-
-                // Return the last error
-                Err(last_error.unwrap_or_else(|| {
-                    AdapterError::connection("Failed to connect to EventSub after all retries")
-                }))?
-            }
-        };
+                    Ok(ws_stream)
+                })
+            },
+            3, // max attempts
+            operation_name,
+        )
+        .await?;
 
         // Create connection with no session ID yet
         let mut conn = EventSubConnection {
@@ -1241,17 +1143,10 @@ impl EventSubClient {
 
         info!("Getting user ID from token");
 
-        // Define retry options
-        let retry_options = RetryOptions::new(
-            3, // Max attempts
-            BackoffStrategy::Exponential {
-                base_delay: Duration::from_millis(500),
-                max_delay: Duration::from_secs(5),
-            },
-            true, // Add jitter
-        );
+        // Use our new retry helper
+        use crate::common::retry::{exponential_backoff, with_jitter, with_retry};
 
-        // Implement direct sequential retry logic for getting user ID
+        // Set up operation name for logging and tracing
         let operation_name = "get_user_id_from_token";
 
         // Start tracing the operation
@@ -1259,265 +1154,158 @@ impl EventSubClient {
             "twitch_eventsub",
             &format!("{}_start", operation_name),
             Some(serde_json::json!({
-                "max_attempts": retry_options.max_attempts,
-                "backoff": format!("{:?}", retry_options.backoff),
+                "max_attempts": 3,
                 "endpoint": "https://api.twitch.tv/helix/users",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
         )
         .await;
 
-        // Initialize result
-        let mut result = None;
-        let mut last_error = None;
+        // Clone values needed for the retry operation
+        let client_id_clone = client_id.clone();
+        let token_clone = token.clone();
 
-        // Retry loop
-        for attempt in 1..=retry_options.max_attempts {
-            // Record attempt
-            TraceHelper::record_adapter_operation(
-                "twitch_eventsub",
-                &format!("{}_attempt", operation_name),
-                Some(serde_json::json!({
-                    "attempt": attempt,
-                    "max_attempts": retry_options.max_attempts,
-                })),
-            )
-            .await;
+        // Use our retry helper
+        with_retry(
+            || {
+                // Clone values for use in the async block
+                let client_id = client_id_clone.clone();
+                let token = token_clone.clone();
 
-            debug!(attempt = attempt, "Attempting to get user ID from token");
-
-            // Create client
-            let client = reqwest::Client::new();
-
-            // Make the API request
-            let response = match client
-                .get("https://api.twitch.tv/helix/users")
-                .header("Client-ID", client_id.as_str())
-                .header(
-                    "Authorization",
-                    format!("Bearer {}", token.access_token.secret()),
-                )
-                .send()
-                .await
-            {
-                Ok(resp) => resp,
-                Err(e) => {
-                    let error = AdapterError::api_with_source(
-                        format!(
-                            "Failed to send request to Twitch API (attempt {}): {}",
-                            attempt, e
-                        ),
-                        e,
-                    );
-
-                    // Record failure
+                Box::pin(async move {
+                    // Record attempt
                     TraceHelper::record_adapter_operation(
                         "twitch_eventsub",
-                        &format!("{}_failure", operation_name),
+                        &format!("{}_attempt", operation_name),
                         Some(serde_json::json!({
-                            "attempt": attempt,
-                            "max_attempts": retry_options.max_attempts,
-                            "error": error.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
                     )
                     .await;
 
-                    // Store last error for return if all attempts fail
-                    last_error = Some(error);
+                    debug!("Attempting to get user ID from token");
 
-                    // If this is the last attempt, we're done with errors
-                    if attempt == retry_options.max_attempts {
-                        break;
-                    }
+                    // Create client and make the request
+                    let client = reqwest::Client::new();
+                    let response = client
+                        .get("https://api.twitch.tv/helix/users")
+                        .header("Client-ID", client_id.as_str())
+                        .header(
+                            "Authorization",
+                            format!("Bearer {}", token.access_token.secret()),
+                        )
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            let error = AdapterError::api_with_source(
+                                format!("Failed to send request to Twitch API: {}", e),
+                                e,
+                            );
 
-                    // Calculate delay for the next attempt
-                    let delay = retry_options.get_delay(attempt);
-                    debug!(
-                        attempt = attempt,
-                        delay_ms = delay.as_millis(),
-                        "Retrying after delay"
-                    );
+                            // Record failure
+                            TraceHelper::record_adapter_operation(
+                                "twitch_eventsub",
+                                &format!("{}_failure", operation_name),
+                                Some(serde_json::json!({
+                                    "error": error.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            )
+                            .await;
 
-                    // Wait before next attempt
-                    tokio::time::sleep(delay).await;
+                            error
+                        })?;
 
-                    continue;
-                }
-            };
+                    // Check response status
+                    if !response.status().is_success() {
+                        let status = response.status();
+                        let error_text = response
+                            .text()
+                            .await
+                            .unwrap_or_else(|e| format!("Failed to read error response: {}", e));
 
-            // Check response status
-            if !response.status().is_success() {
-                let status = response.status();
-                let error_text = match response.text().await {
-                    Ok(text) => text,
-                    Err(e) => format!("Failed to read error response: {}", e),
-                };
+                        let error = AdapterError::api_with_status(
+                            format!("Failed to get user info: HTTP {} - {}", status, error_text),
+                            status.as_u16(),
+                        );
 
-                let error = AdapterError::api_with_status(
-                    format!("Failed to get user info: HTTP {} - {}", status, error_text),
-                    status.as_u16(),
-                );
-
-                // Record failure
-                TraceHelper::record_adapter_operation(
-                    "twitch_eventsub",
-                    &format!("{}_failure", operation_name),
-                    Some(serde_json::json!({
-                        "attempt": attempt,
-                        "max_attempts": retry_options.max_attempts,
-                        "status_code": status.as_u16(),
-                        "error": error.to_string(),
-                    })),
-                )
-                .await;
-
-                // Store last error for return if all attempts fail
-                last_error = Some(error);
-
-                // If this is the last attempt, we're done with errors
-                if attempt == retry_options.max_attempts {
-                    break;
-                }
-
-                // Calculate delay for the next attempt
-                let delay = retry_options.get_delay(attempt);
-                debug!(
-                    attempt = attempt,
-                    delay_ms = delay.as_millis(),
-                    "Retrying after delay"
-                );
-
-                // Wait before next attempt
-                tokio::time::sleep(delay).await;
-
-                continue;
-            }
-
-            // Parse response
-            let response_json: Value = match response.json().await {
-                Ok(json) => json,
-                Err(e) => {
-                    let error = AdapterError::api_with_source(
-                        format!("Failed to parse response JSON: {}", e),
-                        e,
-                    );
-
-                    // Record failure
-                    TraceHelper::record_adapter_operation(
-                        "twitch_eventsub",
-                        &format!("{}_failure", operation_name),
-                        Some(serde_json::json!({
-                            "attempt": attempt,
-                            "max_attempts": retry_options.max_attempts,
-                            "error": error.to_string(),
-                        })),
-                    )
-                    .await;
-
-                    // Store last error for return if all attempts fail
-                    last_error = Some(error);
-
-                    // If this is the last attempt, we're done with errors
-                    if attempt == retry_options.max_attempts {
-                        break;
-                    }
-
-                    // Calculate delay for the next attempt
-                    let delay = retry_options.get_delay(attempt);
-                    debug!(
-                        attempt = attempt,
-                        delay_ms = delay.as_millis(),
-                        "Retrying after delay"
-                    );
-
-                    // Wait before next attempt
-                    tokio::time::sleep(delay).await;
-
-                    continue;
-                }
-            };
-
-            // Extract user ID
-            if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
-                if let Some(user) = data.first() {
-                    if let Some(id) = user.get("id").and_then(|id| id.as_str()) {
-                        // Success! Record and set result
+                        // Record failure
                         TraceHelper::record_adapter_operation(
                             "twitch_eventsub",
-                            &format!("{}_success", operation_name),
+                            &format!("{}_failure", operation_name),
                             Some(serde_json::json!({
-                                "user_id": id,
-                                "attempt": attempt,
+                                "status_code": status.as_u16(),
+                                "error": error.to_string(),
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         )
                         .await;
 
-                        result = Some(Ok(UserId::new(id.to_string())));
-                        break;
+                        return Err(error);
                     }
-                }
-            }
 
-            // If we get here, couldn't extract user ID
-            let error = AdapterError::api("Failed to extract user ID from response");
+                    // Parse response
+                    let response_json: Value = response.json().await.map_err(|e| {
+                        let error = AdapterError::api_with_source(
+                            format!("Failed to parse response JSON: {}", e),
+                            e,
+                        );
 
-            // Record failure
-            TraceHelper::record_adapter_operation(
-                "twitch_eventsub",
-                &format!("{}_failure", operation_name),
-                Some(serde_json::json!({
-                    "attempt": attempt,
-                    "max_attempts": retry_options.max_attempts,
-                    "error": error.to_string(),
-                })),
-            )
-            .await;
+                        // Record failure
+                        TraceHelper::record_adapter_operation(
+                            "twitch_eventsub",
+                            &format!("{}_failure", operation_name),
+                            Some(serde_json::json!({
+                                "error": error.to_string(),
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })),
+                        )
+                        .await;
 
-            // Store last error for return if all attempts fail
-            last_error = Some(error);
+                        error
+                    })?;
 
-            // If this is the last attempt, we're done with errors
-            if attempt == retry_options.max_attempts {
-                break;
-            }
+                    // Extract user ID
+                    if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
+                        if let Some(user) = data.first() {
+                            if let Some(id) = user.get("id").and_then(|id| id.as_str()) {
+                                // Success! Record and return the ID
+                                TraceHelper::record_adapter_operation(
+                                    "twitch_eventsub",
+                                    &format!("{}_success", operation_name),
+                                    Some(serde_json::json!({
+                                        "user_id": id,
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                )
+                                .await;
 
-            // Calculate delay for the next attempt
-            let delay = retry_options.get_delay(attempt);
-            debug!(
-                attempt = attempt,
-                delay_ms = delay.as_millis(),
-                "Retrying after delay"
-            );
+                                return Ok(UserId::new(id.to_string()));
+                            }
+                        }
+                    }
 
-            // Wait before next attempt
-            tokio::time::sleep(delay).await;
-        }
+                    // If we get here, couldn't extract user ID
+                    let error = AdapterError::api("Failed to extract user ID from response");
 
-        // Process the final result
-        match result {
-            Some(ok_result) => ok_result,
-            None => {
-                // Record final failure
-                let error_msg = match last_error {
-                    Some(ref e) => e.to_string(),
-                    None => "Unknown error".to_string(),
-                };
+                    // Record failure
+                    TraceHelper::record_adapter_operation(
+                        "twitch_eventsub",
+                        &format!("{}_failure", operation_name),
+                        Some(serde_json::json!({
+                            "error": error.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        })),
+                    )
+                    .await;
 
-                TraceHelper::record_adapter_operation(
-                    "twitch_eventsub",
-                    &format!("{}_all_attempts_failed", operation_name),
-                    Some(serde_json::json!({
-                        "max_attempts": retry_options.max_attempts,
-                        "error": error_msg,
-                    })),
-                )
-                .await;
-
-                // Return the last error
-                Err(last_error.unwrap_or_else(|| {
-                    AdapterError::api("Failed to get user ID after all retries")
-                }))
-            }
-        }
+                    Err(error)
+                })
+            },
+            3, // max attempts (same as before)
+            operation_name,
+        )
+        .await
     }
 
     /// Create EventSub subscriptions using create_eventsub_subscription() from the library
