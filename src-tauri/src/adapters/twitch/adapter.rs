@@ -508,10 +508,7 @@ impl TwitchAdapter {
                         // Tokens will be saved in the polling completion
                         Ok(())
                     }
-                    AuthEvent::TokenRefreshDetails {
-                        expires_in,
-                        ..
-                    } => {
+                    AuthEvent::TokenRefreshDetails { expires_in, .. } => {
                         info!("Token refreshed, expires in {} seconds", expires_in);
                         // Token manager will handle token storage
                         Ok(())
@@ -1046,9 +1043,4 @@ impl Clone for TwitchAdapter {
             service_helper: self.service_helper.clone(),
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    pub use crate::adapters::tests::twitch_test::*;
 }

@@ -249,8 +249,3 @@ impl Clone for EventBus {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    pub use crate::tests::event_bus_test::*;
-}

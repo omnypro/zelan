@@ -1041,8 +1041,3 @@ impl ObsAdapter {
         Self::new(name, id, event_bus, Some(config), None)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    pub use crate::adapters::tests::obs_test::*;
-}

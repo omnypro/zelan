@@ -2116,8 +2116,3 @@ impl EventSubClient {
     // The process_event_notification function has been integrated directly into the process_messages method
     // using the twitch_api library's event types and parsing
 }
-
-#[cfg(test)]
-mod tests {
-    pub use crate::adapters::tests::twitch_eventsub_test::*;
-}

@@ -38,12 +38,6 @@ pub mod recovery;
 #[cfg(test)]
 pub mod tests;
 
-#[cfg(test)]
-mod simple_tests {
-    // Tests for this module have been moved to src/tests/lib_test.rs
-    pub use crate::tests::lib_test::*;
-}
-
 pub use callback_system::{CallbackData, CallbackId, CallbackManager, CallbackRegistry};
 pub use dashmap::{DashMap, DashSet};
 pub use error::{ErrorCategory, ErrorCode, ErrorSeverity, RetryPolicy, ZelanError, ZelanResult};

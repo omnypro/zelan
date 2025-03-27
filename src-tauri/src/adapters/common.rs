@@ -546,7 +546,7 @@ impl RetryOptions {
 /// ```ignore
 /// // Using tokio's sleep for async retry
 /// use tokio::time::sleep;
-/// 
+///
 /// // Define your retry options
 /// let max_attempts = 3;
 /// let base_delay_ms = 50;
@@ -587,7 +587,7 @@ impl RetryOptions {
 /// ```ignore
 /// // Using tokio's sleep for async retry
 /// use tokio::time::sleep;
-/// 
+///
 /// // Define your retry options
 /// let max_attempts = 3;
 /// let base_delay_ms = 50;

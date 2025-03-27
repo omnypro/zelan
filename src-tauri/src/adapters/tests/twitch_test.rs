@@ -7,16 +7,12 @@
 //! - State management
 
 use anyhow::Result;
-use serde_json::json;
 use std::sync::Arc;
 
-use crate::adapters::base::AdapterConfig;
-use crate::adapters::twitch::auth::{AuthEvent, TwitchAuthManager};
-use crate::adapters::twitch::{TwitchAdapter, TwitchConfig};
+use crate::adapters::twitch::TwitchAdapter;
 use crate::auth::token_manager::TokenManager;
 use crate::recovery::RecoveryManager;
 use crate::EventBus;
-use crate::ServiceAdapter;
 
 use super::test_helpers::{cleanup_twitch_env_vars, setup_twitch_env_vars};
 

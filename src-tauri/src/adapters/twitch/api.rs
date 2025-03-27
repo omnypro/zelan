@@ -711,8 +711,3 @@ impl TwitchApiClient {
 
     // Add more API methods as needed...
 }
-
-#[cfg(test)]
-mod tests {
-    pub use crate::adapters::tests::twitch_api_test::*;
-}

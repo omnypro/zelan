@@ -619,8 +619,3 @@ impl Clone for TestAdapter {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    pub use crate::adapters::tests::test_test::*;
-}

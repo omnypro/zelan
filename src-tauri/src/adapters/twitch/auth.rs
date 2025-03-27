@@ -813,8 +813,3 @@ impl TwitchAuthManager {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    pub use crate::adapters::tests::twitch_auth_test::*;
-}
