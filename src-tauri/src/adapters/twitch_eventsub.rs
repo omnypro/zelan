@@ -2199,6 +2199,5 @@ impl EventSubClient {
 
 #[cfg(test)]
 mod tests {
-    // Tests for this module have been moved to src/adapters/tests/twitch_eventsub_test.rs
     pub use crate::adapters::tests::twitch_eventsub_test::*;
 }

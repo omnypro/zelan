@@ -252,6 +252,5 @@ impl Clone for EventBus {
 
 #[cfg(test)]
 mod tests {
-    // Tests for this module have been moved to src/tests/event_bus_test.rs
     pub use crate::tests::event_bus_test::*;
 }

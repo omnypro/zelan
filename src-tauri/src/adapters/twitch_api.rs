@@ -954,6 +954,5 @@ impl TwitchApiClient {
 
 #[cfg(test)]
 mod tests {
-    // Tests for this module have been moved to src/adapters/tests/twitch_api_test.rs
     pub use crate::adapters::tests::twitch_api_test::*;
 }

@@ -1313,6 +1313,5 @@ impl TwitchAuthManager {
 
 #[cfg(test)]
 mod tests {
-    // Tests for this module have been moved to src/adapters/tests/twitch_auth_test.rs
     pub use crate::adapters::tests::twitch_auth_test::*;
 }
