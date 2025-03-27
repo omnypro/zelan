@@ -1352,18 +1352,19 @@ impl EventSubClient {
         // Create a reqwest HTTP client for the Helix client
         let reqw_client = reqwest::Client::new();
         // Create a Helix client with the HTTP client
-        let helix_client: HelixClient<reqwest::Client> = HelixClient::with_client(reqw_client);
+        let helix_client = Arc::new(HelixClient::with_client(reqw_client));
 
         // Create the websocket transport for the session
         let transport = twitch_api::eventsub::Transport::websocket(session_id);
 
         // Helper function to create a subscription with error handling and delay
+        // Takes owned values to ensure longer lifetimes
         async fn create_sub<C>(
-            name: &str,
-            helix_client: &HelixClient<'_, reqwest::Client>,
+            name: String,
+            helix_client: Arc<HelixClient<'_, reqwest::Client>>,
             condition: C,
-            transport: &twitch_api::eventsub::Transport,
-            token: &UserToken,
+            transport: twitch_api::eventsub::Transport,
+            token: UserToken,
             success_count: Arc<AtomicUsize>,
         ) -> Result<(), AdapterError>
         where
@@ -1371,7 +1372,7 @@ impl EventSubClient {
         {
             info!("Creating subscription for {}", name);
             match helix_client
-                .create_eventsub_subscription(condition, transport.clone(), token)
+                .create_eventsub_subscription(condition, transport.clone(), &token)
                 .await
             {
                 Ok(_) => {
@@ -1399,207 +1400,300 @@ impl EventSubClient {
             >,
         )> = vec![
             // Stream events
-            (
-                "stream.online",
-                Box::new(|| {
+            ("stream.online", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
+                    // Use owned values instead of references
                     Box::pin(create_sub(
-                        "stream.online",
-                        &helix_client,
-                        StreamOnlineV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "stream.online".to_string(),
+                        helix_client_clone.clone(),
+                        StreamOnlineV1::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "stream.offline",
-                Box::new(|| {
+                })
+            }),
+            ("stream.offline", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "stream.offline",
-                        &helix_client,
-                        StreamOfflineV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "stream.offline".to_string(),
+                        helix_client_clone.clone(),
+                        StreamOfflineV1::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
+                })
+            }),
             // Channel events
-            (
-                "channel.update",
-                Box::new(|| {
+            ("channel.update", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.update",
-                        &helix_client,
-                        ChannelUpdateV2::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.update".to_string(),
+                        helix_client_clone.clone(),
+                        ChannelUpdateV2::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.follow",
-                Box::new(|| {
+                })
+            }),
+            ("channel.follow", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.follow",
-                        &helix_client,
-                        ChannelFollowV2::new(broadcaster.clone(), broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.follow".to_string(),
+                        helix_client_clone,
+                        ChannelFollowV2::new(broadcaster_clone.clone(), broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.subscribe",
-                Box::new(|| {
+                })
+            }),
+            ("channel.subscribe", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.subscribe",
-                        &helix_client,
-                        ChannelSubscribeV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.subscribe".to_string(),
+                        helix_client_clone,
+                        ChannelSubscribeV1::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.subscription.end",
-                Box::new(|| {
+                })
+            }),
+            ("channel.subscription.end", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.subscription.end",
-                        &helix_client,
-                        ChannelSubscriptionEndV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.subscription.end".to_string(),
+                        helix_client_clone,
+                        ChannelSubscriptionEndV1::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.subscription.gift",
-                Box::new(|| {
+                })
+            }),
+            ("channel.subscription.gift", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.subscription.gift",
-                        &helix_client,
-                        ChannelSubscriptionGiftV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.subscription.gift".to_string(),
+                        helix_client_clone,
+                        ChannelSubscriptionGiftV1::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.subscription.message",
-                Box::new(|| {
+                })
+            }),
+            ("channel.subscription.message", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.subscription.message",
-                        &helix_client,
-                        ChannelSubscriptionMessageV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.subscription.message".to_string(),
+                        helix_client_clone,
+                        ChannelSubscriptionMessageV1::broadcaster_user_id(
+                            broadcaster_clone.clone(),
+                        ),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.cheer",
-                Box::new(|| {
+                })
+            }),
+            ("channel.cheer", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.cheer",
-                        &helix_client,
-                        ChannelCheerV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.cheer".to_string(),
+                        helix_client_clone,
+                        ChannelCheerV1::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.raid",
-                Box::new(|| {
+                })
+            }),
+            ("channel.raid", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.raid",
-                        &helix_client,
-                        ChannelRaidV1::to_broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.raid".to_string(),
+                        helix_client_clone,
+                        ChannelRaidV1::to_broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.ban",
-                Box::new(|| {
+                })
+            }),
+            ("channel.ban", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.ban",
-                        &helix_client,
-                        ChannelBanV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.ban".to_string(),
+                        helix_client_clone,
+                        ChannelBanV1::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.unban",
-                Box::new(|| {
+                })
+            }),
+            ("channel.unban", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.unban",
-                        &helix_client,
-                        ChannelUnbanV1::broadcaster_user_id(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.unban".to_string(),
+                        helix_client_clone,
+                        ChannelUnbanV1::broadcaster_user_id(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.moderator.add",
-                Box::new(|| {
+                })
+            }),
+            ("channel.moderator.add", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.moderator.add",
-                        &helix_client,
-                        ChannelModeratorAddV1::new(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.moderator.add".to_string(),
+                        helix_client_clone,
+                        ChannelModeratorAddV1::new(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
-            (
-                "channel.moderator.remove",
-                Box::new(|| {
+                })
+            }),
+            ("channel.moderator.remove", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     Box::pin(create_sub(
-                        "channel.moderator.remove",
-                        &helix_client,
-                        ChannelModeratorRemoveV1::new(broadcaster.clone()),
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        "channel.moderator.remove".to_string(),
+                        helix_client_clone,
+                        ChannelModeratorRemoveV1::new(broadcaster_clone.clone()),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
+                })
+            }),
             // Chat message event
-            (
-                "channel.chat.message",
-                Box::new(|| {
+            ("channel.chat.message", {
+                // Clone all values to be owned by the closure
+                let helix_client_clone = helix_client.clone();
+                let broadcaster_clone = broadcaster.clone();
+                let transport_clone = transport.clone();
+                let token_clone = token.clone();
+                let success_count_clone = success_count.clone();
+
+                Box::new(move || {
                     let chat_condition = ChannelChatMessageV1::new(
-                        broadcaster.clone(),
-                        broadcaster.clone(), // Using broadcaster ID for chatter too to match any user
+                        broadcaster_clone.clone(),
+                        broadcaster_clone.clone(), // Using broadcaster ID for chatter too to match any user
                     );
                     Box::pin(create_sub(
-                        "channel.chat.message",
-                        &helix_client,
+                        "channel.chat.message".to_string(),
+                        helix_client_clone,
                         chat_condition,
-                        &transport,
-                        token,
-                        success_count.clone(),
+                        transport_clone.clone(),
+                        token_clone.clone(),
+                        success_count_clone.clone(),
                     ))
-                }),
-            ),
+                })
+            }),
         ];
 
         // Create subscriptions for all event types

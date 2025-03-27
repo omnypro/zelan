@@ -16,49 +16,51 @@ where
     T: Send,
 {
     // Inner recursive function for retry logic
-    async fn try_operation<T, E, F>(
-        operation: &F,
+    fn try_operation<'a, T, E, F>(
+        operation: &'a F,
         attempt: usize,
         max_attempts: usize,
-        log_context: &str,
-    ) -> Result<T, E>
+        log_context: &'a str,
+    ) -> futures::future::BoxFuture<'a, Result<T, E>>
     where
         F: Fn() -> futures::future::BoxFuture<'static, Result<T, E>> + Send + Sync,
         E: Display + Send,
         T: Send,
     {
-        // Try the operation
-        match operation().await {
-            // Success case - log if retried and return result
-            Ok(value) => {
-                if attempt > 1 {
-                    debug!("{} succeeded after {} attempts", log_context, attempt);
+        Box::pin(async move {
+            // Try the operation
+            match operation().await {
+                // Success case - log if retried and return result
+                Ok(value) => {
+                    if attempt > 1 {
+                        debug!("{} succeeded after {} attempts", log_context, attempt);
+                    }
+                    Ok(value)
                 }
-                Ok(value)
-            }
 
-            // Error case - either retry or return error
-            Err(e) => {
-                // If we've reached max attempts, log and return error
-                if attempt >= max_attempts {
-                    error!("{} failed after {} attempts: {}", log_context, attempt, e);
-                    Err(e)
-                } else {
-                    // Calculate exponential backoff with a cap
-                    let delay = std::cmp::min(100 * 2u64.pow(attempt as u32), 5000);
-                    warn!(
-                        "{} failed (attempt {}/{}): {}",
-                        log_context, attempt, max_attempts, e
-                    );
+                // Error case - either retry or return error
+                Err(e) => {
+                    // If we've reached max attempts, log and return error
+                    if attempt >= max_attempts {
+                        error!("{} failed after {} attempts: {}", log_context, attempt, e);
+                        Err(e)
+                    } else {
+                        // Calculate exponential backoff with a cap
+                        let delay = std::cmp::min(100 * 2u64.pow(attempt as u32), 5000);
+                        warn!(
+                            "{} failed (attempt {}/{}): {}",
+                            log_context, attempt, max_attempts, e
+                        );
 
-                    // Wait for backoff period
-                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                        // Wait for backoff period
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
 
-                    // Recursive call for next attempt
-                    try_operation(operation, attempt + 1, max_attempts, log_context).await
+                        // Recursive call for next attempt
+                        try_operation(operation, attempt + 1, max_attempts, log_context).await
+                    }
                 }
             }
-        }
+        })
     }
 
     // Start with first attempt
@@ -80,57 +82,59 @@ where
     T: Send,
 {
     // Inner recursive function for retry logic
-    async fn try_operation_with_backoff<T, E, F, B>(
-        operation: &F,
-        backoff_fn: &B,
+    fn try_operation_with_backoff<'a, T, E, F, B>(
+        operation: &'a F,
+        backoff_fn: &'a B,
         attempt: usize,
         max_attempts: usize,
-        log_context: &str,
-    ) -> Result<T, E>
+        log_context: &'a str,
+    ) -> futures::future::BoxFuture<'a, Result<T, E>>
     where
         F: Fn() -> futures::future::BoxFuture<'static, Result<T, E>> + Send + Sync,
         E: Display + Send,
         B: Fn(usize) -> Duration + Send + Sync,
         T: Send,
     {
-        match operation().await {
-            // Success case - log if retried and return result
-            Ok(value) => {
-                if attempt > 1 {
-                    debug!("{} succeeded after {} attempts", log_context, attempt);
+        Box::pin(async move {
+            match operation().await {
+                // Success case - log if retried and return result
+                Ok(value) => {
+                    if attempt > 1 {
+                        debug!("{} succeeded after {} attempts", log_context, attempt);
+                    }
+                    Ok(value)
                 }
-                Ok(value)
-            }
 
-            // Error case - either retry or return error
-            Err(e) => {
-                // If we've reached max attempts, log and return error
-                if attempt >= max_attempts {
-                    error!("{} failed after {} attempts: {}", log_context, attempt, e);
-                    Err(e)
-                } else {
-                    // Use the provided backoff function
-                    let delay = backoff_fn(attempt);
-                    warn!(
-                        "{} failed (attempt {}/{}): {}. Retrying in {:?}",
-                        log_context, attempt, max_attempts, e, delay
-                    );
+                // Error case - either retry or return error
+                Err(e) => {
+                    // If we've reached max attempts, log and return error
+                    if attempt >= max_attempts {
+                        error!("{} failed after {} attempts: {}", log_context, attempt, e);
+                        Err(e)
+                    } else {
+                        // Use the provided backoff function
+                        let delay = backoff_fn(attempt);
+                        warn!(
+                            "{} failed (attempt {}/{}): {}. Retrying in {:?}",
+                            log_context, attempt, max_attempts, e, delay
+                        );
 
-                    // Wait for backoff period
-                    tokio::time::sleep(delay).await;
+                        // Wait for backoff period
+                        tokio::time::sleep(delay).await;
 
-                    // Recursive call for next attempt
-                    try_operation_with_backoff(
-                        operation,
-                        backoff_fn,
-                        attempt + 1,
-                        max_attempts,
-                        log_context,
-                    )
-                    .await
+                        // Recursive call for next attempt
+                        try_operation_with_backoff(
+                            operation,
+                            backoff_fn,
+                            attempt + 1,
+                            max_attempts,
+                            log_context,
+                        )
+                        .await
+                    }
                 }
             }
-        }
+        })
     }
 
     // Start with first attempt
