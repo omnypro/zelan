@@ -2,16 +2,15 @@ use crate::{
     adapters::base::{BaseAdapter, ServiceHelperImpl},
     adapters::common::{AdapterError, TraceHelper},
     auth::token_manager::{TokenData, TokenManager},
-    recovery::{AdapterRecovery, RecoveryManager},
+    recovery::RecoveryManager,
     EventBus, ServiceAdapter, StreamEvent,
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::HashMap, env, sync::Arc};
+use std::{env, sync::Arc};
 use tauri::async_runtime::RwLock;
-use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 use twitch_api::helix::{channels::ChannelInformation, streams::Stream};
@@ -39,10 +38,6 @@ fn get_client_id() -> Result<String, AdapterError> {
 
 /// Default poll interval in milliseconds
 const DEFAULT_POLL_INTERVAL_MS: u64 = 30000; // 30 seconds
-/// Default device code polling interval in milliseconds
-const DEVICE_CODE_POLLING_MS: u64 = 5000; // 5 seconds
-/// Device code polling maximum duration in seconds
-const DEVICE_CODE_MAX_POLL_DURATION_SECS: u64 = 1800; // 30 minutes
 
 /// Configuration for the Twitch adapter
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -515,7 +510,7 @@ impl TwitchAdapter {
                     }
                     AuthEvent::TokenRefreshDetails {
                         expires_in,
-                        payload,
+                        ..
                     } => {
                         info!("Token refreshed, expires in {} seconds", expires_in);
                         // Token manager will handle token storage
@@ -528,7 +523,7 @@ impl TwitchAdapter {
             .map_err(|e| AdapterError::auth(format!("Failed to register auth callback: {}", e)))?;
 
         // Start device auth flow
-        let device_code = self
+        let _device_code = self
             .auth_manager
             .start_device_auth(vec![])
             .await
@@ -690,6 +685,9 @@ impl TwitchAdapter {
     async fn setup_recovery(&self) -> Result<(), AdapterError> {
         info!("Setting up recovery for Twitch adapter");
 
+        // For now, recovery is disabled until we fix the AdapterRecovery trait implementation
+        // When re-implementing, use this commented out code as a reference
+        /*
         // Create recovery data generator closure
         let auth_manager = self.auth_manager.clone();
         let recovery_data_generator = Box::new(move || {
@@ -720,24 +718,7 @@ impl TwitchAdapter {
                 }
             })
         });
-
-        // Register for recovery
-        let base_id = self.base.id();
-        // For now, skip recovery registration until we fix the AdapterRecovery trait
-        // let recovery = AdapterRecovery::new(
-        //     self.adapter_type(),
-        //     &base_id,
-        //     recovery_data_generator,
-        // );
-
-        // Access the recovery manager through the service helper and register
-        // For now, skip the recovery registration
-        // self.service_helper
-        //     .register_for_recovery(recovery)
-        //     .await
-        //     .map_err(|e| {
-        //         AdapterError::recovery(format!("Failed to register for recovery: {}", e))
-        //     })?;
+        */
 
         Ok(())
     }

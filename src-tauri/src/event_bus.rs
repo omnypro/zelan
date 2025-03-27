@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tracing::error;
-use tracing::{debug, info, trace, warn};
+use tracing::{info, trace, warn};
 
 use crate::flow::TraceContext;
 use crate::ZelanResult;

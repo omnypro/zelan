@@ -95,18 +95,18 @@ impl<T: Clone + Send + Sync + 'static> EventBase for T {
 /// A trait for event publishers
 pub trait EventPublisher<T: Clone + Send + Sync + 'static> {
     /// Publish an event to all subscribers
-    async fn publish(&self, event: T) -> Result<usize, EventRegistryError>;
+    fn publish(&self, event: T) -> impl std::future::Future<Output = Result<usize, EventRegistryError>> + Send;
 }
 
 /// A trait for event subscribers
 pub trait EventSubscriber<T: Clone + Send + Sync + 'static> {
     /// Subscribe to events with a callback
-    async fn subscribe<F>(&self, callback: F) -> SubscriptionId
+    fn subscribe<F>(&self, callback: F) -> impl std::future::Future<Output = SubscriptionId> + Send
     where
         F: Fn(T) -> Result<(), EventRegistryError> + Send + Sync + 'static;
 
     /// Unsubscribe from events
-    async fn unsubscribe(&self, id: SubscriptionId) -> bool;
+    fn unsubscribe(&self, id: SubscriptionId) -> impl std::future::Future<Output = bool> + Send;
 }
 
 /// Identifier for event subscriptions
@@ -116,12 +116,6 @@ pub type SubscriptionId = Uuid;
 trait CallbackBase: Send + Sync {
     /// Call this callback with a type-erased event
     fn call(&self, event: &dyn EventBase) -> Result<(), EventRegistryError>;
-
-    /// Get the expected event type for this callback
-    fn expected_type_id(&self) -> TypeId;
-
-    /// Get the expected type name for debugging
-    fn expected_type_name(&self) -> &'static str;
 }
 
 /// A concrete callback for a specific event type
@@ -160,14 +154,6 @@ impl<T: Clone + Send + Sync + 'static> CallbackBase for Callback<T> {
             .flatten()
             .ok_or_else(type_mismatch_error)
             .and_then(|typed_event| (self.func)(typed_event.clone()))
-    }
-
-    fn expected_type_id(&self) -> TypeId {
-        TypeId::of::<T>()
-    }
-
-    fn expected_type_name(&self) -> &'static str {
-        std::any::type_name::<T>()
     }
 }
 
@@ -209,7 +195,8 @@ impl<T: Clone + Send + Sync + 'static> EventTypeRegistry<T> {
 }
 
 impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T> {
-    async fn publish(&self, event: T) -> Result<usize, EventRegistryError> {
+    fn publish(&self, event: T) -> impl std::future::Future<Output = Result<usize, EventRegistryError>> + Send {
+        async move {
         let event_ref = &event as &dyn EventBase;
 
         // Get all callbacks
@@ -279,14 +266,16 @@ impl<T: Clone + Send + Sync + 'static> EventPublisher<T> for EventTypeRegistry<T
 
         // Return success count regardless of errors
         Ok(success_count)
+        }
     }
 }
 
 impl<T: Clone + Send + Sync + 'static> EventSubscriber<T> for EventTypeRegistry<T> {
-    async fn subscribe<F>(&self, callback: F) -> SubscriptionId
+    fn subscribe<F>(&self, callback: F) -> impl std::future::Future<Output = SubscriptionId> + Send
     where
         F: Fn(T) -> Result<(), EventRegistryError> + Send + Sync + 'static,
     {
+        async move {
         let id = Uuid::new_v4();
         let callback = Arc::new(Callback::new(callback));
 
@@ -303,9 +292,11 @@ impl<T: Clone + Send + Sync + 'static> EventSubscriber<T> for EventTypeRegistry<
         );
 
         id
+        }
     }
 
-    async fn unsubscribe(&self, id: SubscriptionId) -> bool {
+    fn unsubscribe(&self, id: SubscriptionId) -> impl std::future::Future<Output = bool> + Send {
+        async move {
         let mut callbacks = self.callbacks.write().await;
         let removed = callbacks.remove(&id).is_some();
 
@@ -324,6 +315,7 @@ impl<T: Clone + Send + Sync + 'static> EventSubscriber<T> for EventTypeRegistry<
         }
 
         removed
+        }
     }
 }
 
@@ -409,7 +401,7 @@ impl EventRegistry {
         // Enhanced functional approach with parallelized future resolution
         let stats_futures: Vec<_> = registries
             .iter()
-            .map(|(type_id, registry)| {
+            .map(|(type_id, _)| {
                 // Format type name and create a future that might resolve with subscriber count
                 let type_name = format!("{:?}", type_id);
                 async move {

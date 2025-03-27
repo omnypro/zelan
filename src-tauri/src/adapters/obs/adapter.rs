@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tauri::async_runtime::{Mutex, RwLock};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, info, instrument, trace, warn, Instrument};
+use tracing::{debug, error, info, trace, warn};
 
 // Import the callback registry for OBS events
 use super::callback::{ObsCallbackRegistry, ObsEvent};

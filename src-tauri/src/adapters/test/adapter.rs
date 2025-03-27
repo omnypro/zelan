@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::async_runtime::RwLock;
 use tokio::time::sleep;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error};
 
 // Import the callback registry for test events
 use super::callback::{TestCallbackRegistry, TestEvent};
