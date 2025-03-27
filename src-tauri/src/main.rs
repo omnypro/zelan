@@ -11,7 +11,7 @@ use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::Subscrib
 use zelan_lib::{plugin, Config, StreamService};
 
 #[cfg(target_os = "macos")]
-use window_vibrancy::{apply_vibrancy,  NSVisualEffectMaterial};
+use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
 /// Initialize all stores used by the application
 fn initialize_stores<R: Runtime>(app: &AppHandle<R>) -> Result<(Arc<Store<R>>, Arc<Store<R>>)> {
@@ -46,7 +46,7 @@ fn initialize_stores<R: Runtime>(app: &AppHandle<R>) -> Result<(Arc<Store<R>>, A
 
         // Create a default configuration
         let default_config = Config {
-            websocket: zelan_lib::WebSocketConfig { 
+            websocket: zelan_lib::WebSocketConfig {
                 port: 9000,
                 max_connections: zelan_lib::default_max_connections(),
                 timeout_seconds: zelan_lib::default_timeout(),
@@ -98,7 +98,13 @@ fn setup_decorations(app: &mut App) {
     let window = app.get_webview_window("main").unwrap();
 
     #[cfg(target_os = "macos")]
-    apply_vibrancy(&window, NSVisualEffectMaterial::WindowBackground, None, Some(8.0)).expect("Unsupported platform! 'apply vibrancy' is only supported on macOS");
+    apply_vibrancy(
+        &window,
+        NSVisualEffectMaterial::WindowBackground,
+        None,
+        Some(8.0),
+    )
+    .expect("Unsupported platform! 'apply vibrancy' is only supported on macOS");
 }
 
 fn main() {

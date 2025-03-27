@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use tracing::{debug, info, trace, warn};
 use tracing::error;
+use tracing::{debug, info, trace, warn};
 
 use crate::flow::TraceContext;
-use crate::{ZelanResult};
+use crate::ZelanResult;
 
 /// Standardized event structure for all events flowing through the system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,9 +54,14 @@ impl StreamEvent {
             trace_context: None,
         }
     }
-    
+
     /// Create a new event with trace context
-    pub fn new_with_trace(source: &str, event_type: &str, payload: serde_json::Value, trace_context: TraceContext) -> Self {
+    pub fn new_with_trace(
+        source: &str,
+        event_type: &str,
+        payload: serde_json::Value,
+        trace_context: TraceContext,
+    ) -> Self {
         Self {
             source: source.to_string(),
             event_type: event_type.to_string(),
@@ -82,17 +87,17 @@ impl StreamEvent {
     pub fn payload(&self) -> &serde_json::Value {
         &self.payload
     }
-    
+
     /// Get the trace context if available
     pub fn trace_context(&self) -> Option<&TraceContext> {
         self.trace_context.as_ref()
     }
-    
+
     /// Get a mutable reference to the trace context
     pub fn trace_context_mut(&mut self) -> Option<&mut TraceContext> {
         self.trace_context.as_mut()
     }
-    
+
     /// Add trace context to an event
     pub fn with_trace_context(mut self, trace_context: TraceContext) -> Self {
         self.trace_context = Some(trace_context);
@@ -157,16 +162,17 @@ impl EventBus {
         // Cache details for statistics
         let source = event.source.clone();
         let event_type = event.event_type.clone();
-        
+
         debug!(
             source = %source,
             event_type = %event_type,
             "Publishing event to bus"
         );
-        
+
         // If the event has a trace context, add a span for the EventBus
         if let Some(trace_context) = event.trace_context_mut() {
-            trace_context.add_span("publish", "EventBus")
+            trace_context
+                .add_span("publish", "EventBus")
                 .context(Some(serde_json::json!({
                     "bus_capacity": self.capacity,
                     "subscribers": self.subscriber_count()
@@ -227,7 +233,7 @@ impl EventBus {
     pub fn capacity(&self) -> usize {
         self.capacity
     }
-    
+
     /// Get the current number of subscribers
     pub fn subscriber_count(&self) -> usize {
         self.sender.receiver_count()

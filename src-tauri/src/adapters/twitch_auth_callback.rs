@@ -1,13 +1,13 @@
 //! Improved callback system for Twitch authentication
-//! 
+//!
 //! This module provides a better way to handle auth callbacks using the centralized
 //! callback system.
 
 use anyhow::Result;
 use tracing::{debug, error};
 
-use crate::callback_system::CallbackRegistry;
 use super::twitch_auth::AuthEvent;
+use crate::callback_system::CallbackRegistry;
 
 /// Dedicated registry for auth callbacks with improved callback management
 #[derive(Clone)]
@@ -23,7 +23,7 @@ impl TwitchAuthCallbackRegistry {
             registry: CallbackRegistry::with_group("twitch_auth"),
         }
     }
-    
+
     /// Register an auth callback function
     pub async fn register<F>(&self, callback: F) -> crate::callback_system::CallbackId
     where
@@ -33,14 +33,14 @@ impl TwitchAuthCallbackRegistry {
         debug!(callback_id = %id, "Registered Twitch auth callback");
         id
     }
-    
+
     /// Trigger all registered callbacks with the provided auth event
     pub async fn trigger(&self, event: AuthEvent) -> Result<usize> {
         debug!(
             event_type = %event.event_type(),
             "Triggering Twitch auth callbacks"
         );
-        
+
         match self.registry.trigger(event.clone()).await {
             Ok(count) => {
                 debug!(
@@ -49,7 +49,7 @@ impl TwitchAuthCallbackRegistry {
                     "Successfully triggered Twitch auth callbacks"
                 );
                 Ok(count)
-            },
+            }
             Err(e) => {
                 error!(
                     event_type = %event.event_type(),
@@ -60,7 +60,7 @@ impl TwitchAuthCallbackRegistry {
             }
         }
     }
-    
+
     /// Get the number of registered callbacks
     pub async fn count(&self) -> usize {
         self.registry.count().await

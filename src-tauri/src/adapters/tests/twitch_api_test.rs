@@ -1,16 +1,16 @@
 //! Tests for the Twitch API client
-//! 
+//!
 //! This module contains tests for Twitch API functionality including
 //! channel and stream information fetching.
 
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
 use twitch_api::types::{UserId, UserName};
-use twitch_oauth2::{ClientId, AccessToken, UserToken};
+use twitch_oauth2::{AccessToken, ClientId, UserToken};
 
-use crate::adapters::twitch_api::TwitchApiClient;
+use super::test_helpers::{cleanup_twitch_env_vars, setup_twitch_env_vars};
 use crate::adapters::http_client::mock::MockHttpClient;
-use super::test_helpers::{setup_twitch_env_vars, cleanup_twitch_env_vars};
+use crate::adapters::twitch_api::TwitchApiClient;
 
 // Set up environment variables for all tests
 fn setup_env_vars() {
@@ -59,11 +59,11 @@ async fn test_fetch_channel_info() -> Result<()> {
 
     // Create a fake client_id for testing using our helper
     let client_id = get_test_client_id();
-    
+
     // Create fake credentials for testing - in real use cases these would come from the API
     let login = UserName::new("testuser".to_string());
     let user_id = UserId::new("123456".to_string());
-    
+
     // For tests, we can use from_existing_unchecked
     // IMPORTANT: This is test-only code, don't use this in production!
     let token = UserToken::from_existing_unchecked(
@@ -78,7 +78,9 @@ async fn test_fetch_channel_info() -> Result<()> {
     );
 
     // Call the method we're testing with the direct client_id parameter
-    let channel_info = api_client.fetch_channel_info_with_client_id(&token, "123456", client_id).await?;
+    let channel_info = api_client
+        .fetch_channel_info_with_client_id(&token, "123456", client_id)
+        .await?;
 
     // Verify we got the expected result
     assert!(channel_info.is_some());
@@ -138,7 +140,7 @@ async fn test_fetch_stream_info() -> Result<()> {
     // Create fake credentials for testing - in real use cases these would come from the API
     let login = UserName::new("testuser".to_string());
     let user_id = UserId::new("123456".to_string());
-    
+
     // For tests, we can use from_existing_unchecked
     // IMPORTANT: This is test-only code, don't use this in production!
     let token = UserToken::from_existing_unchecked(

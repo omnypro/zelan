@@ -16,7 +16,7 @@ pub mod twitch_eventsub;
 pub mod tests;
 
 pub use base::{AdapterConfig, BaseAdapter};
-pub use common::{AdapterError, RetryOptions, BackoffStrategy};
+pub use common::{AdapterError, BackoffStrategy, RetryOptions};
 pub use http_client::{HttpClient, ReqwestHttpClient};
 pub use obs::ObsAdapter;
 pub use test::TestAdapter;

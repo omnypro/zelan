@@ -1,19 +1,19 @@
 //! Tests for Twitch authentication functionality
-//! 
+//!
 //! This module contains tests for the Twitch auth process, including:
 //! - User token management
 //! - Device code flow
 //! - Token refresh and validation
 
-use super::test_helpers::{setup_twitch_env_vars, cleanup_twitch_env_vars};
+use super::test_helpers::{cleanup_twitch_env_vars, setup_twitch_env_vars};
 use crate::adapters::twitch_auth::{AuthEvent, TwitchAuthManager};
 
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
+use twitch_api::types::{Nickname, UserId};
 use twitch_oauth2::{
     id::DeviceCodeResponse, AccessToken, ClientId, RefreshToken, Scope, UserToken,
 };
-use twitch_api::types::{Nickname, UserId};
 
 // Mock struct to capture auth events
 struct AuthEventCapture {
@@ -82,7 +82,7 @@ async fn test_device_auth_state() {
 async fn test_token_refresh_mock_simulation() -> Result<()> {
     // Set up the environment variables for Twitch API
     setup_twitch_env_vars();
-    
+
     // Let's create a simple version of this test that's easier to debug
     // Instead of setting up complex token refresh scenarios, we'll directly test the
     // auth manager's ability to handle a mocked token refresh
@@ -90,33 +90,33 @@ async fn test_token_refresh_mock_simulation() -> Result<()> {
     // We don't need a mock HTTP client for this simplified test
     // since we're directly manipulating the token
 
-    // Since we know refresh_token_if_needed uses reqwest library directly, 
+    // Since we know refresh_token_if_needed uses reqwest library directly,
     // our MockHttpClient won't actually be used for the refresh
     // Instead, we'll create a very simple test that directly calls auth_manager methods
 
     // Create the auth manager
     let mut auth_manager = TwitchAuthManager::new("test_client_id".to_string());
-    
+
     // Create a test user token with a refresh token
     let access_token = AccessToken::new("old_access_token".to_string());
     let refresh_token = Some(RefreshToken::new("old_refresh_token".to_string()));
     let client_id = ClientId::new("test_client_id".to_string());
-    
+
     // Use a token that's already set up with necessary fields
     let token = UserToken::from_existing_unchecked(
         access_token,
         refresh_token,
         client_id.clone(), // Clone the client_id to avoid move
-        None, // client_secret
+        None,              // client_secret
         Nickname::new("test_user".to_string()),
         UserId::new("12345".to_string()),
         Some(vec![Scope::ChannelReadSubscriptions, Scope::UserReadEmail]),
         Some(std::time::Duration::from_secs(14400)), // Not expired
     );
-    
-    // Set the token directly 
+
+    // Set the token directly
     auth_manager.set_token(token.clone())?;
-    
+
     // Create event capture
     let event_capture = AuthEventCapture::new();
     let _ = auth_manager
@@ -125,31 +125,33 @@ async fn test_token_refresh_mock_simulation() -> Result<()> {
 
     // Verify we're initially authenticated
     assert!(auth_manager.is_authenticated().await);
-    
+
     // Instead of testing the actual refresh which uses reqwest,
     // let's simulate a token refresh by manually updating the token
-    
+
     // Create a "refreshed" token
     let new_access_token = AccessToken::new("new_access_token".to_string());
     let new_refresh_token = Some(RefreshToken::new("new_refresh_token".to_string()));
-    
+
     let refreshed_token = UserToken::from_existing_unchecked(
         new_access_token,
         new_refresh_token,
         client_id.clone(), // Clone the client_id to avoid move
-        None, // client_secret
+        None,              // client_secret
         Nickname::new("test_user".to_string()),
         UserId::new("12345".to_string()),
         Some(vec![Scope::ChannelReadSubscriptions, Scope::UserReadEmail]),
         Some(std::time::Duration::from_secs(14400)),
     );
-    
+
     // Set the refreshed token
     auth_manager.set_token(refreshed_token.clone())?;
-    
+
     // Manually trigger a token refreshed event
-    auth_manager.trigger_auth_event(AuthEvent::TokenRefreshed).await?;
-    
+    auth_manager
+        .trigger_auth_event(AuthEvent::TokenRefreshed)
+        .await?;
+
     // Verify the token was updated
     if let Some(current_token) = auth_manager.get_token().await {
         assert_eq!(
@@ -160,16 +162,22 @@ async fn test_token_refresh_mock_simulation() -> Result<()> {
     } else {
         panic!("No token after refresh!");
     }
-    
+
     // Check that a token refresh event was emitted
     let events = event_capture.get_events();
-    assert!(!events.is_empty(), "Should have captured at least one event");
-    
+    assert!(
+        !events.is_empty(),
+        "Should have captured at least one event"
+    );
+
     let refresh_events: Vec<&AuthEvent> = events
         .iter()
         .filter(|e| matches!(e, AuthEvent::TokenRefreshed))
         .collect();
-    assert!(!refresh_events.is_empty(), "Should have a token refresh event");
+    assert!(
+        !refresh_events.is_empty(),
+        "Should have a token refresh event"
+    );
 
     // Clean up
     cleanup_twitch_env_vars();

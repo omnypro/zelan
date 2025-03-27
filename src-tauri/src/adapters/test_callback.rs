@@ -1,5 +1,5 @@
 //! Callback system for Test adapter events
-//! 
+//!
 //! This module provides a structured way to handle test events using the centralized
 //! callback system.
 
@@ -66,7 +66,7 @@ impl TestCallbackRegistry {
             registry: CallbackRegistry::with_group("test_events"),
         }
     }
-    
+
     /// Register a test event callback function
     pub async fn register<F>(&self, callback: F) -> crate::callback_system::CallbackId
     where
@@ -76,14 +76,14 @@ impl TestCallbackRegistry {
         debug!(callback_id = %id, "Registered test event callback");
         id
     }
-    
+
     /// Trigger all registered callbacks with the provided test event
     pub async fn trigger(&self, event: TestEvent) -> Result<usize> {
         debug!(
             event_type = %event.event_type(),
             "Triggering test event callbacks"
         );
-        
+
         match self.registry.trigger(event.clone()).await {
             Ok(count) => {
                 debug!(
@@ -92,7 +92,7 @@ impl TestCallbackRegistry {
                     "Successfully triggered test event callbacks"
                 );
                 Ok(count)
-            },
+            }
             Err(e) => {
                 error!(
                     event_type = %event.event_type(),
@@ -103,7 +103,7 @@ impl TestCallbackRegistry {
             }
         }
     }
-    
+
     /// Get the number of registered callbacks
     pub async fn count(&self) -> usize {
         self.registry.count().await

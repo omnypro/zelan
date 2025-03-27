@@ -1,5 +1,5 @@
-//! Callback system for OBS events 
-//! 
+//! Callback system for OBS events
+//!
 //! This module provides a structured way to handle OBS event callbacks using the centralized
 //! callback system.
 
@@ -77,7 +77,7 @@ impl ObsCallbackRegistry {
             registry: CallbackRegistry::with_group("obs_events"),
         }
     }
-    
+
     /// Register an OBS event callback function
     pub async fn register<F>(&self, callback: F) -> crate::callback_system::CallbackId
     where
@@ -87,14 +87,14 @@ impl ObsCallbackRegistry {
         debug!(callback_id = %id, "Registered OBS event callback");
         id
     }
-    
+
     /// Trigger all registered callbacks with the provided OBS event
     pub async fn trigger(&self, event: ObsEvent) -> Result<usize> {
         debug!(
             event_type = %event.event_type(),
             "Triggering OBS event callbacks"
         );
-        
+
         match self.registry.trigger(event.clone()).await {
             Ok(count) => {
                 debug!(
@@ -103,7 +103,7 @@ impl ObsCallbackRegistry {
                     "Successfully triggered OBS event callbacks"
                 );
                 Ok(count)
-            },
+            }
             Err(e) => {
                 error!(
                     event_type = %event.event_type(),
@@ -114,7 +114,7 @@ impl ObsCallbackRegistry {
             }
         }
     }
-    
+
     /// Get the number of registered callbacks
     pub async fn count(&self) -> usize {
         self.registry.count().await

@@ -83,9 +83,7 @@ impl AdapterConfig for TestConfig {
     fn validate(&self) -> Result<()> {
         // Ensure interval is reasonable
         if self.interval_ms < 100 || self.interval_ms > 60000 {
-            return Err(AdapterError::config(
-                "Interval must be between 100ms and 60000ms"
-            ).into());
+            return Err(AdapterError::config("Interval must be between 100ms and 60000ms").into());
         }
 
         Ok(())
@@ -116,9 +114,12 @@ impl TestAdapter {
             callbacks: Arc::new(TestCallbackRegistry::new()),
         }
     }
-    
+
     /// Register a callback for test events
-    pub async fn register_test_callback<F>(&self, callback: F) -> Result<crate::callback_system::CallbackId>
+    pub async fn register_test_callback<F>(
+        &self,
+        callback: F,
+    ) -> Result<crate::callback_system::CallbackId>
     where
         F: Fn(TestEvent) -> Result<()> + Send + Sync + 'static,
     {
@@ -129,10 +130,11 @@ impl TestAdapter {
             Some(json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         let id = self.callbacks.register(callback).await;
-        
+
         // Record successful registration in trace
         TraceHelper::record_adapter_operation(
             "test",
@@ -141,8 +143,9 @@ impl TestAdapter {
                 "callback_id": id.to_string(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         info!(callback_id = %id, "Registered test event callback");
         Ok(id)
     }
@@ -152,17 +155,17 @@ impl TestAdapter {
     pub fn config_from_json(config_json: &Value) -> Result<TestConfig> {
         TestConfig::from_json(config_json)
     }
-    
+
     /// Get the current configuration
     pub async fn get_config(&self) -> TestConfig {
         self.config.read().await.clone()
     }
-    
+
     /// Trigger a test event (useful for testing)
     pub async fn trigger_event(&self, event: TestEvent) -> Result<()> {
         // Get event type before we move the event
         let event_type = event.event_type();
-        
+
         // Record the event trigger in trace
         TraceHelper::record_adapter_operation(
             "test",
@@ -171,8 +174,9 @@ impl TestAdapter {
                 "event_type": event_type,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         // Set up retry options for triggering
         let trigger_retry_options = RetryOptions::new(
             2, // Max attempts
@@ -182,13 +186,13 @@ impl TestAdapter {
             },
             true, // Add jitter
         );
-        
+
         // Implement direct sequential retry logic
         let mut attempt = 0;
         let mut last_error: Option<AdapterError> = None;
         let mut success = false;
         let mut callback_count = 0;
-        
+
         // Record the beginning of retry attempts in trace
         TraceHelper::record_adapter_operation(
             "test",
@@ -198,11 +202,12 @@ impl TestAdapter {
                 "max_attempts": trigger_retry_options.max_attempts,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         while attempt < trigger_retry_options.max_attempts {
             attempt += 1;
-            
+
             // Record the current attempt in trace
             TraceHelper::record_adapter_operation(
                 "test",
@@ -212,18 +217,19 @@ impl TestAdapter {
                     "event_type": event.event_type(),
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             // Attempt to trigger the event
             if attempt > 1 {
                 debug!(attempt, "Retrying test event trigger");
             }
-            
+
             match self.callbacks.trigger(event.clone()).await {
                 Ok(count) => {
                     success = true;
                     callback_count = count;
-                    
+
                     // Record successful trigger in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -234,11 +240,12 @@ impl TestAdapter {
                             "event_type": event.event_type(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     debug!(callbacks = count, "Triggered test event successfully");
                     break;
-                },
+                }
                 Err(e) => {
                     // Convert to AdapterError
                     let error = AdapterError::from_anyhow_error(
@@ -247,7 +254,7 @@ impl TestAdapter {
                         e,
                     );
                     last_error = Some(error.clone());
-                    
+
                     // Record failure in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -258,8 +265,9 @@ impl TestAdapter {
                             "event_type": event.event_type(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // If not the last attempt, calculate delay and retry
                     if attempt < trigger_retry_options.max_attempts {
                         let delay = trigger_retry_options.get_delay(attempt);
@@ -280,18 +288,18 @@ impl TestAdapter {
                 }
             }
         }
-        
+
         // Determine result based on success flag
         let result = if success {
             Ok(callback_count)
         } else {
             Err(last_error.unwrap())
         };
-        
+
         match result {
             Ok(count) => {
                 debug!(callbacks = count, "Triggered test event successfully");
-                
+
                 // Record successful event trigger in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -301,13 +309,14 @@ impl TestAdapter {
                         "callbacks_triggered": count,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 Ok(())
-            },
+            }
             Err(e) => {
                 error!(error = %e, "Failed to trigger test event");
-                
+
                 // Record event trigger failure in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -317,8 +326,9 @@ impl TestAdapter {
                         "error": e.to_string(),
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 Err(e.into())
             }
         }
@@ -337,15 +347,16 @@ impl TestAdapter {
             Some(json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         // The callbacks registry is already wrapped in Arc, so we'll just clone it when needed
-        
+
         // Force a log entry to confirm execution
         eprintln!("TEST ADAPTER: Starting test event generator");
         info!("Starting test event generator");
         let mut counter = 0;
-        
+
         // Adding multiple extra subscribers directly to make sure events have receivers
         // This ensures that there are always subscribers listening
         let receivers = vec![
@@ -353,8 +364,11 @@ impl TestAdapter {
             self.base.event_bus().subscribe(),
             self.base.event_bus().subscribe(),
         ];
-        eprintln!("TEST ADAPTER: Added {} direct subscribers to event bus", receivers.len());
-        
+        eprintln!(
+            "TEST ADAPTER: Added {} direct subscribers to event bus",
+            receivers.len()
+        );
+
         // Small initial delay to ensure full initialization
         sleep(Duration::from_millis(50)).await;
 
@@ -380,17 +394,17 @@ impl TestAdapter {
                 "message": message.clone(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
-            
+
             // Use direct sequential retry logic for publishing to event bus
             let event_type = "test.initial";
             let payload_clone = payload.clone();
-            
+
             // Implement retry logic
             let mut attempt = 0;
             let mut last_error: Option<AdapterError> = None;
             let mut success = false;
             let mut receivers_count = 0;
-            
+
             // Record the beginning of retry attempts in trace
             TraceHelper::record_adapter_operation(
                 "test",
@@ -400,11 +414,12 @@ impl TestAdapter {
                     "max_attempts": publish_retry_options.max_attempts,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             while attempt < publish_retry_options.max_attempts {
                 attempt += 1;
-                
+
                 // Record the current attempt in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -414,17 +429,22 @@ impl TestAdapter {
                         "counter": i,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 if attempt > 1 {
                     debug!(attempt, "Retrying initial event publication");
                 }
-                
-                match self.base.publish_event(event_type, payload_clone.clone()).await {
+
+                match self
+                    .base
+                    .publish_event(event_type, payload_clone.clone())
+                    .await
+                {
                     Ok(count) => {
                         success = true;
                         receivers_count = count;
-                        
+
                         // Record successful publication in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -435,10 +455,11 @@ impl TestAdapter {
                                 "counter": i,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                        
+                        )
+                        .await;
+
                         break;
-                    },
+                    }
                     Err(e) => {
                         // Convert to AdapterError
                         let error = AdapterError::from_anyhow_error(
@@ -447,7 +468,7 @@ impl TestAdapter {
                             e,
                         );
                         last_error = Some(error.clone());
-                        
+
                         // Record failure in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -458,8 +479,9 @@ impl TestAdapter {
                                 "counter": i,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                        
+                        )
+                        .await;
+
                         // If not the last attempt, calculate delay and retry
                         if attempt < publish_retry_options.max_attempts {
                             let delay = publish_retry_options.get_delay(attempt);
@@ -480,18 +502,21 @@ impl TestAdapter {
                     }
                 }
             }
-            
+
             // Determine the final result
             let publish_result = if success {
                 Ok(receivers_count)
             } else {
                 Err(last_error.unwrap())
             };
-            
+
             match publish_result {
                 Ok(receivers) => {
-                    eprintln!("TEST ADAPTER: Published initial event #{} to {} receivers", i, receivers);
-                    
+                    eprintln!(
+                        "TEST ADAPTER: Published initial event #{} to {} receivers",
+                        i, receivers
+                    );
+
                     // Record successful event publication in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -501,12 +526,16 @@ impl TestAdapter {
                             "receivers": receivers,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                },
+                    )
+                    .await;
+                }
                 Err(e) => {
-                    eprintln!("TEST ADAPTER: Failed to publish initial event #{}: {}", i, e);
+                    eprintln!(
+                        "TEST ADAPTER: Failed to publish initial event #{}: {}",
+                        i, e
+                    );
                     error!(error = %e, "Failed to publish initial event");
-                    
+
                     // Record event publication failure in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -516,24 +545,25 @@ impl TestAdapter {
                             "error": e.to_string(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
+                    )
+                    .await;
                 }
             }
-            
+
             // Also trigger callbacks using direct sequential retry logic
             let callback_event = TestEvent::Initial {
                 counter: i,
                 message: message.clone(),
                 data: payload,
             };
-            
+
             // Implement direct sequential retry logic for callbacks
             let mut attempt = 0;
             let mut last_error: Option<AdapterError> = None;
             let mut success = false;
             let mut callbacks_triggered = 0;
             let callbacks_clone = self.callbacks.clone();
-            
+
             // Record the beginning of callback retry attempts in trace
             TraceHelper::record_adapter_operation(
                 "test",
@@ -543,11 +573,12 @@ impl TestAdapter {
                     "max_attempts": publish_retry_options.max_attempts,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             while attempt < publish_retry_options.max_attempts {
                 attempt += 1;
-                
+
                 // Record the current attempt in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -557,17 +588,18 @@ impl TestAdapter {
                         "counter": i,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 if attempt > 1 {
                     debug!(attempt, "Retrying initial callback trigger");
                 }
-                
+
                 match callbacks_clone.trigger(callback_event.clone()).await {
                     Ok(count) => {
                         success = true;
                         callbacks_triggered = count;
-                        
+
                         // Record successful trigger in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -578,10 +610,11 @@ impl TestAdapter {
                                 "counter": i,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                        
+                        )
+                        .await;
+
                         break;
-                    },
+                    }
                     Err(e) => {
                         // Convert to AdapterError
                         let error = AdapterError::from_anyhow_error(
@@ -590,7 +623,7 @@ impl TestAdapter {
                             e,
                         );
                         last_error = Some(error.clone());
-                        
+
                         // Record failure in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -601,8 +634,9 @@ impl TestAdapter {
                                 "counter": i,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                        
+                        )
+                        .await;
+
                         // If not the last attempt, calculate delay and retry
                         if attempt < publish_retry_options.max_attempts {
                             let delay = publish_retry_options.get_delay(attempt);
@@ -623,18 +657,22 @@ impl TestAdapter {
                     }
                 }
             }
-            
+
             // Determine the final result
             let trigger_result = if success {
                 Ok(callbacks_triggered)
             } else {
                 Err(last_error.unwrap())
             };
-            
+
             match trigger_result {
                 Ok(count) => {
-                    debug!(counter = i, callbacks = count, "Triggered initial test event callbacks");
-                    
+                    debug!(
+                        counter = i,
+                        callbacks = count,
+                        "Triggered initial test event callbacks"
+                    );
+
                     // Record successful callback triggering in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -644,11 +682,12 @@ impl TestAdapter {
                             "callbacks_triggered": count,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                },
+                    )
+                    .await;
+                }
                 Err(e) => {
                     error!(error = %e, "Failed to trigger initial test event callbacks");
-                    
+
                     // Record callback triggering failure in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -658,10 +697,11 @@ impl TestAdapter {
                             "error": e.to_string(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
+                    )
+                    .await;
                 }
             }
-            
+
             // Small delay between initial events
             sleep(Duration::from_millis(10)).await;
         }
@@ -675,7 +715,7 @@ impl TestAdapter {
             if maybe_shutdown.is_ok() {
                 eprintln!("TEST ADAPTER: Received shutdown signal");
                 info!("Received shutdown signal for test event generator");
-                
+
                 // Record shutdown in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -685,19 +725,23 @@ impl TestAdapter {
                         "events_generated": counter,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 break;
             }
 
             // Check if we're still connected - with more logging
             let connected = self.base.is_connected();
-            eprintln!("TEST ADAPTER: Connection check: is_connected = {}", connected);
-            
+            eprintln!(
+                "TEST ADAPTER: Connection check: is_connected = {}",
+                connected
+            );
+
             if !connected {
                 eprintln!("TEST ADAPTER: No longer connected, stopping event generator");
                 info!("Test adapter no longer connected, stopping event generator");
-                
+
                 // Record disconnection in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -707,8 +751,9 @@ impl TestAdapter {
                         "events_generated": counter,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 break;
             }
 
@@ -728,13 +773,13 @@ impl TestAdapter {
             // Use direct sequential retry logic for standard event publishing
             let event_type = "test.event";
             let payload_clone = payload.clone();
-            
+
             // Implement direct sequential retry logic
             let mut attempt = 0;
             let mut last_error: Option<AdapterError> = None;
             let mut success = false;
             let mut receivers_count = 0;
-            
+
             // Record the beginning of retry attempts in trace
             TraceHelper::record_adapter_operation(
                 "test",
@@ -744,11 +789,12 @@ impl TestAdapter {
                     "max_attempts": publish_retry_options.max_attempts,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             while attempt < publish_retry_options.max_attempts {
                 attempt += 1;
-                
+
                 // Record the current attempt in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -758,17 +804,22 @@ impl TestAdapter {
                         "counter": counter,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 if attempt > 1 {
                     debug!(attempt, counter, "Retrying standard event publication");
                 }
-                
-                match self.base.publish_event(event_type, payload_clone.clone()).await {
+
+                match self
+                    .base
+                    .publish_event(event_type, payload_clone.clone())
+                    .await
+                {
                     Ok(count) => {
                         success = true;
                         receivers_count = count;
-                        
+
                         // Record successful publication in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -779,10 +830,11 @@ impl TestAdapter {
                                 "counter": counter,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                        
+                        )
+                        .await;
+
                         break;
-                    },
+                    }
                     Err(e) => {
                         // Convert to AdapterError
                         let error = AdapterError::from_anyhow_error(
@@ -791,7 +843,7 @@ impl TestAdapter {
                             e,
                         );
                         last_error = Some(error.clone());
-                        
+
                         // Record failure in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -802,8 +854,9 @@ impl TestAdapter {
                                 "counter": counter,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                        
+                        )
+                        .await;
+
                         // If not the last attempt, calculate delay and retry
                         if attempt < publish_retry_options.max_attempts {
                             let delay = publish_retry_options.get_delay(attempt);
@@ -824,20 +877,28 @@ impl TestAdapter {
                     }
                 }
             }
-            
+
             // Determine the final result
             let publish_result = if success {
                 Ok(receivers_count)
             } else {
                 Err(last_error.unwrap())
             };
-            
+
             match publish_result {
                 Ok(receivers) => {
                     if receivers > 0 {
-                        eprintln!("TEST ADAPTER: Published event #{} to {} receivers", counter, receivers);
-                        info!(counter, receivers, "Successfully published test event to {} receivers", receivers);
-                        
+                        eprintln!(
+                            "TEST ADAPTER: Published event #{} to {} receivers",
+                            counter, receivers
+                        );
+                        info!(
+                            counter,
+                            receivers,
+                            "Successfully published test event to {} receivers",
+                            receivers
+                        );
+
                         // Record successful standard event publication in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -847,11 +908,18 @@ impl TestAdapter {
                                 "receivers": receivers,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
+                        )
+                        .await;
                     } else {
-                        eprintln!("TEST ADAPTER: Published event #{} but no receivers", counter);
-                        warn!(counter, "Published test event but no receivers were available");
-                        
+                        eprintln!(
+                            "TEST ADAPTER: Published event #{} but no receivers",
+                            counter
+                        );
+                        warn!(
+                            counter,
+                            "Published test event but no receivers were available"
+                        );
+
                         // Record no-receiver event publication in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -860,13 +928,14 @@ impl TestAdapter {
                                 "counter": counter,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
+                        )
+                        .await;
                     }
-                },
+                }
                 Err(e) => {
                     eprintln!("TEST ADAPTER: Failed to publish event #{}: {}", counter, e);
                     error!(error = %e, counter, "Failed to publish test event");
-                    
+
                     // Record event publication failure in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -876,24 +945,25 @@ impl TestAdapter {
                             "error": e.to_string(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
+                    )
+                    .await;
                 }
             }
-            
+
             // Also trigger callbacks using direct sequential retry logic
             let callback_event = TestEvent::Standard {
                 counter,
                 message: message.clone(),
                 data: payload,
             };
-            
+
             // Implement direct sequential retry logic for callbacks
             let mut attempt = 0;
             let mut last_error: Option<AdapterError> = None;
             let mut success = false;
             let mut callbacks_triggered = 0;
             let callbacks_clone = self.callbacks.clone();
-            
+
             // Record the beginning of callback retry attempts in trace
             TraceHelper::record_adapter_operation(
                 "test",
@@ -903,11 +973,12 @@ impl TestAdapter {
                     "max_attempts": publish_retry_options.max_attempts,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             while attempt < publish_retry_options.max_attempts {
                 attempt += 1;
-                
+
                 // Record the current attempt in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -917,17 +988,18 @@ impl TestAdapter {
                         "counter": counter,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 if attempt > 1 {
                     debug!(attempt, counter, "Retrying standard callback trigger");
                 }
-                
+
                 match callbacks_clone.trigger(callback_event.clone()).await {
                     Ok(count) => {
                         success = true;
                         callbacks_triggered = count;
-                        
+
                         // Record successful trigger in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -938,10 +1010,11 @@ impl TestAdapter {
                                 "counter": counter,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                        
+                        )
+                        .await;
+
                         break;
-                    },
+                    }
                     Err(e) => {
                         // Convert to AdapterError
                         let error = AdapterError::from_anyhow_error(
@@ -950,7 +1023,7 @@ impl TestAdapter {
                             e,
                         );
                         last_error = Some(error.clone());
-                        
+
                         // Record failure in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -961,8 +1034,9 @@ impl TestAdapter {
                                 "counter": counter,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                        
+                        )
+                        .await;
+
                         // If not the last attempt, calculate delay and retry
                         if attempt < publish_retry_options.max_attempts {
                             let delay = publish_retry_options.get_delay(attempt);
@@ -983,18 +1057,22 @@ impl TestAdapter {
                     }
                 }
             }
-            
+
             // Determine the final result
             let trigger_result = if success {
                 Ok(callbacks_triggered)
             } else {
                 Err(last_error.unwrap())
             };
-            
+
             match trigger_result {
                 Ok(count) => {
-                    debug!(counter, callbacks = count, "Triggered standard test event callbacks");
-                    
+                    debug!(
+                        counter,
+                        callbacks = count,
+                        "Triggered standard test event callbacks"
+                    );
+
                     // Record successful callback triggering in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -1004,11 +1082,12 @@ impl TestAdapter {
                             "callbacks_triggered": count,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                },
+                    )
+                    .await;
+                }
                 Err(e) => {
                     error!(error = %e, counter, "Failed to trigger standard test event callbacks");
-                    
+
                     // Record callback triggering failure in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -1018,7 +1097,8 @@ impl TestAdapter {
                             "error": e.to_string(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
+                    )
+                    .await;
                 }
             }
 
@@ -1037,13 +1117,13 @@ impl TestAdapter {
                 // Use direct sequential retry logic for special event publishing
                 let special_event_type = "test.special";
                 let special_payload_clone = special_payload.clone();
-                
+
                 // Implement direct sequential retry logic
                 let mut attempt = 0;
                 let mut last_error: Option<AdapterError> = None;
                 let mut success = false;
                 let mut receivers_count = 0;
-                
+
                 // Record the beginning of retry attempts in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -1053,11 +1133,12 @@ impl TestAdapter {
                         "max_attempts": publish_retry_options.max_attempts,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 while attempt < publish_retry_options.max_attempts {
                     attempt += 1;
-                    
+
                     // Record the current attempt in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -1067,17 +1148,22 @@ impl TestAdapter {
                             "counter": counter,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     if attempt > 1 {
                         debug!(attempt, counter, "Retrying special event publication");
                     }
-                    
-                    match self.base.publish_event(special_event_type, special_payload_clone.clone()).await {
+
+                    match self
+                        .base
+                        .publish_event(special_event_type, special_payload_clone.clone())
+                        .await
+                    {
                         Ok(count) => {
                             success = true;
                             receivers_count = count;
-                            
+
                             // Record successful publication in trace
                             TraceHelper::record_adapter_operation(
                                 "test",
@@ -1088,10 +1174,11 @@ impl TestAdapter {
                                     "counter": counter,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             break;
-                        },
+                        }
                         Err(e) => {
                             // Convert to AdapterError
                             let error = AdapterError::from_anyhow_error(
@@ -1100,7 +1187,7 @@ impl TestAdapter {
                                 e,
                             );
                             last_error = Some(error.clone());
-                            
+
                             // Record failure in trace
                             TraceHelper::record_adapter_operation(
                                 "test",
@@ -1111,8 +1198,9 @@ impl TestAdapter {
                                     "counter": counter,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             // If not the last attempt, calculate delay and retry
                             if attempt < publish_retry_options.max_attempts {
                                 let delay = publish_retry_options.get_delay(attempt);
@@ -1133,20 +1221,28 @@ impl TestAdapter {
                         }
                     }
                 }
-                
+
                 // Determine the final result
                 let special_result = if success {
                     Ok(receivers_count)
                 } else {
                     Err(last_error.unwrap())
                 };
-                
+
                 match special_result {
                     Ok(receivers) => {
                         if receivers > 0 {
-                            eprintln!("TEST ADAPTER: Published special event #{} to {} receivers", counter, receivers);
-                            info!(counter, receivers, "Successfully published special test event to {} receivers", receivers);
-                            
+                            eprintln!(
+                                "TEST ADAPTER: Published special event #{} to {} receivers",
+                                counter, receivers
+                            );
+                            info!(
+                                counter,
+                                receivers,
+                                "Successfully published special test event to {} receivers",
+                                receivers
+                            );
+
                             // Record successful special event publication in trace
                             TraceHelper::record_adapter_operation(
                                 "test",
@@ -1156,11 +1252,18 @@ impl TestAdapter {
                                     "receivers": receivers,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
+                            )
+                            .await;
                         } else {
-                            eprintln!("TEST ADAPTER: Published special event #{} but no receivers", counter);
-                            warn!(counter, "Published special test event but no receivers were available");
-                            
+                            eprintln!(
+                                "TEST ADAPTER: Published special event #{} but no receivers",
+                                counter
+                            );
+                            warn!(
+                                counter,
+                                "Published special test event but no receivers were available"
+                            );
+
                             // Record no-receiver special event publication in trace
                             TraceHelper::record_adapter_operation(
                                 "test",
@@ -1169,13 +1272,17 @@ impl TestAdapter {
                                     "counter": counter,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
+                            )
+                            .await;
                         }
-                    },
+                    }
                     Err(e) => {
-                        eprintln!("TEST ADAPTER: Failed to publish special event #{}: {}", counter, e);
+                        eprintln!(
+                            "TEST ADAPTER: Failed to publish special event #{}: {}",
+                            counter, e
+                        );
                         error!(error = %e, counter, "Failed to publish special test event");
-                        
+
                         // Record special event publication failure in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -1185,24 +1292,25 @@ impl TestAdapter {
                                 "error": e.to_string(),
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
+                        )
+                        .await;
                     }
                 }
-                
+
                 // Also trigger callbacks using direct sequential retry logic for special events
                 let special_callback_event = TestEvent::Special {
                     counter,
                     message: special_message.to_string(),
                     data: special_payload,
                 };
-                
+
                 // Implement direct sequential retry logic for special callbacks
                 let mut attempt = 0;
                 let mut last_error: Option<AdapterError> = None;
                 let mut success = false;
                 let mut callbacks_triggered = 0;
                 let callbacks_clone = self.callbacks.clone();
-                
+
                 // Record the beginning of callback retry attempts in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -1212,11 +1320,12 @@ impl TestAdapter {
                         "max_attempts": publish_retry_options.max_attempts,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 while attempt < publish_retry_options.max_attempts {
                     attempt += 1;
-                    
+
                     // Record the current attempt in trace
                     TraceHelper::record_adapter_operation(
                         "test",
@@ -1226,17 +1335,21 @@ impl TestAdapter {
                             "counter": counter,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     if attempt > 1 {
                         debug!(attempt, counter, "Retrying special callback trigger");
                     }
-                    
-                    match callbacks_clone.trigger(special_callback_event.clone()).await {
+
+                    match callbacks_clone
+                        .trigger(special_callback_event.clone())
+                        .await
+                    {
                         Ok(count) => {
                             success = true;
                             callbacks_triggered = count;
-                            
+
                             // Record successful trigger in trace
                             TraceHelper::record_adapter_operation(
                                 "test",
@@ -1247,10 +1360,11 @@ impl TestAdapter {
                                     "counter": counter,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             break;
-                        },
+                        }
                         Err(e) => {
                             // Convert to AdapterError
                             let error = AdapterError::from_anyhow_error(
@@ -1259,7 +1373,7 @@ impl TestAdapter {
                                 e,
                             );
                             last_error = Some(error.clone());
-                            
+
                             // Record failure in trace
                             TraceHelper::record_adapter_operation(
                                 "test",
@@ -1270,8 +1384,9 @@ impl TestAdapter {
                                     "counter": counter,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             // If not the last attempt, calculate delay and retry
                             if attempt < publish_retry_options.max_attempts {
                                 let delay = publish_retry_options.get_delay(attempt);
@@ -1292,18 +1407,22 @@ impl TestAdapter {
                         }
                     }
                 }
-                
+
                 // Determine the final result
                 let special_trigger_result = if success {
                     Ok(callbacks_triggered)
                 } else {
                     Err(last_error.unwrap())
                 };
-                
+
                 match special_trigger_result {
                     Ok(count) => {
-                        debug!(counter, callbacks = count, "Triggered special test event callbacks");
-                        
+                        debug!(
+                            counter,
+                            callbacks = count,
+                            "Triggered special test event callbacks"
+                        );
+
                         // Record successful special callback triggering in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -1313,11 +1432,12 @@ impl TestAdapter {
                                 "callbacks_triggered": count,
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
-                    },
+                        )
+                        .await;
+                    }
                     Err(e) => {
                         error!(error = %e, counter, "Failed to trigger special test event callbacks");
-                        
+
                         // Record special callback triggering failure in trace
                         TraceHelper::record_adapter_operation(
                             "test",
@@ -1327,7 +1447,8 @@ impl TestAdapter {
                                 "error": e.to_string(),
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
-                        ).await;
+                        )
+                        .await;
                     }
                 }
             }
@@ -1344,7 +1465,8 @@ impl TestAdapter {
                 "events_generated": counter,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
+        )
+        .await;
 
         info!("Test event generator stopped");
         Ok(())
@@ -1363,8 +1485,9 @@ impl ServiceAdapter for TestAdapter {
                 "already_connected": self.base.is_connected(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         // Only connect if not already connected
         if self.base.is_connected() {
             info!("Test adapter is already connected");
@@ -1384,7 +1507,7 @@ impl ServiceAdapter for TestAdapter {
         let handle = tauri::async_runtime::spawn(async move {
             if let Err(e) = self_clone.generate_events(shutdown_rx).await {
                 error!(error = %e, "Error in test event generator");
-                
+
                 // Record error in trace
                 TraceHelper::record_adapter_operation(
                     "test",
@@ -1393,7 +1516,8 @@ impl ServiceAdapter for TestAdapter {
                         "error": e.to_string(),
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
+                )
+                .await;
             }
         });
 
@@ -1407,7 +1531,8 @@ impl ServiceAdapter for TestAdapter {
             Some(json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
+        )
+        .await;
 
         info!("Test adapter connected and generating events");
         Ok(())
@@ -1437,23 +1562,27 @@ impl ServiceAdapter for TestAdapter {
                 "input_config": config,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         info!("Configuring test adapter");
 
         // Get the current configuration
         let current = self.config.read().await.clone();
-        
+
         // Create a new config that starts with current values
         let mut new_config = current.clone();
-        
+
         // Update only the fields that are provided in the input config
         if let Some(interval_ms) = config.get("interval_ms").and_then(|v| v.as_u64()) {
             // Ensure interval is reasonable (minimum 100ms, maximum 60000ms)
             new_config.interval_ms = interval_ms.clamp(100, 60000);
         }
-        
-        if let Some(generate_special) = config.get("generate_special_events").and_then(|v| v.as_bool()) {
+
+        if let Some(generate_special) = config
+            .get("generate_special_events")
+            .and_then(|v| v.as_bool())
+        {
             new_config.generate_special_events = generate_special;
         }
 
@@ -1475,7 +1604,8 @@ impl ServiceAdapter for TestAdapter {
                         },
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
+                )
+                .await;
 
                 info!(
                     interval_ms = new_config.interval_ms,
@@ -1484,7 +1614,7 @@ impl ServiceAdapter for TestAdapter {
                 );
 
                 Ok(())
-            },
+            }
             Err(e) => {
                 // Record configuration error in trace
                 TraceHelper::record_adapter_operation(
@@ -1498,14 +1628,16 @@ impl ServiceAdapter for TestAdapter {
                         },
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
+                )
+                .await;
 
                 error!(error = %e, "Invalid test adapter configuration");
                 Err(AdapterError::from_anyhow_error(
                     "config",
                     "Invalid test adapter configuration",
-                    e
-                ).into())
+                    e,
+                )
+                .into())
             }
         }
     }
@@ -1515,7 +1647,7 @@ impl Clone for TestAdapter {
     fn clone(&self) -> Self {
         // Create a new instance with the same event bus
         let _event_bus = self.base.event_bus();
-        
+
         // IMPORTANT: This is a proper implementation of Clone that ensures callback integrity.
         // When an adapter is cloned, it's essential that all shared state wrapped in
         // Arc is properly cloned with Arc::clone to maintain the same underlying instances.
@@ -1530,9 +1662,9 @@ impl Clone for TestAdapter {
         // 1. The config field must be shared so configuration changes affect all clones
         // 2. The callbacks registry must be shared so all callbacks are maintained
         // 3. Any other state containers should be properly shared with Arc::clone
-        
+
         Self {
-            base: self.base.clone(), // Use BaseAdapter's clone implementation
+            base: self.base.clone(),          // Use BaseAdapter's clone implementation
             config: Arc::clone(&self.config), // Share the same config instance
             callbacks: Arc::clone(&self.callbacks), // Share the same callback registry
         }

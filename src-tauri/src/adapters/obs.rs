@@ -68,50 +68,52 @@ impl AdapterConfig for ObsConfig {
 
     fn from_json(json: &serde_json::Value) -> Result<Self> {
         let mut config = ObsConfig::default();
-        
+
         // Extract host if provided
         if let Some(host) = json.get("host").and_then(|v| v.as_str()) {
             config.host = host.to_string();
         }
-        
+
         // Extract port if provided
         if let Some(port) = json.get("port").and_then(|v| v.as_u64()) {
             config.port = port as u16;
         }
-        
+
         // Extract password if provided
         if let Some(password) = json.get("password").and_then(|v| v.as_str()) {
             config.password = password.to_string();
         }
-        
+
         // Extract auto_connect if provided
         if let Some(auto_connect) = json.get("auto_connect").and_then(|v| v.as_bool()) {
             config.auto_connect = auto_connect;
         }
-        
+
         // Extract include_scene_details if provided
-        if let Some(include_scene_details) = json.get("include_scene_details").and_then(|v| v.as_bool()) {
+        if let Some(include_scene_details) =
+            json.get("include_scene_details").and_then(|v| v.as_bool())
+        {
             config.include_scene_details = include_scene_details;
         }
-        
+
         Ok(config)
     }
-    
+
     fn adapter_type() -> &'static str {
         "obs"
     }
-    
+
     fn validate(&self) -> Result<()> {
         // Ensure port is in a reasonable range
         if self.port == 0 {
             return Err(AdapterError::config("Port cannot be 0").into());
         }
-        
+
         // Host cannot be empty
         if self.host.is_empty() {
             return Err(AdapterError::config("Host cannot be empty").into());
         }
-        
+
         Ok(())
     }
 }
@@ -156,9 +158,12 @@ impl ObsAdapter {
             callbacks: Arc::new(ObsCallbackRegistry::new()),
         }
     }
-    
+
     /// Register a callback for OBS events
-    pub async fn register_obs_callback<F>(&self, callback: F) -> Result<crate::callback_system::CallbackId>
+    pub async fn register_obs_callback<F>(
+        &self,
+        callback: F,
+    ) -> Result<crate::callback_system::CallbackId>
     where
         F: Fn(ObsEvent) -> Result<()> + Send + Sync + 'static,
     {
@@ -169,10 +174,11 @@ impl ObsAdapter {
             Some(json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         let id = self.callbacks.register(callback).await;
-        
+
         // Record successful registration in trace
         TraceHelper::record_adapter_operation(
             "obs",
@@ -181,22 +187,23 @@ impl ObsAdapter {
                 "callback_id": id.to_string(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         info!(callback_id = %id, "Registered OBS event callback");
         Ok(id)
     }
-    
+
     /// Get the current configuration (useful for testing)
     pub async fn get_config(&self) -> ObsConfig {
         self.config.read().await.clone()
     }
-    
+
     /// Trigger an OBS event (useful for testing)
     pub async fn trigger_event(&self, event: ObsEvent) -> Result<()> {
         // Get event type before we move the event
         let event_type = event.event_type();
-        
+
         // Record the event trigger in trace
         TraceHelper::record_adapter_operation(
             "obs",
@@ -205,8 +212,9 @@ impl ObsAdapter {
                 "event_type": event_type,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         // Set up retry options for triggering
         let trigger_retry_options = RetryOptions::new(
             2, // Max attempts
@@ -216,13 +224,13 @@ impl ObsAdapter {
             },
             true, // Add jitter
         );
-        
+
         // Implement direct sequential retry logic
         let mut attempt = 0;
         let mut last_error: Option<AdapterError> = None;
         let mut success = false;
         let mut callback_count = 0;
-        
+
         // Record the beginning of retry attempts in trace
         TraceHelper::record_adapter_operation(
             "obs",
@@ -232,11 +240,12 @@ impl ObsAdapter {
                 "max_attempts": trigger_retry_options.max_attempts,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         while attempt < trigger_retry_options.max_attempts {
             attempt += 1;
-            
+
             // Record the current attempt in trace
             TraceHelper::record_adapter_operation(
                 "obs",
@@ -246,18 +255,19 @@ impl ObsAdapter {
                     "event_type": event.event_type(),
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             // Attempt to trigger the event
             if attempt > 1 {
                 debug!(attempt, "Retrying OBS event trigger");
             }
-            
+
             match self.callbacks.trigger(event.clone()).await {
                 Ok(count) => {
                     success = true;
                     callback_count = count;
-                    
+
                     // Record successful trigger in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -268,11 +278,12 @@ impl ObsAdapter {
                             "event_type": event.event_type(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     debug!(callbacks = count, "Triggered OBS event successfully");
                     break;
-                },
+                }
                 Err(e) => {
                     // Convert to AdapterError
                     let error = AdapterError::from_anyhow_error(
@@ -281,7 +292,7 @@ impl ObsAdapter {
                         e,
                     );
                     last_error = Some(error.clone());
-                    
+
                     // Record failure in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -292,8 +303,9 @@ impl ObsAdapter {
                             "event_type": event.event_type(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // If not the last attempt, calculate delay and retry
                     if attempt < trigger_retry_options.max_attempts {
                         let delay = trigger_retry_options.get_delay(attempt);
@@ -314,18 +326,18 @@ impl ObsAdapter {
                 }
             }
         }
-        
+
         // Determine result based on success flag
         let result = if success {
             Ok(callback_count)
         } else {
             Err(last_error.unwrap())
         };
-        
+
         match result {
             Ok(count) => {
                 debug!(callbacks = count, "Triggered OBS event successfully");
-                
+
                 // Record successful event trigger in trace
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -335,13 +347,14 @@ impl ObsAdapter {
                         "callbacks_triggered": count,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 Ok(())
-            },
+            }
             Err(e) => {
                 error!(error = %e, "Failed to trigger OBS event");
-                
+
                 // Record event trigger failure in trace
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -351,8 +364,9 @@ impl ObsAdapter {
                         "error": e.to_string(),
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 Err(e.into())
             }
         }
@@ -378,14 +392,15 @@ impl ObsAdapter {
             Some(json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-    
+        )
+        .await;
+
         // Set up OBS event listener
         let events = match client.events() {
             Ok(events) => events,
             Err(e) => {
                 error!(error = %e, "Failed to create OBS event stream");
-                
+
                 // Record error in trace
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -394,12 +409,14 @@ impl ObsAdapter {
                         "error": e.to_string(),
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 return Err(AdapterError::connection_with_source(
                     format!("Failed to create OBS event stream: {}", e),
-                    e
-                ).into());
+                    e,
+                )
+                .into());
             }
         };
 
@@ -413,7 +430,7 @@ impl ObsAdapter {
                 // Check for shutdown signal
                 _ = shutdown_rx.recv() => {
                     info!("Received shutdown signal for OBS event handler");
-                    
+
                     // Record shutdown in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -423,7 +440,7 @@ impl ObsAdapter {
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
                     ).await;
-                    
+
                     break;
                 }
 
@@ -431,7 +448,7 @@ impl ObsAdapter {
                 _ = sleep(Duration::from_secs(5)) => {
                     if !connected.load(Ordering::SeqCst) {
                         info!("Connection flag set to false, stopping OBS event handler");
-                        
+
                         // Record disconnection in trace
                         TraceHelper::record_adapter_operation(
                             "obs",
@@ -441,7 +458,7 @@ impl ObsAdapter {
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                             })),
                         ).await;
-                        
+
                         break;
                     }
                     debug!("Connection check passed, OBS event handler still active");
@@ -465,7 +482,7 @@ impl ObsAdapter {
                         obws::events::Event::CurrentProgramSceneChanged { id } => {
                             let scene_name = id.name.clone();
                             debug!(scene = %scene_name, "OBS scene changed");
-                            
+
                             // Record scene change in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -474,7 +491,8 @@ impl ObsAdapter {
                                     "scene_name": scene_name,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
+                            )
+                            .await;
 
                             let mut payload = json!({
                                 "scene_name": scene_name,
@@ -484,7 +502,7 @@ impl ObsAdapter {
                             // If configured to include scene details, gather them
                             if config.include_scene_details {
                                 debug!("Fetching additional scene details");
-                                
+
                                 // Set up retry options for fetching scene details
                                 let scene_details_retry = RetryOptions::new(
                                     2, // Max attempts
@@ -494,14 +512,14 @@ impl ObsAdapter {
                                     },
                                     true, // Add jitter
                                 );
-                                
+
                                 // Implement direct sequential retry logic for scene details
                                 let scene_name_for_attempts = id.name.clone();
                                 let mut attempt = 0;
                                 let mut last_error: Option<AdapterError> = None;
                                 let mut success = false;
                                 let mut scene_index_result: Option<usize> = None;
-                                
+
                                 // Record the beginning of retry attempts in trace
                                 TraceHelper::record_adapter_operation(
                                     "obs",
@@ -511,11 +529,12 @@ impl ObsAdapter {
                                         "max_attempts": scene_details_retry.max_attempts,
                                         "timestamp": chrono::Utc::now().to_rfc3339(),
                                     })),
-                                ).await;
-                                
+                                )
+                                .await;
+
                                 while attempt < scene_details_retry.max_attempts {
                                     attempt += 1;
-                                    
+
                                     // Record the current attempt in trace
                                     TraceHelper::record_adapter_operation(
                                         "obs",
@@ -525,21 +544,24 @@ impl ObsAdapter {
                                             "scene_name": scene_name_for_attempts,
                                             "timestamp": chrono::Utc::now().to_rfc3339(),
                                         })),
-                                    ).await;
-                                    
+                                    )
+                                    .await;
+
                                     // Attempt to fetch scene details
                                     if attempt > 1 {
                                         debug!(attempt, "Retrying scene details fetch");
                                     }
-                                    
+
                                     match client.scenes().list().await {
                                         Ok(scene_list) => {
-                                            if let Some(scene) = scene_list.scenes.iter()
+                                            if let Some(scene) = scene_list
+                                                .scenes
+                                                .iter()
                                                 .find(|s| s.id.name == scene_name_for_attempts)
                                             {
                                                 success = true;
                                                 scene_index_result = Some(scene.index);
-                                                
+
                                                 // Record successful fetch in trace
                                                 TraceHelper::record_adapter_operation(
                                                     "obs",
@@ -551,13 +573,13 @@ impl ObsAdapter {
                                                         "timestamp": chrono::Utc::now().to_rfc3339(),
                                                     })),
                                                 ).await;
-                                                
+
                                                 break;
                                             } else {
                                                 // Scene not found, but this is not an error
                                                 success = true;
                                                 scene_index_result = None;
-                                                
+
                                                 // Record scene not found in trace
                                                 TraceHelper::record_adapter_operation(
                                                     "obs",
@@ -568,19 +590,19 @@ impl ObsAdapter {
                                                         "timestamp": chrono::Utc::now().to_rfc3339(),
                                                     })),
                                                 ).await;
-                                                
+
                                                 break;
                                             }
-                                        },
+                                        }
                                         Err(e) => {
                                             // Convert to AdapterError
                                             let error = AdapterError::from_anyhow_error(
                                                 "api",
                                                 format!("Failed to fetch scene details: {}", e),
-                                                anyhow::anyhow!("{}", e)
+                                                anyhow::anyhow!("{}", e),
                                             );
                                             last_error = Some(error.clone());
-                                            
+
                                             // Record failure in trace
                                             TraceHelper::record_adapter_operation(
                                                 "obs",
@@ -591,8 +613,9 @@ impl ObsAdapter {
                                                     "scene_name": scene_name_for_attempts,
                                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                                 })),
-                                            ).await;
-                                            
+                                            )
+                                            .await;
+
                                             // If not the last attempt, calculate delay and retry
                                             if attempt < scene_details_retry.max_attempts {
                                                 let delay = scene_details_retry.get_delay(attempt);
@@ -613,23 +636,23 @@ impl ObsAdapter {
                                         }
                                     }
                                 }
-                                
+
                                 // Determine result based on success flag
                                 let scene_details_result = if success {
                                     Ok(scene_index_result)
                                 } else {
                                     Err(last_error.unwrap())
                                 };
-                                
+
                                 // Process the result
                                 match scene_details_result {
                                     Ok(Some(scene_index)) => {
                                         payload["scene_index"] = json!(scene_index);
                                         debug!(scene_index, "Added scene details");
-                                    },
+                                    }
                                     Ok(None) => {
                                         debug!("Scene not found in scene list");
-                                    },
+                                    }
                                     Err(e) => {
                                         warn!(error = %e, "Failed to fetch scene details after retries");
                                     }
@@ -645,14 +668,14 @@ impl ObsAdapter {
                                 },
                                 true, // Add jitter
                             );
-                            
+
                             // Implement direct sequential retry logic for publishing
                             let payload_for_publish = payload.clone();
                             let mut attempt = 0;
                             let mut last_error: Option<AdapterError> = None;
                             let mut success = false;
                             let mut receivers_count = 0;
-                            
+
                             // Record the beginning of publish attempts in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -662,11 +685,12 @@ impl ObsAdapter {
                                     "max_attempts": publish_retry.max_attempts,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             while attempt < publish_retry.max_attempts {
                                 attempt += 1;
-                                
+
                                 // Record the current attempt in trace
                                 TraceHelper::record_adapter_operation(
                                     "obs",
@@ -676,19 +700,24 @@ impl ObsAdapter {
                                         "scene_name": scene_name,
                                         "timestamp": chrono::Utc::now().to_rfc3339(),
                                     })),
-                                ).await;
-                                
+                                )
+                                .await;
+
                                 // Attempt to publish the event
                                 if attempt > 1 {
                                     debug!(attempt, "Retrying scene change event publication");
                                 }
-                                
-                                let stream_event = StreamEvent::new("obs", "scene.changed", payload_for_publish.clone());
+
+                                let stream_event = StreamEvent::new(
+                                    "obs",
+                                    "scene.changed",
+                                    payload_for_publish.clone(),
+                                );
                                 match event_bus.publish(stream_event).await {
                                     Ok(receivers) => {
                                         success = true;
                                         receivers_count = receivers;
-                                        
+
                                         // Record successful publish in trace
                                         TraceHelper::record_adapter_operation(
                                             "obs",
@@ -699,19 +728,20 @@ impl ObsAdapter {
                                                 "scene_name": scene_name,
                                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                             })),
-                                        ).await;
-                                        
+                                        )
+                                        .await;
+
                                         break;
-                                    },
+                                    }
                                     Err(e) => {
                                         // Convert to AdapterError
                                         let error = AdapterError::from_anyhow_error(
                                             "event",
                                             format!("Failed to publish scene change event: {}", e),
-                                            anyhow::anyhow!("{}", e)
+                                            anyhow::anyhow!("{}", e),
                                         );
                                         last_error = Some(error.clone());
-                                        
+
                                         // Record failure in trace
                                         TraceHelper::record_adapter_operation(
                                             "obs",
@@ -722,8 +752,9 @@ impl ObsAdapter {
                                                 "scene_name": scene_name,
                                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                             })),
-                                        ).await;
-                                        
+                                        )
+                                        .await;
+
                                         // If not the last attempt, calculate delay and retry
                                         if attempt < publish_retry.max_attempts {
                                             let delay = publish_retry.get_delay(attempt);
@@ -744,36 +775,36 @@ impl ObsAdapter {
                                     }
                                 }
                             }
-                            
+
                             // Determine result based on success flag
                             let publish_result = if success {
                                 Ok(receivers_count)
                             } else {
                                 Err(last_error.unwrap())
                             };
-                            
+
                             // Process publish result
                             match publish_result {
                                 Ok(receivers) => {
                                     debug!(scene = %scene_name, receivers, "Published scene change event");
-                                },
+                                }
                                 Err(e) => {
                                     error!(error = %e, "Failed to publish OBS scene change event");
                                 }
                             }
-                            
+
                             // Create callback event
-                            let callback_event = ObsEvent::SceneChanged { 
+                            let callback_event = ObsEvent::SceneChanged {
                                 scene_name: scene_name.clone(),
                                 data: payload,
                             };
-                            
+
                             // Implement direct sequential retry logic for triggering callbacks
                             let mut attempt = 0;
                             let mut last_error: Option<AdapterError> = None;
                             let mut success = false;
                             let mut callbacks_triggered = 0;
-                            
+
                             // Record the beginning of trigger attempts in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -783,11 +814,12 @@ impl ObsAdapter {
                                     "max_attempts": publish_retry.max_attempts,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             while attempt < publish_retry.max_attempts {
                                 attempt += 1;
-                                
+
                                 // Record the current attempt in trace
                                 TraceHelper::record_adapter_operation(
                                     "obs",
@@ -797,18 +829,19 @@ impl ObsAdapter {
                                         "scene_name": scene_name,
                                         "timestamp": chrono::Utc::now().to_rfc3339(),
                                     })),
-                                ).await;
-                                
+                                )
+                                .await;
+
                                 // Attempt to trigger callbacks
                                 if attempt > 1 {
                                     debug!(attempt, "Retrying scene change callback trigger");
                                 }
-                                
+
                                 match callbacks.trigger(callback_event.clone()).await {
                                     Ok(count) => {
                                         success = true;
                                         callbacks_triggered = count;
-                                        
+
                                         // Record successful trigger in trace
                                         TraceHelper::record_adapter_operation(
                                             "obs",
@@ -819,19 +852,23 @@ impl ObsAdapter {
                                                 "scene_name": scene_name,
                                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                             })),
-                                        ).await;
-                                        
+                                        )
+                                        .await;
+
                                         break;
-                                    },
+                                    }
                                     Err(e) => {
                                         // Convert to AdapterError
                                         let error = AdapterError::from_anyhow_error(
                                             "event",
-                                            format!("Failed to trigger scene change callbacks: {}", e),
-                                            e
+                                            format!(
+                                                "Failed to trigger scene change callbacks: {}",
+                                                e
+                                            ),
+                                            e,
                                         );
                                         last_error = Some(error.clone());
-                                        
+
                                         // Record failure in trace
                                         TraceHelper::record_adapter_operation(
                                             "obs",
@@ -842,8 +879,9 @@ impl ObsAdapter {
                                                 "scene_name": scene_name,
                                                 "timestamp": chrono::Utc::now().to_rfc3339(),
                                             })),
-                                        ).await;
-                                        
+                                        )
+                                        .await;
+
                                         // If not the last attempt, calculate delay and retry
                                         if attempt < publish_retry.max_attempts {
                                             let delay = publish_retry.get_delay(attempt);
@@ -864,19 +902,19 @@ impl ObsAdapter {
                                     }
                                 }
                             }
-                            
+
                             // Determine result based on success flag
                             let trigger_result = if success {
                                 Ok(callbacks_triggered)
                             } else {
                                 Err(last_error.unwrap())
                             };
-                            
+
                             // Process trigger result
                             match trigger_result {
                                 Ok(count) => {
                                     debug!(scene = %scene_name, callbacks = count, "Triggered scene change callbacks");
-                                },
+                                }
                                 Err(e) => {
                                     error!(error = %e, "Failed to trigger OBS scene change callbacks");
                                 }
@@ -930,13 +968,13 @@ impl ObsAdapter {
                             if let Err(e) = event_bus.publish(stream_event).await {
                                 error!(error = %e, "Failed to publish OBS stream state event");
                             }
-                            
+
                             // Also trigger callbacks
-                            let callback_event = ObsEvent::StreamStateChanged { 
+                            let callback_event = ObsEvent::StreamStateChanged {
                                 active,
                                 data: payload,
                             };
-                            
+
                             if let Err(e) = callbacks.trigger(callback_event).await {
                                 error!(error = %e, "Failed to trigger OBS stream state callbacks");
                             } else {
@@ -1172,8 +1210,9 @@ impl ServiceAdapter for ObsAdapter {
                 "already_connected": self.base.is_connected(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-    
+        )
+        .await;
+
         // Check if already connected
         if self.base.is_connected() {
             info!("OBS adapter is already connected");
@@ -1199,7 +1238,7 @@ impl ServiceAdapter for ObsAdapter {
             },
             true, // Add jitter
         );
-        
+
         // Log the connection parameters
         debug!(
             host = %config.host,
@@ -1224,7 +1263,8 @@ impl ServiceAdapter for ObsAdapter {
                 "max_attempts": connect_retry_options.max_attempts,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
+        )
+        .await;
 
         while attempt < connect_retry_options.max_attempts {
             attempt += 1;
@@ -1244,7 +1284,7 @@ impl ServiceAdapter for ObsAdapter {
                 connect_timeout: Duration::from_secs(10),
                 dangerous: None,
             };
-            
+
             // Record the attempt in trace
             TraceHelper::record_adapter_operation(
                 "obs",
@@ -1255,14 +1295,15 @@ impl ServiceAdapter for ObsAdapter {
                     "port": config.port,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             // Attempt to connect
             match Client::connect_with_config(connect_opts).await {
                 Ok(new_client) => {
                     // Connection successful
                     client = Some(Arc::new(new_client));
-                    
+
                     // Record success in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -1273,18 +1314,19 @@ impl ServiceAdapter for ObsAdapter {
                             "port": config.port,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     break;
-                },
+                }
                 Err(e) => {
                     // Connection failed
                     let error = AdapterError::connection_with_source(
                         format!("Failed to connect to OBS WebSocket: {}", e),
-                        e
+                        e,
                     );
                     last_error = Some(error.clone());
-                    
+
                     // Record failure in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -1296,8 +1338,9 @@ impl ServiceAdapter for ObsAdapter {
                             "error": error.to_string(),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // If this wasn't the last attempt, calculate delay and retry
                     if attempt < connect_retry_options.max_attempts {
                         let delay = connect_retry_options.get_delay(attempt);
@@ -1318,7 +1361,7 @@ impl ServiceAdapter for ObsAdapter {
                 }
             }
         }
-        
+
         // Process the final result
         let connect_result = match client {
             Some(client) => Ok(client),
@@ -1335,7 +1378,7 @@ impl ServiceAdapter for ObsAdapter {
                 self.base.set_connected(true);
 
                 info!("Connected to OBS WebSocket server");
-                
+
                 // Record successful connection in trace
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -1345,14 +1388,15 @@ impl ServiceAdapter for ObsAdapter {
                         "port": config.port,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
+                )
+                .await;
 
                 // Publish initial state using direct sequential retry logic
                 let initial_state_retry_options = RetryOptions::default();
                 let mut attempt = 0;
                 let mut initial_state_error: Option<AdapterError> = None;
                 let mut initial_state_success = false;
-                
+
                 // Record that we're starting initial state publication
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -1361,12 +1405,13 @@ impl ServiceAdapter for ObsAdapter {
                         "max_attempts": initial_state_retry_options.max_attempts,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 while attempt < initial_state_retry_options.max_attempts {
                     attempt += 1;
                     debug!(attempt, "Attempting to publish initial OBS state");
-                    
+
                     // Record the attempt in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -1375,14 +1420,15 @@ impl ServiceAdapter for ObsAdapter {
                             "attempt": attempt,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Attempt to publish initial state
                     match Self::publish_initial_state(&client, &self.base.event_bus()).await {
                         Ok(_) => {
                             // Publication successful
                             initial_state_success = true;
-                            
+
                             // Record success in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -1391,20 +1437,21 @@ impl ServiceAdapter for ObsAdapter {
                                     "attempt": attempt,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             debug!("Published initial OBS state successfully");
                             break;
-                        },
+                        }
                         Err(e) => {
                             // Publication failed
                             let error = AdapterError::from_anyhow_error(
                                 "internal",
                                 format!("Failed to publish initial OBS state: {}", e),
-                                e
+                                e,
                             );
                             initial_state_error = Some(error.clone());
-                            
+
                             // Record failure in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -1414,8 +1461,9 @@ impl ServiceAdapter for ObsAdapter {
                                     "error": error.to_string(),
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             // If this wasn't the last attempt, calculate delay and retry
                             if attempt < initial_state_retry_options.max_attempts {
                                 let delay = initial_state_retry_options.get_delay(attempt);
@@ -1436,7 +1484,7 @@ impl ServiceAdapter for ObsAdapter {
                         }
                     }
                 }
-                
+
                 // Process final result of initial state publication
                 if !initial_state_success && initial_state_error.is_some() {
                     error!(
@@ -1458,7 +1506,7 @@ impl ServiceAdapter for ObsAdapter {
                 let event_bus = self.base.event_bus();
                 let callbacks = self.callbacks.clone();
                 let config_clone = config.clone();
-                
+
                 let handle = tauri::async_runtime::spawn(
                     async move {
                         if let Err(e) = Self::handle_obs_events(
@@ -1483,21 +1531,21 @@ impl ServiceAdapter for ObsAdapter {
                 // Create a copy of the connection configuration data we need
                 let host = config.host.clone();
                 let port = config.port;
-                
+
                 // Set up connection established event with payload
                 let payload = json!({
                     "host": host,
                     "port": port,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 });
-                
+
                 // Use direct sequential retry logic for publishing connection event
                 let publish_retry_options = RetryOptions::default();
                 let mut attempt = 0;
                 let mut publish_error: Option<AdapterError> = None;
                 let mut publish_success = false;
                 let mut receivers_count = 0;
-                
+
                 // Record that we're starting event publication
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -1506,12 +1554,13 @@ impl ServiceAdapter for ObsAdapter {
                         "max_attempts": publish_retry_options.max_attempts,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 while attempt < publish_retry_options.max_attempts {
                     attempt += 1;
                     debug!(attempt, "Attempting to publish connection event");
-                    
+
                     // Record the attempt in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -1520,16 +1569,18 @@ impl ServiceAdapter for ObsAdapter {
                             "attempt": attempt,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Create the event and attempt to publish
-                    let stream_event = StreamEvent::new("obs", "connection.established", payload.clone());
+                    let stream_event =
+                        StreamEvent::new("obs", "connection.established", payload.clone());
                     match self.base.event_bus().publish(stream_event).await {
                         Ok(receivers) => {
                             // Publication successful
                             publish_success = true;
                             receivers_count = receivers;
-                            
+
                             // Record success in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -1539,20 +1590,21 @@ impl ServiceAdapter for ObsAdapter {
                                     "receivers": receivers,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             debug!(receivers, "Published OBS connection event successfully");
                             break;
-                        },
+                        }
                         Err(e) => {
                             // Publication failed
                             let error = AdapterError::from_anyhow_error(
                                 "event",
                                 format!("Failed to publish connection event: {}", e),
-                                anyhow::anyhow!("{}", e)
+                                anyhow::anyhow!("{}", e),
                             );
                             publish_error = Some(error.clone());
-                            
+
                             // Record failure in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -1562,8 +1614,9 @@ impl ServiceAdapter for ObsAdapter {
                                     "error": error.to_string(),
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             // If this wasn't the last attempt, calculate delay and retry
                             if attempt < publish_retry_options.max_attempts {
                                 let delay = publish_retry_options.get_delay(attempt);
@@ -1584,7 +1637,7 @@ impl ServiceAdapter for ObsAdapter {
                         }
                     }
                 }
-                
+
                 // Process final result of event publication
                 if !publish_success && publish_error.is_some() {
                     error!(
@@ -1592,21 +1645,24 @@ impl ServiceAdapter for ObsAdapter {
                         "Failed to publish OBS connection event after retries"
                     );
                 } else if publish_success {
-                    debug!(receivers = receivers_count, "Published OBS connection event");
+                    debug!(
+                        receivers = receivers_count,
+                        "Published OBS connection event"
+                    );
                 }
-                
+
                 // Now trigger connection callbacks with direct sequential retry logic
                 let callback_event = ObsEvent::ConnectionChanged {
                     connected: true,
                     data: payload,
                 };
-                
+
                 let trigger_retry_options = RetryOptions::default();
                 let mut attempt = 0;
                 let mut trigger_error: Option<AdapterError> = None;
                 let mut trigger_success = false;
                 let mut callbacks_triggered = 0;
-                
+
                 // Record that we're starting callback trigger
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -1615,12 +1671,13 @@ impl ServiceAdapter for ObsAdapter {
                         "max_attempts": trigger_retry_options.max_attempts,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 while attempt < trigger_retry_options.max_attempts {
                     attempt += 1;
                     debug!(attempt, "Attempting to trigger connection callbacks");
-                    
+
                     // Record the attempt in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -1629,15 +1686,16 @@ impl ServiceAdapter for ObsAdapter {
                             "attempt": attempt,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Attempt to trigger callbacks
                     match self.callbacks.trigger(callback_event.clone()).await {
                         Ok(count) => {
                             // Trigger successful
                             trigger_success = true;
                             callbacks_triggered = count;
-                            
+
                             // Record success in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -1647,20 +1705,24 @@ impl ServiceAdapter for ObsAdapter {
                                     "callbacks_triggered": count,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
-                            debug!(callbacks = count, "Triggered OBS connection callbacks successfully");
+                            )
+                            .await;
+
+                            debug!(
+                                callbacks = count,
+                                "Triggered OBS connection callbacks successfully"
+                            );
                             break;
-                        },
+                        }
                         Err(e) => {
                             // Trigger failed
                             let error = AdapterError::from_anyhow_error(
                                 "event",
                                 format!("Failed to trigger connection callbacks: {}", e),
-                                e
+                                e,
                             );
                             trigger_error = Some(error.clone());
-                            
+
                             // Record failure in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -1670,8 +1732,9 @@ impl ServiceAdapter for ObsAdapter {
                                     "error": error.to_string(),
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             // If this wasn't the last attempt, calculate delay and retry
                             if attempt < trigger_retry_options.max_attempts {
                                 let delay = trigger_retry_options.get_delay(attempt);
@@ -1692,7 +1755,7 @@ impl ServiceAdapter for ObsAdapter {
                         }
                     }
                 }
-                
+
                 // Process final result of trigger
                 if !trigger_success && trigger_error.is_some() {
                     error!(
@@ -1700,7 +1763,10 @@ impl ServiceAdapter for ObsAdapter {
                         "Failed to trigger OBS connection callbacks after retries"
                     );
                 } else if trigger_success {
-                    debug!(callbacks = callbacks_triggered, "Triggered OBS connection callbacks");
+                    debug!(
+                        callbacks = callbacks_triggered,
+                        "Triggered OBS connection callbacks"
+                    );
                 }
 
                 Ok(())
@@ -1712,7 +1778,7 @@ impl ServiceAdapter for ObsAdapter {
                     port = config.port,
                     "Failed to connect to OBS WebSocket after retries"
                 );
-                
+
                 // Record connection failure in trace
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -1723,7 +1789,8 @@ impl ServiceAdapter for ObsAdapter {
                         "error": e.to_string(),
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
+                )
+                .await;
 
                 // Use direct sequential retry logic for publishing failure event
                 let payload = json!({
@@ -1732,12 +1799,12 @@ impl ServiceAdapter for ObsAdapter {
                     "error": e.to_string(),
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 });
-                
+
                 let failure_retry_options = RetryOptions::default();
                 let mut attempt = 0;
                 let mut failure_error: Option<AdapterError> = None;
                 let mut failure_success = false;
-                
+
                 // Record that we're starting failure event publication
                 TraceHelper::record_adapter_operation(
                     "obs",
@@ -1746,12 +1813,13 @@ impl ServiceAdapter for ObsAdapter {
                         "max_attempts": failure_retry_options.max_attempts,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 while attempt < failure_retry_options.max_attempts {
                     attempt += 1;
                     debug!(attempt, "Attempting to publish connection failure event");
-                    
+
                     // Record the attempt in trace
                     TraceHelper::record_adapter_operation(
                         "obs",
@@ -1760,15 +1828,17 @@ impl ServiceAdapter for ObsAdapter {
                             "attempt": attempt,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Create the event and attempt to publish
-                    let stream_event = StreamEvent::new("obs", "connection.failed", payload.clone());
+                    let stream_event =
+                        StreamEvent::new("obs", "connection.failed", payload.clone());
                     match self.base.event_bus().publish(stream_event).await {
                         Ok(_) => {
                             // Publication successful
                             failure_success = true;
-                            
+
                             // Record success in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -1777,20 +1847,21 @@ impl ServiceAdapter for ObsAdapter {
                                     "attempt": attempt,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             debug!("Published OBS connection failure event successfully");
                             break;
-                        },
+                        }
                         Err(pub_err) => {
                             // Publication failed
                             let error = AdapterError::from_anyhow_error(
                                 "event",
                                 format!("Failed to publish connection failure event: {}", pub_err),
-                                anyhow::anyhow!("{}", pub_err)
+                                anyhow::anyhow!("{}", pub_err),
                             );
                             failure_error = Some(error.clone());
-                            
+
                             // Record failure in trace
                             TraceHelper::record_adapter_operation(
                                 "obs",
@@ -1800,8 +1871,9 @@ impl ServiceAdapter for ObsAdapter {
                                     "error": error.to_string(),
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             // If this wasn't the last attempt, calculate delay and retry
                             if attempt < failure_retry_options.max_attempts {
                                 let delay = failure_retry_options.get_delay(attempt);
@@ -1822,7 +1894,7 @@ impl ServiceAdapter for ObsAdapter {
                         }
                     }
                 }
-                
+
                 // Process final result of failure event publication
                 if !failure_success && failure_error.is_some() {
                     error!(
@@ -1838,7 +1910,7 @@ impl ServiceAdapter for ObsAdapter {
                     connected: false,
                     data: payload,
                 };
-                
+
                 // We can attempt to trigger callbacks but it's not critical if it fails
                 if let Err(trigger_err) = self.callbacks.trigger(callback_event).await {
                     warn!(
@@ -1991,9 +2063,9 @@ impl Clone for ObsAdapter {
         // 2. The client should be shared so all instances have the same connection
         // 3. The config should be shared so configuration changes affect all clones
         // 4. The callbacks registry must be shared so callbacks are maintained
-        
+
         Self {
-            base: self.base.clone(), // Use BaseAdapter's clone implementation
+            base: self.base.clone(),          // Use BaseAdapter's clone implementation
             client: Arc::clone(&self.client), // Share the same client
             config: Arc::clone(&self.config), // Share the same config
             callbacks: Arc::clone(&self.callbacks), // Share the same callback registry
@@ -2006,7 +2078,7 @@ impl ServiceAdapterHelper for ObsAdapter {
     fn base(&self) -> &BaseAdapter {
         &self.base
     }
-    
+
     async fn clean_up_on_disconnect(&self) -> Result<()> {
         // OBS-specific cleanup: clear the client reference
         debug!("Clearing OBS client reference");

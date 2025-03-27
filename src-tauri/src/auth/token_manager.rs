@@ -48,13 +48,13 @@ impl TokenData {
     pub fn set_expiration(&mut self, expires_in_secs: u64) {
         let expires_in = chrono::Utc::now() + chrono::Duration::seconds(expires_in_secs as i64);
         self.expires_in = Some(expires_in);
-        
+
         // Also store the expiration time in metadata for better tracking
         self.set_metadata_value(
             "expires_at",
             serde_json::Value::String(expires_in.to_rfc3339()),
         );
-        
+
         // Store the original seconds value for diagnostics
         self.set_metadata_value(
             "expires_in_seconds",
@@ -95,7 +95,10 @@ impl TokenData {
                     return days_until_expiry < within_days as i64;
                 } else {
                     // Log parsing error for better diagnostics
-                    warn!("Failed to parse refresh token creation date: {}", created_str);
+                    warn!(
+                        "Failed to parse refresh token creation date: {}",
+                        created_str
+                    );
                 }
             }
         }
@@ -230,7 +233,7 @@ impl TokenManager {
                     attempts += 1;
                     warn!(error = %e, attempt = attempts, "Secure store save failed");
                     last_error = Some(e);
-                    
+
                     if attempts < MAX_ATTEMPTS {
                         // Exponential backoff with jitter
                         let base_delay = 50 * 2u64.pow(attempts as u32);
@@ -245,7 +248,11 @@ impl TokenManager {
         if let Some(e) = last_error {
             if attempts >= MAX_ATTEMPTS {
                 error!(error = %e, "Failed to save secure store after maximum attempts");
-                return Err(anyhow!("Failed to save secure store after {} attempts: {}", MAX_ATTEMPTS, e));
+                return Err(anyhow!(
+                    "Failed to save secure store after {} attempts: {}",
+                    MAX_ATTEMPTS,
+                    e
+                ));
             }
         }
 
@@ -437,7 +444,7 @@ impl TokenManager {
                     attempts += 1;
                     warn!(error = %e, attempt = attempts, "Secure store save failed after deletion");
                     last_error = Some(e);
-                    
+
                     if attempts < MAX_ATTEMPTS {
                         // Exponential backoff with jitter
                         let base_delay = 50 * 2u64.pow(attempts as u32);
@@ -504,56 +511,64 @@ impl TokenManager {
             _ => false,
         }
     }
-    
+
     /// Ensures tokens have an expiration time set
     /// If no expiration time is set, uses a default token lifetime
-    pub async fn ensure_token_expiration(&self, adapter_name: &str, default_expiry_secs: u64) -> Result<()> {
+    pub async fn ensure_token_expiration(
+        &self,
+        adapter_name: &str,
+        default_expiry_secs: u64,
+    ) -> Result<()> {
         info!(adapter = %adapter_name, "Ensuring token has expiration time set");
-        
+
         // Get the current tokens
         match self.get_tokens(adapter_name).await? {
             Some(mut token_data) => {
                 // Check if token has an expiration time
                 if token_data.expires_in.is_none() {
                     info!(
-                        adapter = %adapter_name, 
-                        "Token has no expiration time, setting default of {} seconds", 
+                        adapter = %adapter_name,
+                        "Token has no expiration time, setting default of {} seconds",
                         default_expiry_secs
                     );
-                    
+
                     // Set default expiration time
                     token_data.set_expiration(default_expiry_secs);
-                    
+
                     // Store the updated token
                     self.store_tokens(adapter_name, token_data).await?;
-                    
+
                     info!(adapter = %adapter_name, "Successfully updated token with default expiration time");
                 } else {
                     debug!(adapter = %adapter_name, "Token already has expiration time set");
                 }
-                
+
                 Ok(())
-            },
+            }
             None => {
                 debug!(adapter = %adapter_name, "No tokens found to update");
                 Ok(())
             }
         }
     }
-    
+
     /// Specifically ensure Twitch tokens have an expiration time
     /// The default Twitch token lifetime is 4 hours (14400 seconds)
     pub async fn ensure_twitch_token_expiration(&self) -> Result<()> {
         // Default Twitch token lifetime is 4 hours (14400 seconds)
         const DEFAULT_TWITCH_TOKEN_EXPIRY: u64 = 14400;
-        self.ensure_token_expiration("twitch", DEFAULT_TWITCH_TOKEN_EXPIRY).await
+        self.ensure_token_expiration("twitch", DEFAULT_TWITCH_TOKEN_EXPIRY)
+            .await
     }
 
     /// Attempt to recover tokens with validation and error handling
     /// This provides a simple one-step method for secure token recovery
-    pub async fn recover_tokens_with_validation(&self, adapter_name: &str) -> Result<Option<TokenData>> {
+    pub async fn recover_tokens_with_validation(
+        &self,
+        adapter_name: &str,
+    ) -> Result<Option<TokenData>> {
         info!(adapter = %adapter_name, "Attempting to recover tokens with validation");
-        
+
         // Get app handle
         let app_guard = self.app.read().await;
         let app = match &*app_guard {
@@ -563,27 +578,27 @@ impl TokenManager {
                 return Ok(None);
             }
         };
-        
+
         // Attempt to retrieve tokens with retries
         let mut attempts = 0;
         const MAX_ATTEMPTS: u8 = 3;
         let mut last_error = None;
-        
+
         while attempts < MAX_ATTEMPTS {
             match self.retrieve_tokens_secure(app, adapter_name).await {
                 Ok(Some(tokens)) => {
                     // Successfully retrieved tokens
-                    
+
                     // Validate access token
                     if tokens.access_token.is_empty() {
                         warn!(adapter = %adapter_name, "Recovered tokens have empty access_token");
                         return Ok(None);
                     }
-                    
+
                     // Update in-memory cache
                     let mut token_map = self.tokens.write().await;
                     token_map.insert(adapter_name.to_string(), tokens.clone());
-                    
+
                     info!(adapter = %adapter_name, "Successfully recovered and validated tokens");
                     return Ok(Some(tokens));
                 }
@@ -596,7 +611,7 @@ impl TokenManager {
                     attempts += 1;
                     warn!(error = %e, attempt = attempts, "Token recovery failed");
                     last_error = Some(e);
-                    
+
                     if attempts < MAX_ATTEMPTS {
                         // Exponential backoff with jitter
                         let base_delay = 100 * 2u64.pow(attempts as u32);
@@ -607,11 +622,15 @@ impl TokenManager {
                 }
             }
         }
-        
+
         // All attempts failed
         if let Some(e) = last_error {
             error!(error = %e, adapter = %adapter_name, "Failed to recover tokens after maximum attempts");
-            Err(anyhow!("Token recovery failed after {} attempts: {}", MAX_ATTEMPTS, e))
+            Err(anyhow!(
+                "Token recovery failed after {} attempts: {}",
+                MAX_ATTEMPTS,
+                e
+            ))
         } else {
             // This shouldn't happen with the logic above, but just in case
             Ok(None)
@@ -636,100 +655,107 @@ mod tests {
     #[test]
     fn test_token_expiration() {
         let mut token = TokenData::new("test_token".to_string(), Some("refresh_token".to_string()));
-        
+
         // Test with non-expired token
         token.set_expiration(3600); // 1 hour from now
         assert!(!token.is_expired());
         assert!(!token.expires_soon(10)); // Not expiring within 10 seconds
         assert!(token.expires_soon(4000)); // Expiring within 4000 seconds
-        
+
         // Test with expired token
         let expired_time = Utc::now() - chrono::Duration::seconds(100);
         token.expires_in = Some(expired_time);
         assert!(token.is_expired());
         assert!(token.expires_soon(10)); // Already expired
     }
-    
+
     #[test]
     fn test_refresh_token_expiry() {
         let mut token = TokenData::new("test_token".to_string(), Some("refresh_token".to_string()));
-        
+
         // Set refresh token created time to 25 days ago
         let created_time = Utc::now() - chrono::Duration::days(25);
         token.set_metadata_value(
             "refresh_token_created_at",
             serde_json::Value::String(created_time.to_rfc3339()),
         );
-        
+
         // Should expire soon (within 7 days)
         assert!(token.refresh_token_expires_soon(7));
-        
+
         // Should not expire soon (within 3 days)
         assert!(!token.refresh_token_expires_soon(3));
-        
+
         // Set to 28 days ago (very close to 30-day limit)
         let created_time = Utc::now() - chrono::Duration::days(28);
         token.set_metadata_value(
             "refresh_token_created_at",
             serde_json::Value::String(created_time.to_rfc3339()),
         );
-        
+
         // Should expire very soon
         assert!(token.refresh_token_expires_soon(3));
     }
-    
+
     #[test]
     fn test_invalid_refresh_token_date() {
         let mut token = TokenData::new("test_token".to_string(), Some("refresh_token".to_string()));
-        
+
         // Set invalid date format
         token.set_metadata_value(
             "refresh_token_created_at",
             serde_json::Value::String("not-a-valid-date".to_string()),
         );
-        
+
         // Should handle invalid date without panicking
         assert!(!token.refresh_token_expires_soon(7));
-        
+
         // Set non-string value
         token.set_metadata_value(
             "refresh_token_created_at",
             serde_json::Value::Number(serde_json::Number::from(12345)),
         );
-        
+
         // Should handle non-string value without panicking
         assert!(!token.refresh_token_expires_soon(7));
     }
-    
+
     // Integration tests would need a mock app handle for secure storage
     #[tokio::test]
     async fn test_token_manager_basic() {
         let token_manager = TokenManager::new();
         let adapter_name = "test_adapter";
-        let token_data = TokenData::new("test_access".to_string(), Some("test_refresh".to_string()));
-        
+        let token_data =
+            TokenData::new("test_access".to_string(), Some("test_refresh".to_string()));
+
         // Test in-memory storage without app handle
-        assert!(token_manager.store_tokens(adapter_name, token_data.clone()).await.is_ok());
-        
+        assert!(token_manager
+            .store_tokens(adapter_name, token_data.clone())
+            .await
+            .is_ok());
+
         // Retrieve from memory
         let retrieved = token_manager.get_tokens(adapter_name).await.unwrap();
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.access_token, "test_access");
         assert_eq!(retrieved.refresh_token, Some("test_refresh".to_string()));
-        
+
         // Test token validation
         assert!(token_manager.has_valid_tokens(adapter_name).await);
-        
+
         // Make the token "expire"
-        token_manager.update_tokens(adapter_name, |mut t| {
-            t.expires_in = Some(Utc::now() - chrono::Duration::seconds(10));
-            t
-        }).await.unwrap();
-        
+        token_manager
+            .update_tokens(adapter_name, |mut t| {
+                t.expires_in = Some(Utc::now() - chrono::Duration::seconds(10));
+                t
+            })
+            .await
+            .unwrap();
+
         // Should now be invalid
         assert!(!token_manager.has_valid_tokens(adapter_name).await);
-        
+
         // Test removal
         token_manager.remove_tokens(adapter_name).await.unwrap();
         assert!(!token_manager.has_valid_tokens(adapter_name).await);

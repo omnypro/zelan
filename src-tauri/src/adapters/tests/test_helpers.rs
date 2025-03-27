@@ -1,5 +1,5 @@
 //! Shared test utilities for adapter tests
-//! 
+//!
 //! This module provides common utilities used across adapter tests.
 
 use std::collections::HashMap;
@@ -38,7 +38,13 @@ where
 pub fn create_test_config() -> HashMap<String, String> {
     let mut config = HashMap::new();
     config.insert("client_id".to_string(), "test_client_id".to_string());
-    config.insert("client_secret".to_string(), "test_client_secret".to_string());
-    config.insert("redirect_uri".to_string(), "http://localhost:8080/callback".to_string());
+    config.insert(
+        "client_secret".to_string(),
+        "test_client_secret".to_string(),
+    );
+    config.insert(
+        "redirect_uri".to_string(),
+        "http://localhost:8080/callback".to_string(),
+    );
     config
 }

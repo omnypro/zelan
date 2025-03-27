@@ -9,7 +9,7 @@ use twitch_oauth2::{ClientId, UserToken};
 
 use crate::adapters::{
     common::{AdapterError, BackoffStrategy, RetryOptions, TraceHelper},
-    http_client::{HttpClient, ReqwestHttpClient}
+    http_client::{HttpClient, ReqwestHttpClient},
 };
 
 /// Environment variable name for Twitch Client ID
@@ -51,7 +51,7 @@ impl TwitchApiClient {
     pub fn with_http_client(http_client: Arc<dyn HttpClient + Send + Sync>) -> Self {
         Self { http_client }
     }
-    
+
     /// Test helper - fetch stream info with a specific client ID (bypassing environment lookup)
     #[cfg(test)]
     pub async fn fetch_stream_info_with_client_id(
@@ -67,10 +67,10 @@ impl TwitchApiClient {
             (_, Some(login)) => format!("user_login={}", login),
             _ => return Err(anyhow!("Either user_id or user_login must be provided")),
         };
-        
+
         // Define the API endpoint
         let url = format!("https://api.twitch.tv/helix/streams?{}", query_param);
-        
+
         // Prepare headers
         let mut headers = HashMap::new();
         headers.insert("Client-ID".to_string(), client_id.as_str().to_string());
@@ -78,10 +78,10 @@ impl TwitchApiClient {
             "Authorization".to_string(),
             format!("Bearer {}", token.access_token.secret()),
         );
-        
+
         // Make the request using our abstracted HTTP client
         let response = self.http_client.get(&url, headers).await?;
-        
+
         // Check status
         if !(response.status() >= 200 && response.status() < 300) {
             return Err(anyhow!(
@@ -90,10 +90,10 @@ impl TwitchApiClient {
                 response.body()
             ));
         }
-        
+
         // Parse JSON from the response body
         let response_json: Value = serde_json::from_str(response.body())?;
-        
+
         // Check if we have data
         if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
             if let Some(stream) = data.first() {
@@ -102,7 +102,7 @@ impl TwitchApiClient {
                 return Ok(Some(stream_info));
             }
         }
-        
+
         // No stream found (user is offline)
         Ok(None)
     }
@@ -175,10 +175,10 @@ impl TwitchApiClient {
 
         // Create retry options for robust error handling
         let retry_options = RetryOptions::default();
-        
+
         // Implement direct sequential retry logic
         let operation_name = "fetch_channel_info";
-        
+
         // Start tracing the operation
         TraceHelper::record_adapter_operation(
             "twitch",
@@ -189,12 +189,13 @@ impl TwitchApiClient {
                 "broadcaster_id": broadcaster_id,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         // Initialize result
         let mut result = None;
         let mut last_error = None;
-        
+
         // Retry loop
         for attempt in 1..=retry_options.max_attempts {
             // Record attempt
@@ -206,8 +207,9 @@ impl TwitchApiClient {
                     "max_attempts": retry_options.max_attempts,
                     "broadcaster_id": broadcaster_id,
                 })),
-            ).await;
-            
+            )
+            .await;
+
             // Get client ID from environment
             let client_id = match get_client_id() {
                 Ok(id) => id,
@@ -215,9 +217,9 @@ impl TwitchApiClient {
                     let error = AdapterError::from_anyhow_error(
                         "config",
                         format!("Failed to get client ID: {}", e),
-                        e
+                        e,
                     );
-                    
+
                     // Record failure
                     TraceHelper::record_adapter_operation(
                         "twitch",
@@ -229,16 +231,17 @@ impl TwitchApiClient {
                             "broadcaster_id": broadcaster_id,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Store last error for return if all attempts fail
                     last_error = Some(error);
-                    
+
                     // If this is the last attempt, we're done with errors
                     if attempt == retry_options.max_attempts {
                         break;
                     }
-                    
+
                     // Calculate delay for the next attempt
                     let delay = retry_options.get_delay(attempt);
                     debug!(
@@ -246,7 +249,7 @@ impl TwitchApiClient {
                         delay_ms = delay.as_millis(),
                         "Retrying after delay"
                     );
-                    
+
                     // Wait before next attempt
                     tokio::time::sleep(delay).await;
                     continue;
@@ -272,17 +275,17 @@ impl TwitchApiClient {
                 Ok(resp) => resp,
                 Err(e) => {
                     warn!(
-                        error = %e, 
+                        error = %e,
                         attempt = attempt,
                         "HTTP request failed when fetching channel info"
                     );
-                    
+
                     let error = AdapterError::from_anyhow_error(
                         "connection",
                         format!("Failed to connect to Twitch API: {}", e),
-                        anyhow::anyhow!(e)
+                        anyhow::anyhow!(e),
                     );
-                    
+
                     // Record failure
                     TraceHelper::record_adapter_operation(
                         "twitch",
@@ -294,16 +297,17 @@ impl TwitchApiClient {
                             "broadcaster_id": broadcaster_id,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Store last error for return if all attempts fail
                     last_error = Some(error);
-                    
+
                     // If this is the last attempt, we're done with errors
                     if attempt == retry_options.max_attempts {
                         break;
                     }
-                    
+
                     // Calculate delay for the next attempt
                     let delay = retry_options.get_delay(attempt);
                     debug!(
@@ -311,7 +315,7 @@ impl TwitchApiClient {
                         delay_ms = delay.as_millis(),
                         "Retrying after delay"
                     );
-                    
+
                     // Wait before next attempt
                     tokio::time::sleep(delay).await;
                     continue;
@@ -326,13 +330,13 @@ impl TwitchApiClient {
                     attempt = attempt,
                     "Received error status from Twitch API"
                 );
-                
+
                 let error = AdapterError::from_anyhow_error_with_status(
                     format!("Twitch API error: {}", response.body()),
                     response.status(),
-                    anyhow!("API request failed with status {}", response.status())
+                    anyhow!("API request failed with status {}", response.status()),
                 );
-                
+
                 // Record failure
                 TraceHelper::record_adapter_operation(
                     "twitch",
@@ -345,16 +349,17 @@ impl TwitchApiClient {
                         "broadcaster_id": broadcaster_id,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 // Store last error for return if all attempts fail
                 last_error = Some(error);
-                
+
                 // If this is the last attempt, we're done with errors
                 if attempt == retry_options.max_attempts {
                     break;
                 }
-                
+
                 // Calculate delay for the next attempt
                 let delay = retry_options.get_delay(attempt);
                 debug!(
@@ -362,7 +367,7 @@ impl TwitchApiClient {
                     delay_ms = delay.as_millis(),
                     "Retrying after delay"
                 );
-                
+
                 // Wait before next attempt
                 tokio::time::sleep(delay).await;
                 continue;
@@ -372,11 +377,9 @@ impl TwitchApiClient {
             let response_json: Value = match serde_json::from_str(response.body()) {
                 Ok(json) => json,
                 Err(e) => {
-                    let error = AdapterError::api_with_source(
-                        "Failed to parse Twitch API response",
-                        e
-                    );
-                    
+                    let error =
+                        AdapterError::api_with_source("Failed to parse Twitch API response", e);
+
                     // Record failure
                     TraceHelper::record_adapter_operation(
                         "twitch",
@@ -388,16 +391,17 @@ impl TwitchApiClient {
                             "broadcaster_id": broadcaster_id,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Store last error for return if all attempts fail
                     last_error = Some(error);
-                    
+
                     // If this is the last attempt, we're done with errors
                     if attempt == retry_options.max_attempts {
                         break;
                     }
-                    
+
                     // Calculate delay for the next attempt
                     let delay = retry_options.get_delay(attempt);
                     debug!(
@@ -405,7 +409,7 @@ impl TwitchApiClient {
                         delay_ms = delay.as_millis(),
                         "Retrying after delay"
                     );
-                    
+
                     // Wait before next attempt
                     tokio::time::sleep(delay).await;
                     continue;
@@ -422,7 +426,7 @@ impl TwitchApiClient {
                                 broadcaster_id = %broadcaster_id,
                                 "Successfully fetched channel information"
                             );
-                            
+
                             // Record success in trace
                             TraceHelper::record_adapter_operation(
                                 "twitch",
@@ -432,8 +436,9 @@ impl TwitchApiClient {
                                     "broadcaster_id": broadcaster_id,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             result = Some(Ok(Some(channel_info)));
                             break;
                         }
@@ -441,9 +446,9 @@ impl TwitchApiClient {
                             let error = AdapterError::from_anyhow_error(
                                 "api",
                                 "Failed to deserialize channel information",
-                                anyhow::anyhow!(e)
+                                anyhow::anyhow!(e),
                             );
-                            
+
                             // Record failure
                             TraceHelper::record_adapter_operation(
                                 "twitch",
@@ -455,16 +460,17 @@ impl TwitchApiClient {
                                     "broadcaster_id": broadcaster_id,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             // Store last error for return if all attempts fail
                             last_error = Some(error);
-                            
+
                             // If this is the last attempt, we're done with errors
                             if attempt == retry_options.max_attempts {
                                 break;
                             }
-                            
+
                             // Calculate delay for the next attempt
                             let delay = retry_options.get_delay(attempt);
                             debug!(
@@ -472,7 +478,7 @@ impl TwitchApiClient {
                                 delay_ms = delay.as_millis(),
                                 "Retrying after delay"
                             );
-                            
+
                             // Wait before next attempt
                             tokio::time::sleep(delay).await;
                             continue;
@@ -482,8 +488,11 @@ impl TwitchApiClient {
             }
 
             // No channel found - not an error, just no data
-            debug!("No channel information found for broadcaster ID: {}", broadcaster_id);
-            
+            debug!(
+                "No channel information found for broadcaster ID: {}",
+                broadcaster_id
+            );
+
             // Record success in trace with no data
             TraceHelper::record_adapter_operation(
                 "twitch",
@@ -493,12 +502,13 @@ impl TwitchApiClient {
                     "broadcaster_id": broadcaster_id,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             result = Some(Ok(None));
             break;
         }
-        
+
         // Process the final result
         match result {
             Some(ok_result) => ok_result,
@@ -508,7 +518,7 @@ impl TwitchApiClient {
                     Some(ref e) => e.to_string(),
                     None => "Unknown error during channel info fetch".to_string(),
                 };
-                
+
                 TraceHelper::record_adapter_operation(
                     "twitch",
                     &format!("{}_all_attempts_failed", operation_name),
@@ -518,12 +528,13 @@ impl TwitchApiClient {
                         "broadcaster_id": broadcaster_id,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 // Return the last error
-                Err(last_error.unwrap_or_else(|| 
+                Err(last_error.unwrap_or_else(|| {
                     AdapterError::api("Failed to fetch channel info after all retry attempts")
-                ))
+                }))
             }
         }
     }
@@ -542,10 +553,10 @@ impl TwitchApiClient {
 
         // Create retry options for robust error handling
         let retry_options = RetryOptions::default();
-        
+
         // Implement direct sequential retry logic
         let operation_name = "fetch_stream_info";
-        
+
         // Start tracing the operation
         TraceHelper::record_adapter_operation(
             "twitch",
@@ -557,8 +568,9 @@ impl TwitchApiClient {
                 "user_login": user_login,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })),
-        ).await;
-        
+        )
+        .await;
+
         // Need either user_id or user_login - verify this up front
         let query_param = match (user_id, user_login) {
             (Some(id), _) => format!("user_id={}", id),
@@ -566,7 +578,7 @@ impl TwitchApiClient {
             _ => {
                 // This is a parameter validation error, not a retry-able error
                 let error = AdapterError::api("Either user_id or user_login must be provided");
-                
+
                 // Record the validation error
                 TraceHelper::record_adapter_operation(
                     "twitch",
@@ -575,16 +587,17 @@ impl TwitchApiClient {
                         "error": error.to_string(),
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 return Err(error);
             }
         };
-        
+
         // Initialize result
         let mut result = None;
         let mut last_error = None;
-        
+
         // Retry loop
         for attempt in 1..=retry_options.max_attempts {
             // Record attempt
@@ -597,8 +610,9 @@ impl TwitchApiClient {
                     "user_id": user_id,
                     "user_login": user_login,
                 })),
-            ).await;
-            
+            )
+            .await;
+
             // Get client ID from environment
             let client_id = match get_client_id() {
                 Ok(id) => id,
@@ -606,9 +620,9 @@ impl TwitchApiClient {
                     let error = AdapterError::from_anyhow_error(
                         "config",
                         format!("Failed to get client ID: {}", e),
-                        e
+                        e,
                     );
-                    
+
                     // Record failure
                     TraceHelper::record_adapter_operation(
                         "twitch",
@@ -621,16 +635,17 @@ impl TwitchApiClient {
                             "user_login": user_login,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Store last error for return if all attempts fail
                     last_error = Some(error);
-                    
+
                     // If this is the last attempt, we're done with errors
                     if attempt == retry_options.max_attempts {
                         break;
                     }
-                    
+
                     // Calculate delay for the next attempt
                     let delay = retry_options.get_delay(attempt);
                     debug!(
@@ -638,7 +653,7 @@ impl TwitchApiClient {
                         delay_ms = delay.as_millis(),
                         "Retrying after delay"
                     );
-                    
+
                     // Wait before next attempt
                     tokio::time::sleep(delay).await;
                     continue;
@@ -661,17 +676,17 @@ impl TwitchApiClient {
                 Ok(resp) => resp,
                 Err(e) => {
                     warn!(
-                        error = %e, 
+                        error = %e,
                         attempt = attempt,
                         "HTTP request failed when fetching stream info"
                     );
-                    
+
                     let error = AdapterError::from_anyhow_error(
                         "connection",
                         format!("Failed to connect to Twitch API: {}", e),
-                        anyhow::anyhow!(e)
+                        anyhow::anyhow!(e),
                     );
-                    
+
                     // Record failure
                     TraceHelper::record_adapter_operation(
                         "twitch",
@@ -684,16 +699,17 @@ impl TwitchApiClient {
                             "user_login": user_login,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Store last error for return if all attempts fail
                     last_error = Some(error);
-                    
+
                     // If this is the last attempt, we're done with errors
                     if attempt == retry_options.max_attempts {
                         break;
                     }
-                    
+
                     // Calculate delay for the next attempt
                     let delay = retry_options.get_delay(attempt);
                     debug!(
@@ -701,7 +717,7 @@ impl TwitchApiClient {
                         delay_ms = delay.as_millis(),
                         "Retrying after delay"
                     );
-                    
+
                     // Wait before next attempt
                     tokio::time::sleep(delay).await;
                     continue;
@@ -716,13 +732,13 @@ impl TwitchApiClient {
                     attempt = attempt,
                     "Received error status from Twitch API"
                 );
-                
+
                 let error = AdapterError::from_anyhow_error_with_status(
                     format!("Twitch API error: {}", response.body()),
                     response.status(),
-                    anyhow!("API request failed with status {}", response.status())
+                    anyhow!("API request failed with status {}", response.status()),
                 );
-                
+
                 // Record failure
                 TraceHelper::record_adapter_operation(
                     "twitch",
@@ -736,16 +752,17 @@ impl TwitchApiClient {
                         "user_login": user_login,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 // Store last error for return if all attempts fail
                 last_error = Some(error);
-                
+
                 // If this is the last attempt, we're done with errors
                 if attempt == retry_options.max_attempts {
                     break;
                 }
-                
+
                 // Calculate delay for the next attempt
                 let delay = retry_options.get_delay(attempt);
                 debug!(
@@ -753,7 +770,7 @@ impl TwitchApiClient {
                     delay_ms = delay.as_millis(),
                     "Retrying after delay"
                 );
-                
+
                 // Wait before next attempt
                 tokio::time::sleep(delay).await;
                 continue;
@@ -763,11 +780,9 @@ impl TwitchApiClient {
             let response_json: Value = match serde_json::from_str(response.body()) {
                 Ok(json) => json,
                 Err(e) => {
-                    let error = AdapterError::api_with_source(
-                        "Failed to parse Twitch API response",
-                        e
-                    );
-                    
+                    let error =
+                        AdapterError::api_with_source("Failed to parse Twitch API response", e);
+
                     // Record failure
                     TraceHelper::record_adapter_operation(
                         "twitch",
@@ -780,16 +795,17 @@ impl TwitchApiClient {
                             "user_login": user_login,
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         })),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     // Store last error for return if all attempts fail
                     last_error = Some(error);
-                    
+
                     // If this is the last attempt, we're done with errors
                     if attempt == retry_options.max_attempts {
                         break;
                     }
-                    
+
                     // Calculate delay for the next attempt
                     let delay = retry_options.get_delay(attempt);
                     debug!(
@@ -797,7 +813,7 @@ impl TwitchApiClient {
                         delay_ms = delay.as_millis(),
                         "Retrying after delay"
                     );
-                    
+
                     // Wait before next attempt
                     tokio::time::sleep(delay).await;
                     continue;
@@ -815,7 +831,7 @@ impl TwitchApiClient {
                                 user_login = ?user_login,
                                 "Successfully fetched stream information"
                             );
-                            
+
                             // Record success in trace
                             TraceHelper::record_adapter_operation(
                                 "twitch",
@@ -826,8 +842,9 @@ impl TwitchApiClient {
                                     "user_login": user_login,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             result = Some(Ok(Some(stream_info)));
                             break;
                         }
@@ -835,9 +852,9 @@ impl TwitchApiClient {
                             let error = AdapterError::from_anyhow_error(
                                 "api",
                                 "Failed to deserialize stream information",
-                                anyhow::anyhow!(e)
+                                anyhow::anyhow!(e),
                             );
-                            
+
                             // Record failure
                             TraceHelper::record_adapter_operation(
                                 "twitch",
@@ -850,16 +867,17 @@ impl TwitchApiClient {
                                     "user_login": user_login,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                 })),
-                            ).await;
-                            
+                            )
+                            .await;
+
                             // Store last error for return if all attempts fail
                             last_error = Some(error);
-                            
+
                             // If this is the last attempt, we're done with errors
                             if attempt == retry_options.max_attempts {
                                 break;
                             }
-                            
+
                             // Calculate delay for the next attempt
                             let delay = retry_options.get_delay(attempt);
                             debug!(
@@ -867,7 +885,7 @@ impl TwitchApiClient {
                                 delay_ms = delay.as_millis(),
                                 "Retrying after delay"
                             );
-                            
+
                             // Wait before next attempt
                             tokio::time::sleep(delay).await;
                             continue;
@@ -882,7 +900,7 @@ impl TwitchApiClient {
                 user_login = ?user_login,
                 "No stream information found (user likely offline)"
             );
-            
+
             // Record success in trace with no data
             TraceHelper::record_adapter_operation(
                 "twitch",
@@ -893,12 +911,13 @@ impl TwitchApiClient {
                     "user_login": user_login,
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 })),
-            ).await;
-            
+            )
+            .await;
+
             result = Some(Ok(None));
             break;
         }
-        
+
         // Process the final result
         match result {
             Some(ok_result) => ok_result,
@@ -908,7 +927,7 @@ impl TwitchApiClient {
                     Some(ref e) => e.to_string(),
                     None => "Unknown error during stream info fetch".to_string(),
                 };
-                
+
                 TraceHelper::record_adapter_operation(
                     "twitch",
                     &format!("{}_all_attempts_failed", operation_name),
@@ -919,12 +938,13 @@ impl TwitchApiClient {
                         "user_login": user_login,
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                     })),
-                ).await;
-                
+                )
+                .await;
+
                 // Return the last error
-                Err(last_error.unwrap_or_else(|| 
+                Err(last_error.unwrap_or_else(|| {
                     AdapterError::api("Failed to fetch stream info after all retry attempts")
-                ))
+                }))
             }
         }
     }

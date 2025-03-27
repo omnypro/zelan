@@ -286,7 +286,7 @@ impl ZelanState {
         info!("Setting app handle on TokenManager");
         token_manager.set_app(app.clone()).await;
         info!("TokenManager app handle successfully set");
-        
+
         // Ensure all tokens have expiration times set
         if let Err(e) = token_manager.ensure_twitch_token_expiration().await {
             warn!("Error ensuring Twitch token expiration: {}", e);
@@ -1292,7 +1292,7 @@ pub async fn get_recent_traces(
 ) -> Result<Vec<crate::flow::TraceContext>, ZelanError> {
     let registry = crate::flow::get_trace_registry();
     let limit = limit.unwrap_or(10);
-    
+
     // Get recent traces
     let traces = registry.get_recent_traces(limit).await;
     Ok(traces)
@@ -1304,7 +1304,7 @@ pub async fn get_trace_by_id(
     trace_id: String,
 ) -> Result<Option<crate::flow::TraceContext>, ZelanError> {
     let registry = crate::flow::get_trace_registry();
-    
+
     // Parse UUID from string
     let trace_id = match uuid::Uuid::parse_str(&trace_id) {
         Ok(id) => id,
@@ -1319,7 +1319,7 @@ pub async fn get_trace_by_id(
             });
         }
     };
-    
+
     // Get the trace
     let trace = registry.get_trace(trace_id).await;
     Ok(trace)
@@ -1329,7 +1329,7 @@ pub async fn get_trace_by_id(
 #[tauri::command]
 pub async fn clear_traces() -> Result<String, ZelanError> {
     let registry = crate::flow::get_trace_registry();
-    
+
     // Clear all traces
     registry.clear().await;
     Ok("Traces cleared successfully".to_string())

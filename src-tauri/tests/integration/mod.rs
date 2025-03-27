@@ -7,11 +7,11 @@ pub mod ws_client;
 pub mod ws_test_harness;
 
 // Import individual test modules
-pub mod event_bus_test;
 pub mod adapter_lifecycle_test;
-pub mod websocket_server_test;
 pub mod callback_integrity_test;
+pub mod event_bus_test;
 pub mod flow_tracing_test;
+pub mod websocket_server_test;
 
 // This function is called by cargo test, and is the entry point for the integration tests
 #[cfg(test)]

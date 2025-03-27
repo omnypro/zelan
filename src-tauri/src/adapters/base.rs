@@ -56,8 +56,8 @@ impl Clone for BaseAdapter {
             event_bus: Arc::clone(&self.event_bus),
             connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
             shutdown_signal: Mutex::new(None), // Don't clone the shutdown channel - each clone manages its own tasks
-            event_handler: Mutex::new(None),   // Don't clone the task handle - each clone manages its own tasks
-            last_error: Mutex::new(None),      // Don't clone the last error - each clone tracks its own errors
+            event_handler: Mutex::new(None), // Don't clone the task handle - each clone manages its own tasks
+            last_error: Mutex::new(None), // Don't clone the last error - each clone tracks its own errors
         }
     }
 }
@@ -158,35 +158,43 @@ impl BaseAdapter {
 
         // Create trace context for tracking this event's journey
         let mut trace = crate::flow::TraceContext::new(self.name.clone(), event_type.to_string());
-        
+
         // Add the initial span for adapter publishing - use the correct component name "TestHarness" for test adapter
-        let component_name = if self.name == "test" { "TestHarness" } else { &self.name };
-        trace.add_span("create", component_name)
+        let component_name = if self.name == "test" {
+            "TestHarness"
+        } else {
+            &self.name
+        };
+        trace
+            .add_span("create", component_name)
             .context(Some(serde_json::json!({
                 "adapter_connected": self.is_connected(),
                 "event_type": event_type
             })));
-        
+
         // Get the global trace registry to record our trace
         let registry = crate::flow::get_trace_registry();
-        
+
         // Complete the span and the trace
         trace.complete_span();
         trace.complete();
-        
+
         // Record the trace in the registry
         registry.record_trace(trace.clone()).await;
-        
+
         // Create the event with a new trace context (for the event's journey)
-        let mut event_trace = crate::flow::TraceContext::new(self.name.clone(), event_type.to_string());
-        event_trace.add_span("create", &self.name)
+        let mut event_trace =
+            crate::flow::TraceContext::new(self.name.clone(), event_type.to_string());
+        event_trace
+            .add_span("create", &self.name)
             .context(Some(serde_json::json!({
                 "adapter_connected": self.is_connected(),
                 "event_type": event_type
             })));
-        
-        let stream_event = StreamEvent::new_with_trace(&self.name, event_type, payload, event_trace);
-        
+
+        let stream_event =
+            StreamEvent::new_with_trace(&self.name, event_type, payload, event_trace);
+
         match self.event_bus.publish(stream_event).await {
             Ok(receivers) => {
                 debug!(
@@ -271,7 +279,7 @@ impl BaseAdapter {
             }
         }
     }
-    
+
     /// Set the last error message
     #[instrument(skip(self, error), level = "debug")]
     pub async fn set_last_error(&self, error: impl std::fmt::Display) {
@@ -279,21 +287,25 @@ impl BaseAdapter {
         error!(adapter = %self.name, error = %error_str, "Adapter error occurred");
         *self.last_error.lock().await = Some(error_str);
     }
-    
+
     /// Get the last error message
     pub async fn get_last_error(&self) -> Option<String> {
         self.last_error.lock().await.clone()
     }
-    
+
     /// Clear the last error message
     pub async fn clear_last_error(&self) {
         *self.last_error.lock().await = None;
     }
-    
+
     /// Record the start of a standard adapter operation with trace
-    pub async fn record_operation_start(&self, operation: &str, context: Option<serde_json::Value>) {
+    pub async fn record_operation_start(
+        &self,
+        operation: &str,
+        context: Option<serde_json::Value>,
+    ) {
         use crate::adapters::common::TraceHelper;
-        
+
         // Create default context if none provided
         let context = context.unwrap_or_else(|| {
             serde_json::json!({
@@ -302,14 +314,23 @@ impl BaseAdapter {
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         });
-        
-        TraceHelper::record_adapter_operation(&self.name, &format!("{}_start", operation), Some(context)).await;
+
+        TraceHelper::record_adapter_operation(
+            &self.name,
+            &format!("{}_start", operation),
+            Some(context),
+        )
+        .await;
     }
-    
+
     /// Record the success of a standard adapter operation with trace
-    pub async fn record_operation_success(&self, operation: &str, context: Option<serde_json::Value>) {
+    pub async fn record_operation_success(
+        &self,
+        operation: &str,
+        context: Option<serde_json::Value>,
+    ) {
         use crate::adapters::common::TraceHelper;
-        
+
         // Create default context if none provided
         let context = context.unwrap_or_else(|| {
             serde_json::json!({
@@ -318,14 +339,24 @@ impl BaseAdapter {
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         });
-        
-        TraceHelper::record_adapter_operation(&self.name, &format!("{}_success", operation), Some(context)).await;
+
+        TraceHelper::record_adapter_operation(
+            &self.name,
+            &format!("{}_success", operation),
+            Some(context),
+        )
+        .await;
     }
-    
+
     /// Record the failure of a standard adapter operation with trace
-    pub async fn record_operation_failure(&self, operation: &str, error: &impl std::fmt::Display, context: Option<serde_json::Value>) {
+    pub async fn record_operation_failure(
+        &self,
+        operation: &str,
+        error: &impl std::fmt::Display,
+        context: Option<serde_json::Value>,
+    ) {
         use crate::adapters::common::TraceHelper;
-        
+
         // Create default context with error information
         let mut context_map = match context {
             Some(ctx) => ctx,
@@ -333,21 +364,33 @@ impl BaseAdapter {
                 "adapter": self.name,
                 "connected": self.is_connected(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
-            })
+            }),
         };
-        
+
         // Add error info to context
         if let serde_json::Value::Object(ref mut map) = context_map {
-            map.insert("error".to_string(), serde_json::Value::String(error.to_string()));
+            map.insert(
+                "error".to_string(),
+                serde_json::Value::String(error.to_string()),
+            );
         }
-        
-        TraceHelper::record_adapter_operation(&self.name, &format!("{}_failure", operation), Some(context_map)).await;
+
+        TraceHelper::record_adapter_operation(
+            &self.name,
+            &format!("{}_failure", operation),
+            Some(context_map),
+        )
+        .await;
     }
-    
+
     /// Publish a connection status event
-    pub async fn publish_connection_event(&self, status: &str, context: Option<serde_json::Value>) -> Result<usize> {
+    pub async fn publish_connection_event(
+        &self,
+        status: &str,
+        context: Option<serde_json::Value>,
+    ) -> Result<usize> {
         let event_type = format!("connection.{}", status);
-        
+
         // Create default context if none provided
         let context = context.unwrap_or_else(|| {
             serde_json::json!({
@@ -356,34 +399,47 @@ impl BaseAdapter {
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         });
-        
+
         self.publish_event(&event_type, context).await
     }
-    
+
     /// Publish a connection established event
-    pub async fn publish_connection_established(&self, details: Option<serde_json::Value>) -> Result<usize> {
+    pub async fn publish_connection_established(
+        &self,
+        details: Option<serde_json::Value>,
+    ) -> Result<usize> {
         self.publish_connection_event("established", details).await
     }
-    
+
     /// Publish a connection failure event
-    pub async fn publish_connection_failed(&self, error: &impl std::fmt::Display, details: Option<serde_json::Value>) -> Result<usize> {
+    pub async fn publish_connection_failed(
+        &self,
+        error: &impl std::fmt::Display,
+        details: Option<serde_json::Value>,
+    ) -> Result<usize> {
         // Create the error context
         let mut context = details.unwrap_or_else(|| {
             serde_json::json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         });
-        
+
         // Add error info to context
         if let serde_json::Value::Object(ref mut map) = context {
-            map.insert("error".to_string(), serde_json::Value::String(error.to_string()));
+            map.insert(
+                "error".to_string(),
+                serde_json::Value::String(error.to_string()),
+            );
         }
-        
+
         self.publish_connection_event("failed", Some(context)).await
     }
-    
+
     /// Publish a connection closed event
-    pub async fn publish_connection_closed(&self, details: Option<serde_json::Value>) -> Result<usize> {
+    pub async fn publish_connection_closed(
+        &self,
+        details: Option<serde_json::Value>,
+    ) -> Result<usize> {
         self.publish_connection_event("closed", details).await
     }
 }
@@ -395,19 +451,19 @@ impl BaseAdapter {
 pub trait ServiceAdapterHelper: ServiceAdapter {
     /// Get a reference to the base adapter
     fn base(&self) -> &BaseAdapter;
-    
+
     /// Default implementation for checking connection status
     fn is_connected_default(&self) -> bool {
         self.base().is_connected()
     }
-    
+
     /// Default implementation for getting adapter name
     fn get_name_default(&self) -> &str {
         self.base().name()
     }
-    
+
     /// Default implementation for disconnect method
-    /// 
+    ///
     /// This method handles the standard disconnection flow:
     /// 1. Records the operation start in trace
     /// 2. Checks if already disconnected
@@ -421,11 +477,16 @@ pub trait ServiceAdapterHelper: ServiceAdapter {
     /// custom cleanup logic specific to their implementation.
     async fn disconnect_default(&self) -> Result<()> {
         // Record the disconnect operation in trace
-        self.base().record_operation_start("disconnect", Some(serde_json::json!({
-            "currently_connected": self.base().is_connected(),
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        }))).await;
-        
+        self.base()
+            .record_operation_start(
+                "disconnect",
+                Some(serde_json::json!({
+                    "currently_connected": self.base().is_connected(),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            )
+            .await;
+
         // Only disconnect if currently connected
         if !self.base().is_connected() {
             debug!("Adapter {} already disconnected", self.base().name());
@@ -439,10 +500,15 @@ pub trait ServiceAdapterHelper: ServiceAdapter {
 
         // Stop the event handler
         match self.base().stop_event_handler().await {
-            Ok(_) => debug!("Successfully stopped event handler for {}", self.base().name()),
-            Err(e) => warn!(error = %e, "Issues while stopping event handler for {}", self.base().name()),
+            Ok(_) => debug!(
+                "Successfully stopped event handler for {}",
+                self.base().name()
+            ),
+            Err(e) => {
+                warn!(error = %e, "Issues while stopping event handler for {}", self.base().name())
+            }
         }
-        
+
         // Run adapter-specific cleanup
         if let Err(e) = self.clean_up_on_disconnect().await {
             warn!(error = %e, "Error during cleanup for {}", self.base().name());
@@ -453,22 +519,31 @@ pub trait ServiceAdapterHelper: ServiceAdapter {
             "message": format!("Disconnected from {} adapter", self.base().name()),
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
-        
-        if let Err(e) = self.base().publish_connection_closed(Some(event_payload.clone())).await {
+
+        if let Err(e) = self
+            .base()
+            .publish_connection_closed(Some(event_payload.clone()))
+            .await
+        {
             warn!(error = %e, "Failed to publish disconnection event for {}", self.base().name());
         }
-        
+
         // Record disconnect success
-        self.base().record_operation_success("disconnect", Some(serde_json::json!({
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        }))).await;
+        self.base()
+            .record_operation_success(
+                "disconnect",
+                Some(serde_json::json!({
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })),
+            )
+            .await;
 
         info!("Disconnected from {} adapter", self.base().name());
         Ok(())
     }
-    
+
     /// Hook method for adapter-specific cleanup on disconnect
-    /// 
+    ///
     /// Override this method to add custom cleanup logic specific to your adapter.
     /// The default implementation does nothing.
     async fn clean_up_on_disconnect(&self) -> Result<()> {

@@ -19,9 +19,9 @@ use tokio::sync::mpsc;
 // use tokio::time::sleep;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 // Import tracing from external crate
-use ::tracing::{debug, error, info, warn, trace};
+use ::tracing::{debug, error, info, trace, warn};
 use ::tracing::{instrument, span};
-use ::tracing::{Level, Instrument};
+use ::tracing::{Instrument, Level};
 
 // Re-export modules
 pub mod adapters;
@@ -30,9 +30,9 @@ pub mod callback_system;
 pub mod common;
 pub mod error;
 pub mod event_bus;
+pub mod flow;
 pub mod plugin;
 pub mod recovery;
-pub mod flow;
 
 // Test modules - only compiled in test mode
 #[cfg(test)]
@@ -44,12 +44,14 @@ mod simple_tests {
     pub use crate::tests::lib_test::*;
 }
 
+pub use callback_system::{CallbackData, CallbackId, CallbackManager, CallbackRegistry};
+pub use common::{
+    ConcurrentMap, ConcurrentSet, OptionalSharedState, RefreshableState, SharedState,
+};
 pub use error::{ErrorCategory, ErrorCode, ErrorSeverity, RetryPolicy, ZelanError, ZelanResult};
-pub use recovery::{AdapterRecovery, RecoveryManager};
+pub use event_bus::{EventBus, EventBusStats, StreamEvent};
 pub use flow::TraceContext;
-pub use callback_system::{CallbackRegistry, CallbackManager, CallbackData, CallbackId};
-pub use common::{SharedState, OptionalSharedState, RefreshableState, ConcurrentMap, ConcurrentSet};
-pub use event_bus::{EventBus, StreamEvent, EventBusStats};
+pub use recovery::{AdapterRecovery, RecoveryManager};
 
 // Import specific adapters for type casting in helper methods
 // use crate::adapters::twitch::TwitchAdapter;
@@ -98,8 +100,6 @@ pub fn default_timeout() -> u64 {
 pub fn default_ping_interval() -> u64 {
     60
 }
-
-
 
 /// Trait for service adapters that can connect to external services
 #[async_trait]
@@ -647,7 +647,7 @@ impl StreamService {
         // Clone all necessary values before the async move block
         let ws_config = self.ws_config.clone();
         let callback_manager = self.callback_manager.clone();
-        
+
         // Get the port for the span
         let ws_port = ws_config.port;
 
@@ -948,7 +948,11 @@ impl WebSocketClientPreferences {
     }
 
     /// Process a client subscription command
-    fn process_subscription_command(&mut self, command: &str, value: &serde_json::Value) -> Result<String, String> {
+    fn process_subscription_command(
+        &mut self,
+        command: &str,
+        value: &serde_json::Value,
+    ) -> Result<String, String> {
         match command {
             "subscribe.sources" => {
                 if let Some(sources) = value.as_array() {
@@ -959,11 +963,14 @@ impl WebSocketClientPreferences {
                         }
                     }
                     self.filtering_active = true;
-                    Ok(format!("Subscribed to {} sources", self.source_filters.len()))
+                    Ok(format!(
+                        "Subscribed to {} sources",
+                        self.source_filters.len()
+                    ))
                 } else {
                     Err("Invalid sources format, expected array".to_string())
                 }
-            },
+            }
             "subscribe.types" => {
                 if let Some(types) = value.as_array() {
                     self.type_filters.clear();
@@ -973,25 +980,33 @@ impl WebSocketClientPreferences {
                         }
                     }
                     self.filtering_active = true;
-                    Ok(format!("Subscribed to {} event types", self.type_filters.len()))
+                    Ok(format!(
+                        "Subscribed to {} event types",
+                        self.type_filters.len()
+                    ))
                 } else {
                     Err("Invalid types format, expected array".to_string())
                 }
-            },
+            }
             "unsubscribe.all" => {
                 self.source_filters.clear();
                 self.type_filters.clear();
                 self.filtering_active = false;
                 Ok("Unsubscribed from all filters".to_string())
-            },
-            _ => Err(format!("Unknown command: {}", command))
+            }
+            _ => Err(format!("Unknown command: {}", command)),
         }
     }
 }
 
 /// Handler for WebSocket client connections
 #[instrument(skip(stream, event_bus, config, callback_manager), fields(client = ?stream.peer_addr().map_or("unknown".to_string(), |addr| addr.to_string())))]
-async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, config: WebSocketConfig, callback_manager: Arc<CallbackManager>) -> ZelanResult<()> {
+async fn handle_websocket_client(
+    stream: TcpStream,
+    event_bus: Arc<EventBus>,
+    config: WebSocketConfig,
+    callback_manager: Arc<CallbackManager>,
+) -> ZelanResult<()> {
     // Get client IP for logging
     let peer_addr = stream
         .peer_addr()
@@ -1151,7 +1166,7 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                                             // Check if it's a command
                                             if let Some(command) = json.get("command").and_then(|c| c.as_str()) {
                                                 let data = json.get("data").unwrap_or(&serde_json::Value::Null);
-                                                
+
                                                 // Process subscription commands
                                                 if command.starts_with("subscribe.") || command.starts_with("unsubscribe.") {
                                                     match preferences.process_subscription_command(command, data) {
@@ -1186,9 +1201,9 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                                                     let callback_info = serde_json::json!({
                                                         "twitch_auth": "Authentication events from Twitch - auth state changes, token refresh, etc.",
                                                         "obs_events": "OBS scene changes, stream status, connection events",
-                                                        "test_events": "Test events (standard, special, initial)" 
+                                                        "test_events": "Test events (standard, special, initial)"
                                                     });
-                                                    
+
                                                     let info_json = serde_json::json!({
                                                         "success": true,
                                                         "command": "info",
@@ -1207,8 +1222,8 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                                                                 "types": preferences.type_filters
                                                             },
                                                             "event_sources": [
-                                                                "twitch", 
-                                                                "obs", 
+                                                                "twitch",
+                                                                "obs",
                                                                 "test"
                                                             ],
                                                             "callback_systems": callback_info
@@ -1220,10 +1235,10 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                                                     }
                                                 } else if command == "callback.stats" {
                                                     debug!(client = %peer_addr, "Retrieving callback statistics");
-                                                    
+
                                                     // Get the callback statistics
                                                     let stats = callback_manager.stats().await;
-                                                    
+
                                                     // Send the statistics back to the client
                                                     let stats_json = serde_json::json!({
                                                         "success": true,
@@ -1234,7 +1249,7 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
                                                             "description": "Number of callbacks registered per system"
                                                         }
                                                     });
-                                                    
+
                                                     if let Err(e) = ws_sender.send(Message::Text(stats_json.to_string().into())).await {
                                                         error!(error = %e, client = %peer_addr, "Error sending callback stats");
                                                         break;
@@ -1291,7 +1306,7 @@ async fn handle_websocket_client(stream: TcpStream, event_bus: Arc<EventBus>, co
             // Add a timeout to check client activity periodically
             _ = tokio::time::sleep(std::time::Duration::from_secs(config.ping_interval)) => {
                 debug!(
-                    client = %peer_addr, 
+                    client = %peer_addr,
                     ping_interval = config.ping_interval,
                     "Sending ping to check if client is alive"
                 );
