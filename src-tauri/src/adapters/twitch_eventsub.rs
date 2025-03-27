@@ -1193,9 +1193,9 @@ impl EventSubClient {
 
                     debug!("Attempting to get user ID from token");
 
-                    // Create client and make the request
+                    // Create client and make the request - using match instead of map_err
                     let client = reqwest::Client::new();
-                    let response = client
+                    let response = match client
                         .get("https://api.twitch.tv/helix/users")
                         .header("Client-ID", client_id.as_str())
                         .header(
@@ -1203,8 +1203,10 @@ impl EventSubClient {
                             format!("Bearer {}", token.access_token.secret()),
                         )
                         .send()
-                        .await
-                        .map_err(|e| {
+                        .await 
+                    {
+                        Ok(resp) => resp,
+                        Err(e) => {
                             let error = AdapterError::api_with_source(
                                 format!("Failed to send request to Twitch API: {}", e),
                                 e,
@@ -1221,8 +1223,9 @@ impl EventSubClient {
                             )
                             .await;
 
-                            error
-                        })?;
+                            return Err(error);
+                        }
+                    };
 
                     // Check response status
                     if !response.status().is_success() {
@@ -1252,26 +1255,29 @@ impl EventSubClient {
                         return Err(error);
                     }
 
-                    // Parse response
-                    let response_json: Value = response.json().await.map_err(|e| {
-                        let error = AdapterError::api_with_source(
-                            format!("Failed to parse response JSON: {}", e),
-                            e,
-                        );
+                    // Parse response - using match instead of map_err
+                    let response_json: Value = match response.json().await {
+                        Ok(json) => json,
+                        Err(e) => {
+                            let error = AdapterError::api_with_source(
+                                format!("Failed to parse response JSON: {}", e),
+                                e,
+                            );
 
-                        // Record failure
-                        TraceHelper::record_adapter_operation(
-                            "twitch_eventsub",
-                            &format!("{}_failure", operation_name),
-                            Some(serde_json::json!({
-                                "error": error.to_string(),
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })),
-                        )
-                        .await;
+                            // Record failure
+                            TraceHelper::record_adapter_operation(
+                                "twitch_eventsub",
+                                &format!("{}_failure", operation_name),
+                                Some(serde_json::json!({
+                                    "error": error.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            )
+                            .await;
 
-                        error
-                    })?;
+                            return Err(error);
+                        }
+                    };
 
                     // Extract user ID
                     if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
