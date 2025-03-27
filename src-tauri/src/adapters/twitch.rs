@@ -459,37 +459,38 @@ impl TwitchAdapter {
         let event_bus = self.base.event_bus();
         // self_clone is not needed here
 
-        // Define retry options
-        let retry_options = RetryOptions::new(
-            2, // Try twice
-            BackoffStrategy::Constant(Duration::from_secs(1)),
-            true, // Add jitter
-        );
-
-        // Use execute_with_retry for client creation
-        let result = execute_with_retry("init_eventsub_client", retry_options, |attempt| {
-            let event_bus_clone = event_bus.clone();
-            // No need for self_clone here since it's not used
-
-            async move {
-                debug!(
-                    attempt = attempt,
-                    "Attempting to initialize EventSub client"
-                );
-
-                match EventSubClient::new(event_bus_clone.clone()).await {
-                    Ok(client) => Ok(client),
-                    Err(e) => {
-                        // Convert the error to our adapter error type
-                        Err(AdapterError::from_anyhow_error(
-                            "connection",
-                            format!("Failed to create EventSub client (attempt {})", attempt),
-                            anyhow::anyhow!(e),
-                        ))
-                    }
-                }
-            }
-        })
+        // Use our new retry helper
+        use crate::common::retry::{with_retry_and_backoff, constant_backoff, with_jitter};
+        
+        // Set up operation name for logging and tracing
+        let operation_name = "init_eventsub_client";
+        
+        // Create a constant backoff with jitter
+        let backoff_fn = with_jitter(constant_backoff(1000)); // 1 second (1000ms)
+        
+        // Use our retry helper for client creation
+        let result = with_retry_and_backoff(
+            || {
+                let event_bus_clone = event_bus.clone();
+                
+                Box::pin(async move {
+                    debug!("Attempting to initialize EventSub client");
+                    
+                    EventSubClient::new(event_bus_clone.clone()).await
+                        .map_err(|e| {
+                            // Convert the error to our adapter error type
+                            AdapterError::from_anyhow_error(
+                                "connection",
+                                "Failed to create EventSub client",
+                                anyhow::anyhow!(e),
+                            )
+                        })
+                })
+            },
+            2, // Try twice, just like before
+            operation_name,
+            backoff_fn,
+        )
         .await;
 
         match result {
@@ -575,46 +576,55 @@ impl TwitchAdapter {
 
             let self_clone = self.clone();
 
-            // Define retry options for token retrieval
-            let retry_options = RetryOptions::new(
-                2, // Max 2 attempts
-                BackoffStrategy::Constant(Duration::from_secs(1)),
-                true, // Add jitter
-            );
-
-            // Use execute_with_retry to attempt token retrieval with built-in restoration fallback
-            let token_result = execute_with_retry("get_token_for_eventsub", retry_options, |attempt| {
-                let self_inner = self_clone.clone();
-                
-                async move {
-                    debug!(attempt = attempt, "Attempting to get token for EventSub");
+            // Use our new retry helper
+            use crate::common::retry::{with_retry_and_backoff, constant_backoff, with_jitter};
+            
+            // Set up operation name for logging and tracing
+            let operation_name = "get_token_for_eventsub";
+            
+            // Create a constant backoff with jitter
+            let backoff_fn = with_jitter(constant_backoff(1000)); // 1 second (1000ms)
+            
+            // Use our retry helper for token retrieval with restoration fallback
+            let token_result = with_retry_and_backoff(
+                || {
+                    let self_inner = self_clone.clone();
                     
-                    if attempt == 1 {
-                        // First attempt - try direct token retrieval
-                        let auth_manager = self_inner.auth_manager.read().await;
-                        if let Some(token) = auth_manager.get_token().await {
-                            info!("Auth manager has valid token: access_token_len={}, has_refresh_token={}, expires_in={}s", 
-                                token.access_token.secret().len(),
-                                token.refresh_token.is_some(),
-                                token.expires_in().as_secs());
-                            
-                            // Record token found
-                            TraceHelper::record_adapter_operation(
-                                "twitch",
-                                "eventsub_token_found",
-                                Some(serde_json::json!({
-                                    "has_refresh_token": token.refresh_token.is_some(),
-                                    "expires_in_seconds": token.expires_in().as_secs(),
-                                })),
-                            ).await;
-                            
-                            drop(auth_manager);
-                            return Ok(token);
-                        }
+                    Box::pin(async move {
+                        // The attempt will be tracked internally in our retry helper
+                        // For compatibility with existing code that needs the attempt number
+                        static ATTEMPT_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+                        let attempt = ATTEMPT_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                         
-                        // No token in auth manager
-                        drop(auth_manager);
-                        return Err(AdapterError::auth("No token in auth manager"));
+                        debug!(attempt = attempt, "Attempting to get token for EventSub");
+                        
+                        if attempt == 1 {
+                            // First attempt - try direct token retrieval
+                            let auth_manager = self_inner.auth_manager.read().await;
+                            if let Some(token) = auth_manager.get_token().await {
+                                info!("Auth manager has valid token: access_token_len={}, has_refresh_token={}, expires_in={}s", 
+                                    token.access_token.secret().len(),
+                                    token.refresh_token.is_some(),
+                                    token.expires_in().as_secs());
+                                
+                                // Record token found
+                                TraceHelper::record_adapter_operation(
+                                    "twitch",
+                                    "eventsub_token_found",
+                                    Some(serde_json::json!({
+                                        "has_refresh_token": token.refresh_token.is_some(),
+                                        "expires_in_seconds": token.expires_in().as_secs(),
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })),
+                                ).await;
+                                
+                                drop(auth_manager);
+                                return Ok(token);
+                            }
+                            
+                            // No token in auth manager
+                            drop(auth_manager);
+                            return Err(AdapterError::auth("No token in auth manager"));
                     } else {
                         // Second attempt - try restoration flow
                         warn!("Auth manager has no token, attempting to restore from config");
@@ -667,8 +677,12 @@ impl TwitchAdapter {
                         drop(auth_manager);
                         return Err(AdapterError::auth("No token available after restoration"));
                     }
-                }
-            }).await;
+                })
+            },
+            2, // Max attempts
+            operation_name,
+            backoff_fn,
+        ).await;
 
             match token_result {
                 Ok(token) => token,
