@@ -153,11 +153,11 @@ impl ServiceAdapter for ObsAdapter {
 
     /// Connect to OBS
     async fn connect(&self) -> Result<(), AdapterError> {
-        debug!("OBS adapter connect() called");
+        trace!("OBS adapter connect() called");
 
         // Only connect if not already connected
         if self.connected.load(Ordering::SeqCst) {
-            debug!("OBS adapter already connected, skipping connect");
+            trace!("OBS adapter already connected, skipping connect");
             return Ok(());
         }
 
@@ -363,8 +363,8 @@ impl ServiceAdapter for ObsAdapter {
                     event = event_listener.next() => {
                         match event {
                             Some(Ok(event)) => {
-                                // Debug log the event
-                                debug!("Received OBS event: {:?}", event);
+                                // Log the event at trace level
+                                trace!("Received OBS event: {:?}", event);
 
                                 // Map OBS events to our event model
                                 let adapter_type_str = adapter_type.clone();
@@ -622,11 +622,11 @@ impl ServiceAdapter for ObsAdapter {
 
     /// Disconnect from OBS
     async fn disconnect(&self) -> Result<(), AdapterError> {
-        debug!("OBS adapter disconnect() called");
+        trace!("OBS adapter disconnect() called");
 
         // Only disconnect if connected
         if !self.connected.load(Ordering::SeqCst) {
-            debug!("OBS adapter not connected, skipping disconnect");
+            trace!("OBS adapter not connected, skipping disconnect");
             return Ok(());
         }
 

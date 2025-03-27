@@ -173,7 +173,7 @@ impl TwitchAuthManager {
         F: Fn(AuthEvent) -> Result<()> + Send + Sync + 'static,
     {
         let id = self.auth_callbacks.register(callback).await;
-        info!(callback_id = %id, "Registered auth callback");
+        debug!(callback_id = %id, "Registered auth callback");
         Ok(id)
     }
 
@@ -183,7 +183,7 @@ impl TwitchAuthManager {
         let count = self.auth_callbacks.trigger(event.clone()).await?;
 
         // Provide a detailed log message for better diagnostics
-        info!(
+        debug!(
             event_type = %event.event_type(),
             callbacks_executed = count,
             "Auth event dispatched to {} callbacks",
@@ -195,7 +195,7 @@ impl TwitchAuthManager {
 
     /// Manually trigger an auth event for reactive handling
     pub async fn trigger_auth_event(&self, event: AuthEvent) -> Result<()> {
-        info!("Manually triggering auth event: {:?}", event);
+        debug!("Manually triggering auth event: {:?}", event);
         self.send_event(event).await
     }
 
@@ -374,7 +374,7 @@ impl TwitchAuthManager {
             let expires_in_mins = expires_in_secs / 60;
             let expires_in_hours = expires_in_mins / 60;
 
-            info!(
+            debug!(
                 "Current token: expires_in={}s ({}m or {}h), has_refresh_token={}",
                 expires_in_secs,
                 expires_in_mins,
@@ -463,10 +463,10 @@ impl TwitchAuthManager {
                                 }
                             };
 
-                            info!("Token successfully validated or refreshed");
+                            debug!("Token successfully validated or refreshed");
 
                             // Log token details without exposing the actual token
-                            info!(
+                            debug!(
                                 "Token details: expires_in={}s, has_refresh_token={}",
                                 refreshed_token.expires_in().as_secs(),
                                 refreshed_token.refresh_token.is_some()
@@ -524,7 +524,7 @@ impl TwitchAuthManager {
                                 }
                             };
 
-                            info!("Access token is still valid (validated directly)");
+                            debug!("Access token is still valid (validated directly)");
 
                             // Log success in trace
                             TraceHelper::record_adapter_operation(

@@ -141,7 +141,7 @@ impl ServiceAdapter for TwitchAdapter {
 
     /// Connect to the service
     async fn connect(&self) -> Result<(), AdapterError> {
-        debug!("Twitch adapter connect() called");
+        trace!("Twitch adapter connect() called");
 
         // Get service helper features
         let features = self.service_helper.get_features().await;

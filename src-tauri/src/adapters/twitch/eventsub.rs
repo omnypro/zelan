@@ -418,7 +418,7 @@ impl EventSubClient {
                         )
                         .await;
 
-                        debug!("Attempting to refresh token");
+                        trace!("Attempting to refresh token");
 
                         // Execute the token refresh operation
                         match refresher().await {
@@ -496,7 +496,7 @@ impl EventSubClient {
             Ok(())
         } else {
             // Token is still valid
-            debug!("Token is still valid for {} seconds", expires_in.as_secs());
+            trace!("Token is still valid for {} seconds", expires_in.as_secs());
 
             // Record that token is still valid
             TraceHelper::record_adapter_operation(
@@ -938,7 +938,7 @@ impl EventSubClient {
                     )
                     .await;
 
-                    debug!("Attempting to connect to EventSub WebSocket");
+                    trace!("Attempting to connect to EventSub WebSocket");
 
                     // Execute the operation with timeout
                     // Using match instead of map_err to allow await in error handling
@@ -1193,7 +1193,7 @@ impl EventSubClient {
                     )
                     .await;
 
-                    debug!("Attempting to get user ID from token");
+                    trace!("Attempting to get user ID from token");
 
                     // Create client and make the request - using match instead of map_err
                     let client = reqwest::Client::new();
@@ -1682,7 +1682,7 @@ impl EventSubClient {
                     }
                 }
             }
-            debug!("Ping task stopped");
+            trace!("Ping task stopped");
         });
 
         // Message processing loop
@@ -1694,7 +1694,7 @@ impl EventSubClient {
             let conn = match &mut *conn_guard {
                 Some(c) => c,
                 None => {
-                    debug!("Connection closed, stopping message processing");
+                    trace!("Connection closed, stopping message processing");
                     break;
                 }
             };
@@ -1710,7 +1710,7 @@ impl EventSubClient {
                                     // Process based on message type
                                     match websocket_data {
                                         EventsubWebsocketData::Keepalive { .. } => {
-                                            debug!("Received keepalive");
+                                            trace!("Received keepalive");
                                             conn.last_keepalive = std::time::Instant::now();
                                         }
                                         EventsubWebsocketData::Reconnect { payload, .. } => {
@@ -1841,8 +1841,8 @@ impl EventSubClient {
                                                         event_json.clone()
                                                     };
 
-                                                    // Debug log to see the structure after extraction
-                                                    debug!(
+                                                    // Trace log to see the structure after extraction
+                                                    trace!(
                                                         event_type = %event_type,
                                                         struct_name = %struct_name,
                                                         "Extracted payload: {}",
@@ -1920,11 +1920,11 @@ impl EventSubClient {
                                         }
                                         EventsubWebsocketData::Welcome { .. } => {
                                             // This should have been handled during connection
-                                            debug!("Received welcome message after connection was established");
+                                            trace!("Received welcome message after connection was established");
                                         }
                                         // Catch all for any new message types added in the future
                                         _ => {
-                                            debug!("Received unhandled EventSub message type");
+                                            trace!("Received unhandled EventSub message type");
                                         }
                                     }
                                 }
@@ -1935,7 +1935,7 @@ impl EventSubClient {
                         }
                         WsMessage::Ping(data) => {
                             // Respond to ping
-                            debug!("Received ping, sending pong");
+                            trace!("Received ping, sending pong");
                             if let Err(e) = conn.ws_stream.send(WsMessage::Pong(data)).await {
                                 error!("Failed to send pong: {}", e);
                                 break;
@@ -1943,7 +1943,7 @@ impl EventSubClient {
                         }
                         WsMessage::Pong(_) => {
                             // Received pong response
-                            debug!("Received pong");
+                            trace!("Received pong");
                         }
                         WsMessage::Close(frame) => {
                             info!("Received close frame: {:?}", frame);

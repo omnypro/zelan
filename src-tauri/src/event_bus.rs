@@ -153,7 +153,7 @@ impl EventBus {
 
     /// Get a receiver to subscribe to events
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
-        debug!("New subscriber registered to event bus");
+        trace!("New subscriber registered to event bus");
         self.sender.subscribe()
     }
 
@@ -163,7 +163,7 @@ impl EventBus {
         let source = event.source.clone();
         let event_type = event.event_type.clone();
 
-        debug!(
+        trace!(
             source = %source,
             event_type = %event_type,
             "Publishing event to bus"
@@ -188,7 +188,7 @@ impl EventBus {
                 *stats_guard.source_counts.entry(source).or_insert(0) += 1;
                 *stats_guard.type_counts.entry(event_type).or_insert(0) += 1;
 
-                debug!(receivers, "Event published successfully");
+                trace!(receivers, "Event published successfully");
                 Ok(receivers)
             }
             Err(err) => {

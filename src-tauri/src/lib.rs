@@ -1120,7 +1120,7 @@ async fn handle_websocket_client(
                     Ok(event) => {
                         // Check if this client should receive this event based on filters
                         if !preferences.should_receive_event(&event) {
-                            debug!(
+                            trace!(
                                 client = %peer_addr,
                                 event_source = %event.source(),
                                 event_type = %event.event_type(),
@@ -1131,7 +1131,7 @@ async fn handle_websocket_client(
 
                         // We no longer need to create a cache key as we serialize each event
 
-                        debug!(
+                        trace!(
                             client = %peer_addr,
                             event_source = %event.source(),
                             event_type = %event.event_type(),
@@ -1198,7 +1198,7 @@ async fn handle_websocket_client(
                         // Handle client messages
                         match msg {
                             Message::Text(text) => {
-                                debug!(client = %peer_addr, message = %text, "Received text message");
+                                trace!(client = %peer_addr, message = %text, "Received text message");
 
                                 // Process client commands
                                 if text == "ping" {
@@ -1317,7 +1317,7 @@ async fn handle_websocket_client(
                                         },
                                         Err(_) => {
                                             // Not JSON, ignore non-standard messages
-                                            debug!(client = %peer_addr, "Ignoring non-JSON message");
+                                            trace!(client = %peer_addr, "Ignoring non-JSON message");
                                         }
                                     }
                                 }
@@ -1335,7 +1335,7 @@ async fn handle_websocket_client(
                                 }
                             },
                             _ => {
-                                debug!(client = %peer_addr, message_type = ?msg, "Received other message type");
+                                trace!(client = %peer_addr, message_type = ?msg, "Received other message type");
                             } // Ignore other message types
                         }
                     }
@@ -1352,7 +1352,7 @@ async fn handle_websocket_client(
 
             // Add a timeout to check client activity periodically
             _ = tokio::time::sleep(std::time::Duration::from_secs(config.ping_interval)) => {
-                debug!(
+                trace!(
                     client = %peer_addr,
                     ping_interval = config.ping_interval,
                     "Sending ping to check if client is alive"
