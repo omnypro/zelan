@@ -945,7 +945,9 @@ impl EventSubClient {
                     let connect_result = match timeout(
                         Duration::from_secs(WEBSOCKET_CONNECT_TIMEOUT_SECS),
                         connect_async(&ws_url),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(result) => result,
                         Err(_) => {
                             let error = AdapterError::connection(format!(
@@ -1015,7 +1017,7 @@ impl EventSubClient {
 
         // Create connection with no session ID yet
         let mut conn = EventSubConnection {
-            ws_stream,  // ws_stream is already unwrapped by the retry function
+            ws_stream, // ws_stream is already unwrapped by the retry function
             session_id: String::new(),
             last_keepalive: std::time::Instant::now(),
         };
@@ -1203,7 +1205,7 @@ impl EventSubClient {
                             format!("Bearer {}", token.access_token.secret()),
                         )
                         .send()
-                        .await 
+                        .await
                     {
                         Ok(resp) => resp,
                         Err(e) => {

@@ -374,7 +374,7 @@ impl TestAdapter {
 
             // Set up operation name for the initial publish operation
             let operation_name = "publish_initial_event";
-            
+
             // Create a backoff strategy with exponential backoff and jitter
             // Using parameters from the original publish_retry_options
             let backoff_fn = with_jitter(exponential_backoff(10, Some(200)));
@@ -517,15 +517,15 @@ impl TestAdapter {
 
             // Set up operation name for the callback trigger
             let operation_name = "trigger_initial_callback";
-            
+
             // We already have the backoff functions imported, so reuse the strategy
             // using the same parameters from publish_retry_options
-            
+
             // Clone values needed for the retry closure
             let callbacks = self.callbacks.clone();
             let callback_event_clone = callback_event.clone();
             let counter = i;
-            
+
             // Create a new backoff function for each loop iteration
             let callback_backoff_fn = with_jitter(exponential_backoff(10, Some(200)));
 

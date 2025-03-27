@@ -479,7 +479,7 @@ impl TwitchApiClient {
         let token_clone = token.clone();
         let self_clone = self.clone();
         let query_param_clone = query_param.clone();
-        
+
         // Store user_id and user_login as owned Strings inside the closure
         let user_id_owned = user_id.map(|s| s.to_string());
         let user_login_owned = user_login.map(|s| s.to_string());

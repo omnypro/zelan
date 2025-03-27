@@ -460,23 +460,24 @@ impl TwitchAdapter {
         // self_clone is not needed here
 
         // Use our new retry helper
-        use crate::common::retry::{with_retry_and_backoff, constant_backoff, with_jitter};
-        
+        use crate::common::retry::{constant_backoff, with_jitter, with_retry_and_backoff};
+
         // Set up operation name for logging and tracing
         let operation_name = "init_eventsub_client";
-        
+
         // Create a constant backoff with jitter
         let backoff_fn = with_jitter(constant_backoff(1000)); // 1 second (1000ms)
-        
+
         // Use our retry helper for client creation
         let result = with_retry_and_backoff(
             || {
                 let event_bus_clone = event_bus.clone();
-                
+
                 Box::pin(async move {
                     debug!("Attempting to initialize EventSub client");
-                    
-                    EventSubClient::new(event_bus_clone.clone()).await
+
+                    EventSubClient::new(event_bus_clone.clone())
+                        .await
                         .map_err(|e| {
                             // Convert the error to our adapter error type
                             AdapterError::from_anyhow_error(
@@ -577,14 +578,14 @@ impl TwitchAdapter {
             let self_clone = self.clone();
 
             // Use our new retry helper
-            use crate::common::retry::{with_retry_and_backoff, constant_backoff, with_jitter};
-            
+            use crate::common::retry::{constant_backoff, with_jitter, with_retry_and_backoff};
+
             // Set up operation name for logging and tracing
             let operation_name = "get_token_for_eventsub";
-            
+
             // Create a constant backoff with jitter
             let backoff_fn = with_jitter(constant_backoff(1000)); // 1 second (1000ms)
-            
+
             // Use our retry helper for token retrieval with restoration fallback
             let token_result = with_retry_and_backoff(
                 || {

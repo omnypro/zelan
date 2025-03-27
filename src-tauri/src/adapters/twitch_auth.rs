@@ -412,14 +412,17 @@ impl TwitchAuthManager {
                         let client_id = match get_client_id() {
                             Ok(id) => id,
                             Err(e) => {
-                                return Err(anyhow!("Failed to get client ID for token refresh: {}", e));
+                                return Err(anyhow!(
+                                    "Failed to get client ID for token refresh: {}",
+                                    e
+                                ));
                             }
                         };
 
                         // Create HTTP client - using match instead of map_err
                         let http_client = match reqwest::Client::builder()
                             .redirect(reqwest::redirect::Policy::none())
-                            .build() 
+                            .build()
                         {
                             Ok(client) => client,
                             Err(e) => {
@@ -449,10 +452,14 @@ impl TwitchAuthManager {
                                 client_id,
                                 None, // client_secret
                             )
-                            .await {
+                            .await
+                            {
                                 Ok(token) => token,
                                 Err(e) => {
-                                    return Err(anyhow!("Failed to validate or refresh token: {}", e));
+                                    return Err(anyhow!(
+                                        "Failed to validate or refresh token: {}",
+                                        e
+                                    ));
                                 }
                             };
 
@@ -511,7 +518,7 @@ impl TwitchAuthManager {
 
                             // Direct token validation - using match instead of map_err
                             match token.access_token.validate_token(&http_client).await {
-                                Ok(_) => {},
+                                Ok(_) => {}
                                 Err(e) => {
                                     return Err(anyhow!("Token validation failed: {}", e));
                                 }
@@ -660,7 +667,8 @@ impl TwitchAuthManager {
                     // Create HTTP client for this attempt - using match instead of map_err
                     let http_client = match reqwest::Client::builder()
                         .redirect(reqwest::redirect::Policy::none())
-                        .build() {
+                        .build()
+                    {
                         Ok(client) => client,
                         Err(e) => {
                             return Err(anyhow!("Failed to create HTTP client: {}", e));
@@ -683,7 +691,8 @@ impl TwitchAuthManager {
                             client_id,
                             None, // client_secret
                         )
-                        .await {
+                        .await
+                        {
                             Ok(token) => token,
                             Err(e) => {
                                 return Err(anyhow!("Failed to restore or refresh token: {}", e));
@@ -728,7 +737,7 @@ impl TwitchAuthManager {
 
                         // Validate token directly - using match instead of map_err
                         match access_token_obj.validate_token(&http_client).await {
-                            Ok(_) => {},
+                            Ok(_) => {}
                             Err(e) => {
                                 return Err(anyhow!("Token validation failed: {}", e));
                             }
@@ -743,7 +752,8 @@ impl TwitchAuthManager {
                             None, // No refresh token
                             None, // No client secret
                         )
-                        .await {
+                        .await
+                        {
                             Ok(token) => token,
                             Err(e) => {
                                 return Err(anyhow!(
