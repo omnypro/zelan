@@ -58,6 +58,13 @@ impl Clone for BaseAdapter {
         // Create a new instance with the same name and event bus
         // IMPORTANT: We must maintain the proper pattern of sharing immutable state
         // through Arc and using atomic operations for shared mutable state.
+        let config_value = match self.config.try_lock() {
+            Ok(guard) => guard.clone(),
+            // If we can't get the lock immediately, use an empty JSON object
+            // This is better than blocking or panicking
+            Err(_) => serde_json::Value::Object(serde_json::Map::new()),
+        };
+
         Self {
             name: self.name.clone(),
             id: self.id.clone(),
@@ -66,7 +73,7 @@ impl Clone for BaseAdapter {
             shutdown_signal: Mutex::new(None), // Don't clone the shutdown channel - each clone manages its own tasks
             event_handler: Mutex::new(None), // Don't clone the task handle - each clone manages its own tasks
             last_error: Mutex::new(None), // Don't clone the last error - each clone tracks its own errors
-            config: Mutex::new(self.config.blocking_lock().clone()), // Clone the config JSON
+            config: Mutex::new(config_value), // Clone the config JSON without blocking
             token_manager: Arc::clone(&self.token_manager), // Share the token manager
         }
     }

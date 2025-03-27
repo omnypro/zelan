@@ -596,13 +596,25 @@ impl TestAdapter {
 // Implement Clone for TestAdapter
 impl Clone for TestAdapter {
     fn clone(&self) -> Self {
+        // This implementation is already correctly using Arc::clone for all shared state
+        // which provides a proper non-blocking clone that preserves callbacks.
         Self {
+            // Clone the base adapter (using our updated non-blocking implementation)
             base: self.base.clone(),
+
+            // Properly share config via Arc::clone
             config: Arc::clone(&self.config),
+
+            // CRITICAL: Share callbacks via Arc::clone to ensure all adapter clones
+            // trigger the same callback functions
             callbacks: Arc::clone(&self.callbacks),
+
+            // Share other state via Arc::clone
             counter: Arc::clone(&self.counter),
             is_running: Arc::clone(&self.is_running),
             is_streaming: Arc::clone(&self.is_streaming),
+
+            // Share the service helper
             service_helper: self.service_helper.clone(),
         }
     }

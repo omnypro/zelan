@@ -1019,16 +1019,49 @@ impl TwitchAdapter {
 // Implement Clone for TwitchAdapter
 impl Clone for TwitchAdapter {
     fn clone(&self) -> Self {
+        // Create a non-blocking clone that properly preserves shared state
         Self {
+            // Clone the base adapter (using our non-blocking implementation)
             base: self.base.clone(),
+
+            // CRITICAL: Share the auth manager which contains callbacks
             auth_manager: self.auth_manager.clone(),
+
+            // Share the API client
             api_client: self.api_client.clone(),
-            eventsub_client: RwLock::new(self.eventsub_client.blocking_read().clone()),
-            stream_info: RwLock::new(self.stream_info.blocking_read().clone()),
-            channel_info: RwLock::new(self.channel_info.blocking_read().clone()),
-            pending_auth: RwLock::new(*self.pending_auth.blocking_read()),
-            config: RwLock::new(self.config.blocking_read().clone()),
-            last_stream_id: RwLock::new(self.last_stream_id.blocking_read().clone()),
+
+            // Clone state without blocking using try_read where possible
+            eventsub_client: RwLock::new(match self.eventsub_client.try_read() {
+                Ok(client) => client.clone(),
+                Err(_) => None,
+            }),
+
+            stream_info: RwLock::new(match self.stream_info.try_read() {
+                Ok(info) => info.clone(),
+                Err(_) => None,
+            }),
+
+            channel_info: RwLock::new(match self.channel_info.try_read() {
+                Ok(info) => info.clone(),
+                Err(_) => None,
+            }),
+
+            pending_auth: RwLock::new(match self.pending_auth.try_read() {
+                Ok(pending) => *pending,
+                Err(_) => false,
+            }),
+
+            config: RwLock::new(match self.config.try_read() {
+                Ok(config) => config.clone(),
+                Err(_) => TwitchConfig::default(),
+            }),
+
+            last_stream_id: RwLock::new(match self.last_stream_id.try_read() {
+                Ok(id) => id.clone(),
+                Err(_) => None,
+            }),
+
+            // Share the service helper
             service_helper: self.service_helper.clone(),
         }
     }

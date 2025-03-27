@@ -133,26 +133,32 @@ pub struct ObsAdapter {
 impl Clone for ObsAdapter {
     fn clone(&self) -> Self {
         Self {
+            // Clone the base adapter (using the non-blocking implementation)
             base: self.base.clone(),
-            // Use mutex clone instead of blocking_lock to avoid potential deadlocks
+
+            // Each clone starts with no active OBS client - it will be initialized on connect
             obs_client: Mutex::new(None),
-            // Clone RwLock data safely
+
+            // Clone config without blocking - use try_read
             config: RwLock::new(match self.config.try_read() {
                 Ok(config) => config.clone(),
-                // If lock is held, create a default config
+                // If we can't get the lock immediately, use default config
                 Err(_) => ObsConfig::default(),
             }),
-            // Clone RwLock data safely
-            shutdown_tx: RwLock::new(match self.shutdown_tx.try_read() {
-                Ok(tx) => tx.clone(),
-                Err(_) => None,
-            }),
-            // Share the connection state
+
+            // New clones have no shutdown channel until they connect
+            shutdown_tx: RwLock::new(None),
+
+            // Share connection state but create a new atomic with the same value
             connected: AtomicBool::new(self.connected.load(Ordering::SeqCst)),
-            // Properly share the callback registry using Arc
+
+            // CRITICAL: Share the callback registry using Arc::clone
+            // This ensures all adapter clones trigger the same callbacks
             callback_registry: Arc::clone(&self.callback_registry),
-            // Properly share event subscriptions using Arc
+
+            // Share immutable event subscriptions via Arc::clone
             event_subscriptions: Arc::clone(&self.event_subscriptions),
+
             // Share the service helper implementation
             service_helper: self.service_helper.clone(),
         }
