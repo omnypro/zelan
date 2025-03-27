@@ -199,9 +199,9 @@ impl TwitchApiClient {
         // Use the retry helper
         let result = with_retry(
             || {
-                // Create clones for the async block
+                // Create clones for each invocation of the closure
                 let token = token_clone.clone();
-                let http_client = self_clone.http_client.clone();
+                let self_clone = self_clone.clone(); // Clone the whole struct
                 let broadcaster_id = broadcaster_id_clone.clone();
 
                 Box::pin(async move {
@@ -216,28 +216,31 @@ impl TwitchApiClient {
                     )
                     .await;
 
-                    // Get client ID from environment
-                    let client_id = get_client_id().map_err(|e| {
-                        // Record failure and convert to AdapterError
-                        let error = AdapterError::from_anyhow_error(
-                            "config",
-                            format!("Failed to get client ID: {}", e),
-                            e,
-                        );
+                    // Get client ID from environment - using match instead of map_err
+                    let client_id = match get_client_id() {
+                        Ok(id) => id,
+                        Err(e) => {
+                            // Record failure and convert to AdapterError
+                            let error = AdapterError::from_anyhow_error(
+                                "config",
+                                format!("Failed to get client ID: {}", e),
+                                e,
+                            );
 
-                        TraceHelper::record_adapter_operation(
-                            "twitch",
-                            &format!("{}_failure", operation_name),
-                            Some(serde_json::json!({
-                                "error": error.to_string(),
-                                "broadcaster_id": broadcaster_id,
-                                "timestamp": chrono::Utc::now().to_rfc3339(),
-                            })),
-                        )
-                        .await;
+                            TraceHelper::record_adapter_operation(
+                                "twitch",
+                                &format!("{}_failure", operation_name),
+                                Some(serde_json::json!({
+                                    "error": error.to_string(),
+                                    "broadcaster_id": broadcaster_id,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            )
+                            .await;
 
-                        error
-                    })?;
+                            return Err(error);
+                        }
+                    };
 
                     // Define the API endpoint
                     let url = format!(
@@ -253,39 +256,37 @@ impl TwitchApiClient {
                         format!("Bearer {}", token.access_token.secret()),
                     );
 
-                    // Make the request using our abstracted HTTP client
-                    let response =
-                        self_clone
-                            .http_client
-                            .get(&url, headers)
-                            .await
-                            .map_err(|e| {
-                                // Log and convert to AdapterError
-                                warn!(
-                                    error = %e,
-                                    "HTTP request failed when fetching channel info"
-                                );
+                    // Make the request using our abstracted HTTP client - using match instead of map_err
+                    let response = match self_clone.http_client.get(&url, headers).await {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            // Log and convert to AdapterError
+                            warn!(
+                                error = %e,
+                                "HTTP request failed when fetching channel info"
+                            );
 
-                                let error = AdapterError::from_anyhow_error(
-                                    "connection",
-                                    format!("Failed to connect to Twitch API: {}", e),
-                                    anyhow::anyhow!(e),
-                                );
+                            let error = AdapterError::from_anyhow_error(
+                                "connection",
+                                format!("Failed to connect to Twitch API: {}", e),
+                                anyhow::anyhow!(e),
+                            );
 
-                                // Record failure
-                                TraceHelper::record_adapter_operation(
-                                    "twitch",
-                                    &format!("{}_failure", operation_name),
-                                    Some(serde_json::json!({
-                                        "error": error.to_string(),
-                                        "broadcaster_id": broadcaster_id,
-                                        "timestamp": chrono::Utc::now().to_rfc3339(),
-                                    })),
-                                )
-                                .await;
+                            // Record failure
+                            TraceHelper::record_adapter_operation(
+                                "twitch",
+                                &format!("{}_failure", operation_name),
+                                Some(serde_json::json!({
+                                    "error": error.to_string(),
+                                    "broadcaster_id": broadcaster_id,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                })),
+                            )
+                            .await;
 
-                                error
-                            })?;
+                            return Err(error);
+                        }
+                    };
 
                     // Check status
                     if !(response.status() >= 200 && response.status() < 300) {
@@ -318,8 +319,9 @@ impl TwitchApiClient {
                     }
 
                     // Parse JSON from the response body
-                    let response_json: Value =
-                        serde_json::from_str(response.body()).map_err(|e| {
+                    let response_json: Value = match serde_json::from_str(response.body()) {
+                        Ok(json) => json,
+                        Err(e) => {
                             let error = AdapterError::api_with_source(
                                 "Failed to parse Twitch API response",
                                 e,
@@ -337,15 +339,17 @@ impl TwitchApiClient {
                             )
                             .await;
 
-                            error
-                        })?;
+                            return Err(error);
+                        }
+                    };
 
                     // Check if we have data
                     if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
                         if let Some(channel) = data.first() {
                             // Convert to ChannelInformation
-                            let channel_info =
-                                serde_json::from_value(channel.clone()).map_err(|e| {
+                            let channel_info = match serde_json::from_value(channel.clone()) {
+                                Ok(info) => info,
+                                Err(e) => {
                                     let error = AdapterError::from_anyhow_error(
                                         "api",
                                         "Failed to deserialize channel information",
@@ -364,8 +368,9 @@ impl TwitchApiClient {
                                     )
                                     .await;
 
-                                    error
-                                })?;
+                                    return Err(error);
+                                }
+                            };
 
                             info!(
                                 broadcaster_id = %broadcaster_id,
@@ -473,21 +478,28 @@ impl TwitchApiClient {
         // Clone values for use in retry operation
         let token_clone = token.clone();
         let self_clone = self.clone();
-        let user_id_str = user_id.map(|s| s.to_string());
-        let user_login_str = user_login.map(|s| s.to_string());
         let query_param_clone = query_param.clone();
+        
+        // Store user_id and user_login as owned Strings inside the closure
+        let user_id_owned = user_id.map(|s| s.to_string());
+        let user_login_owned = user_login.map(|s| s.to_string());
 
         // Use the retry helper
         with_retry(
             || {
-                // Create clones for the async block
+                // Create clones for each invocation of the closure
                 let token = token_clone.clone();
-                let http_client = self_clone.http_client.clone();
+                let self_clone = self_clone.clone();
                 let query_param = query_param_clone.clone();
-                let user_id_ref = user_id_str.as_deref();
-                let user_login_ref = user_login_str.as_deref();
+                
+                // Create owned versions for this iteration of the closure
+                let user_id_owned = user_id_owned.clone();
+                let user_login_owned = user_login_owned.clone();
                 
                 Box::pin(async move {
+                    // Inside the async block, get references when needed
+                    let user_id_ref = user_id_owned.as_deref();
+                    let user_login_ref = user_login_owned.as_deref();
                     // Record attempt
                     TraceHelper::record_adapter_operation(
                         "twitch",
@@ -499,9 +511,10 @@ impl TwitchApiClient {
                         })),
                     ).await;
     
-                    // Get client ID from environment
-                    let client_id = get_client_id()
-                        .map_err(|e| {
+                    // Get client ID from environment - using match instead of map_err
+                    let client_id = match get_client_id() {
+                        Ok(id) => id,
+                        Err(e) => {
                             // Record failure and convert to AdapterError
                             let error = AdapterError::from_anyhow_error(
                                 "config",
@@ -520,8 +533,9 @@ impl TwitchApiClient {
                                 })),
                             ).await;
                             
-                            error
-                        })?;
+                            return Err(error);
+                        }
+                    };
     
                     // Define the API endpoint
                     let url = format!("https://api.twitch.tv/helix/streams?{}", query_param);
@@ -534,9 +548,10 @@ impl TwitchApiClient {
                         format!("Bearer {}", token.access_token.secret()),
                     );
     
-                    // Make the request using our abstracted HTTP client
-                    let response = self_clone.http_client.get(&url, headers).await
-                        .map_err(|e| {
+                    // Make the request using our abstracted HTTP client - using match instead of map_err
+                    let response = match self_clone.http_client.get(&url, headers).await {
+                        Ok(resp) => resp,
+                        Err(e) => {
                             // Log and convert to AdapterError
                             warn!(
                                 error = %e,
@@ -561,8 +576,9 @@ impl TwitchApiClient {
                                 })),
                             ).await;
                             
-                            error
-                        })?;
+                            return Err(error);
+                        }
+                    };
     
                     // Check status
                     if !(response.status() >= 200 && response.status() < 300) {
@@ -594,9 +610,10 @@ impl TwitchApiClient {
                         return Err(error);
                     }
     
-                    // Parse JSON from the response body
-                    let response_json: Value = serde_json::from_str(response.body())
-                        .map_err(|e| {
+                    // Parse JSON from the response body - using match instead of map_err
+                    let response_json: Value = match serde_json::from_str(response.body()) {
+                        Ok(json) => json,
+                        Err(e) => {
                             let error = AdapterError::api_with_source(
                                 "Failed to parse Twitch API response", e
                             );
@@ -613,15 +630,17 @@ impl TwitchApiClient {
                                 })),
                             ).await;
                             
-                            error
-                        })?;
+                            return Err(error);
+                        }
+                    };
     
                     // Check if we have data
                     if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
                         if let Some(stream) = data.first() {
-                            // Convert to Stream
-                            let stream_info = serde_json::from_value(stream.clone())
-                                .map_err(|e| {
+                            // Convert to Stream - using match instead of map_err
+                            let stream_info = match serde_json::from_value(stream.clone()) {
+                                Ok(info) => info,
+                                Err(e) => {
                                     let error = AdapterError::from_anyhow_error(
                                         "api",
                                         "Failed to deserialize stream information",
@@ -640,8 +659,9 @@ impl TwitchApiClient {
                                         })),
                                     ).await;
                                     
-                                    error
-                                })?;
+                                    return Err(error);
+                                }
+                            };
                                 
                             info!(
                                 user_id = ?user_id_ref,
