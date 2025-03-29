@@ -9,7 +9,7 @@ export function Settings() {
     { id: 'twitch', name: 'Twitch', status: 'connected' },
     { id: 'obs', name: 'OBS', status: 'disconnected' },
   ]
-
+ 
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Settings</h2>

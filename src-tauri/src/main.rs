@@ -100,7 +100,7 @@ fn setup_decorations(app: &mut App) {
     #[cfg(target_os = "macos")]
     apply_vibrancy(
         &window,
-        NSVisualEffectMaterial::WindowBackground,
+        NSVisualEffectMaterial::HudWindow,
         None,
         Some(8.0),
     )
@@ -157,7 +157,7 @@ fn main() {
         .setup(|app| {
             info!("Setting up Tauri application");
 
-            setup_decorations(app);
+            // setup_decorations(app);
 
             // Create the Zelan state
             let zelan_state = plugin::init_state();

@@ -16,9 +16,9 @@
         "title": "Zelan",
         "width": 864,
         "height": 486,
+        "resizable": false,
         "decorations": false,
-        "transparent": true,
-        "shadow": false
+        "transparent": true
       }
     ],
     "security": {

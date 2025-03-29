@@ -13,65 +13,56 @@ export function DeveloperDebug() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Developer Debug</h2>
         <div className="flex gap-2">
           <button
-            className="px-3 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90"
+            className="bg-primary text-primary-foreground hover:bg-primary/90 rounded px-3 py-1"
             onClick={() => {
               // Send test event
               const newEvent = {
                 id: events.length + 1,
                 source: 'test',
                 event_type: 'test.event',
-                timestamp: new Date().toISOString(),
+                timestamp: new Date().toISOString()
               }
               setEvents([...events, newEvent])
-            }}
-          >
+            }}>
             Send Test Event
           </button>
-          <button
-            className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
-            onClick={clearEvents}
-          >
+          <button className="rounded bg-red-500 px-3 py-1 text-white hover:bg-red-600" onClick={clearEvents}>
             Clear Events
           </button>
         </div>
       </div>
-      
-      <div className="flex border-b mb-4">
+
+      <div className="mb-4 flex border-b">
         <button
-          className={`px-4 py-2 ${activeTab === 'events' ? 'border-b-2 border-primary font-medium' : 'text-gray-500'}`}
-          onClick={() => setActiveTab('events')}
-        >
+          className={`px-4 py-2 ${activeTab === 'events' ? 'border-primary border-b-2 font-medium' : 'text-gray-500'}`}
+          onClick={() => setActiveTab('events')}>
           Event Log
         </button>
         <button
-          className={`px-4 py-2 ${activeTab === 'traces' ? 'border-b-2 border-primary font-medium' : 'text-gray-500'}`}
-          onClick={() => setActiveTab('traces')}
-        >
+          className={`px-4 py-2 ${activeTab === 'traces' ? 'border-primary border-b-2 font-medium' : 'text-gray-500'}`}
+          onClick={() => setActiveTab('traces')}>
           Traces
         </button>
         <button
-          className={`px-4 py-2 ${activeTab === 'websocket' ? 'border-b-2 border-primary font-medium' : 'text-gray-500'}`}
-          onClick={() => setActiveTab('websocket')}
-        >
+          className={`px-4 py-2 ${activeTab === 'websocket' ? 'border-primary border-b-2 font-medium' : 'text-gray-500'}`}
+          onClick={() => setActiveTab('websocket')}>
           WebSocket Tester
         </button>
       </div>
-      
-      <div className="bg-white rounded-lg shadow p-4">
+
+      <div className="rounded-lg p-4 shadow">
         <div className="h-[60vh] overflow-auto">
           {activeTab === 'events' && (
             <div className="space-y-2">
               {events.length === 0 ? (
-                <div className="text-center text-gray-500 p-4">
-                  No events recorded
-                </div>
+                <div className="p-4 text-center text-gray-500">No events recorded</div>
               ) : (
                 events.map((event) => (
-                  <div key={event.id} className="p-3 border rounded hover:bg-gray-50">
+                  <div key={event.id} className="rounded border p-3 hover:bg-gray-50">
                     <div className="flex justify-between">
                       <span className="font-medium">{event.event_type}</span>
                       <span className="text-sm text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
@@ -84,53 +75,53 @@ export function DeveloperDebug() {
               )}
             </div>
           )}
-          
+
           {activeTab === 'traces' && (
-            <div className="text-center text-gray-500 p-4">
-              Trace visualization will be implemented here
-            </div>
+            <div className="p-4 text-center text-gray-500">Trace visualization will be implemented here</div>
           )}
-          
+
           {activeTab === 'websocket' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <h3 className="font-medium mb-2">WebSocket Status</h3>
-                  <div className="p-3 border rounded">
+                  <h3 className="mb-2 font-medium">WebSocket Status</h3>
+                  <div className="rounded border p-3">
                     <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                      <div className="h-3 w-3 rounded-full bg-green-500"></div>
                       <span>Connected to: ws://localhost:9000</span>
                     </div>
                   </div>
                 </div>
-                
+
                 <div>
-                  <h3 className="font-medium mb-2">Send Command</h3>
-                  <div className="p-3 border rounded">
+                  <h3 className="mb-2 font-medium">Send Command</h3>
+                  <div className="rounded border p-3">
                     <div className="space-y-2">
-                      <select className="w-full p-2 border rounded">
+                      <select className="w-full rounded border p-2">
                         <option value="ping">ping</option>
                         <option value="subscribe.sources">subscribe.sources</option>
                         <option value="subscribe.types">subscribe.types</option>
                         <option value="unsubscribe.all">unsubscribe.all</option>
                       </select>
                       <textarea
-                        className="w-full p-2 border rounded font-mono text-sm"
+                        className="w-full rounded border p-2 font-mono text-sm"
                         rows={3}
-                        placeholder={'{\"command\": \"subscribe.types\", \"data\": [\"stream.online\", \"stream.offline\"]}'} 
-                      ></textarea>
-                      <button className="w-full p-2 bg-primary text-primary-foreground rounded">
-                        Send Command
-                      </button>
+                        placeholder={
+                          '{\"command\": \"subscribe.types\", \"data\": [\"stream.online\", \"stream.offline\"]}'
+                        }></textarea>
+                      <button className="bg-primary text-primary-foreground w-full rounded p-2">Send Command</button>
                     </div>
                   </div>
                 </div>
               </div>
-              
+
               <div>
-                <h3 className="font-medium mb-2">Messages</h3>
-                <div className="border rounded p-3 font-mono text-sm bg-gray-50 h-64 overflow-y-auto">
-                  <div className="text-green-600">&lt; {'{\"event_type\":\"stream.online\",\"source\":\"twitch\",\"timestamp\":\"2023-03-14T12:34:56Z\"}'}</div>
+                <h3 className="mb-2 font-medium">Messages</h3>
+                <div className="h-64 overflow-y-auto rounded border bg-gray-50 p-3 font-mono text-sm">
+                  <div className="text-green-600">
+                    &lt;{' '}
+                    {'{\"event_type\":\"stream.online\",\"source\":\"twitch\",\"timestamp\":\"2023-03-14T12:34:56Z\"}'}
+                  </div>
                   <div className="text-blue-600">&gt; {'{\"command\":\"ping\"}'}</div>
                   <div className="text-green-600">&lt; {'{\"response\":\"pong\"}'}</div>
                 </div>

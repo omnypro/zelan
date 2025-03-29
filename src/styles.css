@@ -1,7 +1,12 @@
 @import 'tailwindcss';
 
 /* Base styles for your application */
+@theme {
+  --font-sans: 'SF Pro', 'Inter', 'system-ui', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
 @layer base {
+
   :root {
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
@@ -15,8 +20,9 @@
     --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
   }
+}
 
-  /* body {
-    @apply bg-background text-foreground;
-  } */
+html, body {
+  background: transparent;
+  @apply antialiased
 }
